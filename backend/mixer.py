@@ -37,6 +37,7 @@ def from_news(items: list[dict]) -> list[dict]:
             "score": round(s),
             "ts": a.get("published"),
             "title": a.get("title"),
+            "dek": a.get("summary"),
             "url": a.get("url"),
             "outlet": a.get("outlet"),
             "category": a.get("category"),

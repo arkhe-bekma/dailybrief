@@ -4,25 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>dailybrief</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800;9..144,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header class="topbar">
+  <header class="masthead">
     <div class="brand">
-      <span class="logo">▮</span> dailybrief
+      <span class="logo">▮</span>
+      <span class="name">dailybrief</span>
       <span class="date" id="today"></span>
     </div>
-
-    <div class="chips" id="chips">
-      <button class="chip active" data-kind="all">all <span class="ct" id="ct-all"></span></button>
-      <button class="chip news"  data-kind="news">📰 news <span class="ct" id="ct-news"></span></button>
-      <button class="chip whale" data-kind="whale">🐋 whales <span class="ct" id="ct-whale"></span></button>
-      <button class="chip trade" data-kind="trade">🏛 trades <span class="ct" id="ct-trade"></span></button>
-      <button class="chip video" data-kind="video">📺 video <span class="ct" id="ct-video"></span></button>
-    </div>
-
     <div class="actions">
-      <input id="filter" placeholder="filter…" />
+      <input id="filter" placeholder="search…" />
       <button id="refresh" title="refresh">↻</button>
       <button id="density" title="toggle density">▦</button>
     </div>
@@ -32,8 +27,24 @@
 
   <div class="headline" id="headline"></div>
 
+  <nav class="chips" id="chips">
+    <button class="chip active" data-cat="all">All<span class="ct" id="ct-all"></span></button>
+    <button class="chip" data-cat="hero">★ Top<span class="ct"></span></button>
+    <button class="chip cat-world"  data-cat="world">World<span class="ct" id="ct-world"></span></button>
+    <button class="chip cat-econ"   data-cat="econ">Markets<span class="ct" id="ct-econ"></span></button>
+    <button class="chip cat-tech"   data-cat="tech">Tech<span class="ct" id="ct-tech"></span></button>
+    <button class="chip cat-ai"     data-cat="ai">AI<span class="ct" id="ct-ai"></span></button>
+    <button class="chip cat-crypto" data-cat="crypto">Crypto<span class="ct" id="ct-crypto"></span></button>
+    <button class="chip cat-korea"  data-cat="korea">Korea 한국<span class="ct" id="ct-korea"></span></button>
+    <button class="chip cat-whale"  data-cat="whale">🐋 Whales<span class="ct" id="ct-whale"></span></button>
+    <button class="chip cat-trade"  data-cat="trade">🏛 Trades<span class="ct" id="ct-trade"></span></button>
+    <button class="chip cat-video"  data-cat="video">📺 Video<span class="ct" id="ct-video"></span></button>
+  </nav>
+
   <main>
-    <div id="wall" class="wall"></div>
+    <div id="paper"></div>
+
+    <div class="pager" id="pager"></div>
   </main>
 
   <footer>

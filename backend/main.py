@@ -32,7 +32,7 @@ async def brief():
         prices.fetch_tape(),
     )
 
-    top = await curator.rank(articles, top_k=12)
+    top = await curator.rank(articles, top_k=config.TOP_K)
     await tickers.enrich_with_sparks(top)
 
     by_outlet: dict[str, list[dict]] = {}
