@@ -275,9 +275,18 @@ function paint() {
   const slice = all.slice(startIdx, startIdx + PAGE_SIZE);
 
   const paper = $("#paper");
+  const paperNoImg = $("#paper-noimg");
   paper.innerHTML = "";
+  paperNoImg.innerHTML = "";
   buildPage(slice).forEach(({ item, tier }) => {
-    paper.appendChild(renderNewsCard(item, tier));
+    const card = renderNewsCard(item, tier);
+    // Text-only tiers (no image) go to the float section so they aren't
+    // stretched to match neighbours in the grid.
+    if (tier === "headline" || tier === "flash") {
+      paperNoImg.appendChild(card);
+    } else {
+      paper.appendChild(card);
+    }
   });
 
   // chip counts (from full STATE, not filtered)
