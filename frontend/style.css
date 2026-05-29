@@ -484,9 +484,9 @@ a { color: inherit; text-decoration: none; }
 /* ── HERO — magazine cover, dramatic display sizing ──────── */
 .tier-hero {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;     /* image dominates */
-  gap: 28px;
-  padding: 26px 28px;
+  grid-template-columns: 1.85fr 1fr;     /* image even more dominant */
+  gap: 30px;
+  padding: 28px 30px;
   border-radius: 18px;
   background:
     linear-gradient(135deg, rgba(0,225,255,0.07), rgba(255,43,214,0.07)),
@@ -495,8 +495,8 @@ a { color: inherit; text-decoration: none; }
 }
 .tier-hero::before { display: none; }
 .tier-hero .img {
-  aspect-ratio: 4/3;
-  min-height: 380px;
+  aspect-ratio: 16/10;
+  min-height: 460px;
   border-radius: 14px;
   filter: saturate(1.15) contrast(1.08);
 }
@@ -532,30 +532,18 @@ a { color: inherit; text-decoration: none; }
   .tier-hero { grid-template-columns: 1fr; }
 }
 
-/* ── FEATURE — image LEFT and BIG (~58% of card width) ──── */
+/* ── FEATURE — image ON TOP, full card width, big and dominant ── */
 .tier-feature {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.58fr) 0.42fr;  /* image dominant */
-  grid-auto-rows: min-content;
-  column-gap: 18px;
-  row-gap: 8px;
   padding: 14px 16px;
+  /* default flex-column from .art puts image on top */
 }
 .tier-feature .img {
-  grid-row: 1 / -1;
-  grid-column: 1;
   width: 100%;
-  height: 100%;
-  min-height: 240px;
-  align-self: stretch;
+  aspect-ratio: 16/10;
+  min-height: 280px;
   border-radius: 11px;
   filter: saturate(1.12) contrast(1.07);
 }
-.tier-feature .meta,
-.tier-feature .h,
-.tier-feature .dek,
-.tier-feature .why,
-.tier-feature .spark-row { grid-column: 2; }
 .tier-feature .h {
   font-size: clamp(22px, 1.9vw, 28px);
   font-weight: 800;
@@ -574,30 +562,17 @@ a { color: inherit; text-decoration: none; }
 }
 .tier-feature .dek { -webkit-line-clamp: 4; font-size: 13px; }
 
-/* ── LARGE — image LEFT, balanced ~52% ─────────────────── */
+/* ── LARGE — image ON TOP, full card width ──────────────── */
 .tier-large {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.52fr) 0.48fr;
-  grid-auto-rows: min-content;
-  column-gap: 16px;
-  row-gap: 6px;
   padding: 12px 14px;
 }
 .tier-large .img {
-  grid-row: 1 / -1;
-  grid-column: 1;
   width: 100%;
-  height: 100%;
-  min-height: 200px;
-  align-self: stretch;
+  aspect-ratio: 16/10;
+  min-height: 220px;
   border-radius: 10px;
   filter: saturate(1.1) contrast(1.06);
 }
-.tier-large .meta,
-.tier-large .h,
-.tier-large .dek,
-.tier-large .why,
-.tier-large .spark-row { grid-column: 2; }
 .tier-large .h {
   font-size: clamp(20px, 1.7vw, 24px);
   font-weight: 800;
