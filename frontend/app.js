@@ -1,15 +1,15 @@
 const $ = (s) => document.querySelector(s);
 
-// ── Helpers ────────────────────────────────────────────────────
+// ── Formatters ─────────────────────────────────────────────────
 const fmtWhen = (iso) => {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d)) return "";
   const diff = (Date.now() - d.getTime()) / 1000;
-  if (diff < 60)        return "just now";
-  if (diff < 3600)      return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400)     return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60)        return "now";
+  if (diff < 3600)      return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400)     return `${Math.floor(diff / 3600)}h`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d`;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
 const fmtUSD = (n) => {
@@ -24,7 +24,6 @@ const fmtPrice = (p) => {
   return p.toFixed(4);
 };
 const fmtPct = (p) => `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
-
 const stripHtml = (s) => (s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
 const el = (tag, props = {}, children = []) => {
@@ -43,7 +42,7 @@ const el = (tag, props = {}, children = []) => {
 };
 
 // ── Sparkline SVG ──────────────────────────────────────────────
-function sparkSVG(values, w = 48, h = 16, strokeOverride = null) {
+function sparkSVG(values, w = 48, h = 16, color = null) {
   if (!values || values.length < 2) return null;
   const min = Math.min(...values), max = Math.max(...values);
   const range = max - min || 1;
@@ -54,7 +53,7 @@ function sparkSVG(values, w = 48, h = 16, strokeOverride = null) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const up = values[values.length - 1] >= values[0];
-  const color = strokeOverride || (up ? "var(--up)" : "var(--down)");
+  const stroke = color || (up ? "var(--up)" : "var(--down)");
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", w);
@@ -63,12 +62,10 @@ function sparkSVG(values, w = 48, h = 16, strokeOverride = null) {
   const poly = document.createElementNS(NS, "polyline");
   poly.setAttribute("points", pts);
   poly.setAttribute("fill", "none");
-  poly.setAttribute("stroke", color);
+  poly.setAttribute("stroke", stroke);
   poly.setAttribute("stroke-width", "1.6");
   poly.setAttribute("stroke-linejoin", "round");
   poly.setAttribute("stroke-linecap", "round");
-  // path length for the draw animation
-  poly.setAttribute("stroke-dasharray", "200");
   svg.appendChild(poly);
   return svg;
 }
@@ -78,8 +75,8 @@ function renderTape(quotes) {
   const tape = $("#tape");
   tape.innerHTML = "";
   if (!quotes || !quotes.length) return;
-  const inner = document.createElement("div");
-  inner.className = "tape-track";
+  const track = document.createElement("div");
+  track.className = "tape-track";
   const buildBlock = () => {
     const frag = document.createDocumentFragment();
     quotes.forEach((q) => {
@@ -95,25 +92,83 @@ function renderTape(quotes) {
     });
     return frag;
   };
-  inner.appendChild(buildBlock());
-  inner.appendChild(buildBlock());
-  tape.appendChild(inner);
+  track.appendChild(buildBlock());
+  track.appendChild(buildBlock());
+  tape.appendChild(track);
 }
 
-// ── Article card body builders ─────────────────────────────────
+// ── Right rail renderers ───────────────────────────────────────
+function renderWhalesRail(items) {
+  const root = $("#rail-whales");
+  root.innerHTML = "";
+  items.slice(0, 12).forEach((w) => {
+    root.appendChild(el("a", {
+      class: "w-row",
+      href: w.tx_url || "#",
+      target: "_blank",
+      rel: "noopener",
+    }, [
+      el("span", { class: "amt" }, fmtUSD(w.amount_usd || 0)),
+      el("span", { class: "asset" }, w.asset || ""),
+      el("span", { class: "flow" }, `${w.from_label} → ${w.to_label}`),
+      el("span", { class: "when" }, fmtWhen(w.timestamp)),
+    ]));
+  });
+}
+
+function renderTradesRail(items) {
+  const root = $("#rail-trades");
+  root.innerHTML = "";
+  items.slice(0, 14).forEach((t) => {
+    root.appendChild(el("a", {
+      class: "t-row",
+      href: t.source_url || "#",
+      target: "_blank",
+      rel: "noopener",
+    }, [
+      el("span", { class: "who", lang: "ko" }, t.name || ""),
+      el("span", { class: `action ${t.action}` }, t.action || ""),
+      el("span", { class: "meta-line" }, [
+        el("span", { class: "ticker" }, t.ticker || ""),
+        el("span", {}, t.size_band || ""),
+        el("span", {}, fmtWhen(t.timestamp)),
+      ]),
+    ]));
+  });
+}
+
+function renderVideosRail(items) {
+  const root = $("#rail-videos");
+  root.innerHTML = "";
+  items.slice(0, 14).forEach((v) => {
+    root.appendChild(el("a", {
+      class: "v-row",
+      href: v.url || "#",
+      target: "_blank",
+      rel: "noopener",
+    }, [
+      el("span", { class: "thumb", style: `background-image:url('${v.thumbnail}')` }),
+      el("span", { class: "meta-block" }, [
+        el("span", { class: "ch" }, v.channel || ""),
+        el("span", { class: "title" }, v.title || ""),
+      ]),
+    ]));
+  });
+}
+
+// ── News card body ─────────────────────────────────────────────
 function newsBody(item) {
   const lang = item.lang || "en";
   const meta = el("div", { class: "meta" }, [
-    el("span", { class: "cat-tag" }, (item.category || "news").toUpperCase()),
+    el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
     el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
     el("span", { class: "when" }, fmtWhen(item.ts)),
+    item.score != null ? el("span", { class: "score-pill" }, `★${item.score}`) : null,
   ]);
   const head = el("h2", { class: "h", lang }, item.title || "");
   const dek = item.dek ? el("p", { class: "dek", lang }, item.dek) : null;
   const why = item.why ? el("div", { class: "why", lang }, item.why) : null;
-
-  // sparkline tickers
   const sparks = item.sparks || {};
   const tickers = (item.tickers || []).filter((t) => sparks[t]);
   let sparkRow = null;
@@ -133,124 +188,87 @@ function newsBody(item) {
   return { meta, head, dek, why, sparkRow };
 }
 
-function whaleBody(item) {
-  return {
-    meta: el("div", { class: "meta" }, [
-      el("span", { class: "cat-tag" }, "WHALE"),
-      el("span", { class: "src" }, item.asset || ""),
-      el("span", { class: "when" }, fmtWhen(item.ts)),
-    ]),
-    head: el("div", {}, [
-      el("div", { class: "amount" }, fmtUSD(item.amount_usd || 0)),
-      el("div", { class: "flow" }, item.title || ""),
-    ]),
-  };
-}
-
-function tradeBody(item) {
-  return {
-    meta: el("div", { class: "meta" }, [
-      el("span", { class: "cat-tag" }, "TRADE"),
-      el("span", { class: "src" }, item.role || ""),
-      el("span", { class: "when" }, fmtWhen(item.ts)),
-    ]),
-    head: el("div", {}, [
-      el("div", { class: "who" }, item.title.split("·")[0]),
-      el("div", { class: "row" }, [
-        el("span", { class: `action ${item.action}` }, item.action || ""),
-        el("span", { class: "ticker" }, item.ticker || ""),
-        el("span", { class: "band" }, item.size_band || ""),
-      ]),
-    ]),
-  };
-}
-
-function videoBody(item) {
-  return {
-    meta: el("div", { class: "meta" }, [
-      el("span", { class: "cat-tag" }, "VIDEO"),
-      el("span", { class: "src" }, item.channel || ""),
-      el("span", { class: "when" }, fmtWhen(item.ts)),
-    ]),
-    head: el("h2", { class: "h" }, item.title || ""),
-  };
-}
-
-const BODY_BUILDERS = {
-  news: newsBody, whale: whaleBody, trade: tradeBody, video: videoBody,
-};
-
-// ── Render one article card given a tier ───────────────────────
-function renderArt(item, tier) {
-  const builder = BODY_BUILDERS[item.kind] || newsBody;
-  const parts = builder(item);
-  const cat = item.kind === "news" ? (item.category || "world") : item.kind;
+function renderNewsCard(item, tier) {
+  const parts = newsBody(item);
+  const cat = item.category || "world";
   const node = el("a", {
-    class: `art tier-${tier} kind-${item.kind} cat-${cat}`,
+    class: `art tier-${tier} cat-${cat}`,
     href: item.url || "#",
     target: "_blank",
     rel: "noopener",
   });
 
-  const hasImage = tier === "hero" || tier === "lead" || tier === "standard";
-  if (hasImage && item.image) {
-    const img = el("div", { class: "img", style: `background-image:url('${item.image}')` });
+  const wantsImage = ["hero", "feature", "large", "medium", "small"].includes(tier);
+  if (wantsImage && item.image) {
     if (tier === "hero") {
-      node.appendChild(img);
-      const body = el("div", { class: "body" }, [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow]);
-      node.appendChild(body);
+      node.appendChild(el("div", { class: "img", style: `background-image:url('${item.image}')` }));
+      node.appendChild(el("div", { class: "body" }, [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow]));
     } else {
-      node.appendChild(img);
-      node.appendChild(parts.meta);
-      node.appendChild(parts.head);
-      if (parts.dek) node.appendChild(parts.dek);
-      if (parts.why) node.appendChild(parts.why);
-      if (parts.sparkRow) node.appendChild(parts.sparkRow);
+      node.appendChild(el("div", { class: "img", style: `background-image:url('${item.image}')` }));
+      [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
     }
   } else {
-    // No image → text-only
-    node.appendChild(parts.meta);
-    node.appendChild(parts.head);
-    if (parts.dek) node.appendChild(parts.dek);
-    if (parts.why) node.appendChild(parts.why);
-    if (parts.sparkRow) node.appendChild(parts.sparkRow);
+    // No image — use one of the text tiers
+    [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
   }
   return node;
 }
 
+// ── Score-based tier assignment ────────────────────────────────
+// Goal: visually weight by importance, never waste vertical space on
+// image-less items. We allow at most one HERO per page.
+function buildPage(news) {
+  // sort by score desc (already sorted by mixer, but be defensive)
+  const sorted = [...news].sort((a, b) => b.score - a.score);
+  const out = [];
+  let usedHero = false;
+  let imageBudget = { feature: 2, large: 4, medium: 8, small: Infinity };
+
+  for (const item of sorted) {
+    const hasImage = !!item.image;
+    let tier;
+    const s = item.score;
+
+    if (hasImage) {
+      if (!usedHero && s >= 80) {
+        tier = "hero";
+        usedHero = true;
+      } else if (imageBudget.feature > 0 && s >= 75) {
+        tier = "feature"; imageBudget.feature--;
+      } else if (imageBudget.large > 0 && s >= 65) {
+        tier = "large"; imageBudget.large--;
+      } else if (imageBudget.medium > 0) {
+        tier = "medium"; imageBudget.medium--;
+      } else {
+        tier = "small";
+      }
+    } else {
+      tier = s >= 70 ? "headline" : "flash";
+    }
+    out.push({ item, tier });
+  }
+  return out;
+}
+
 // ── State ──────────────────────────────────────────────────────
-let STATE = { mixed: [], tape: [], headline: null };
+let STATE = { mixed: [], tape: [], whales: [], trades: [], youtube: [] };
 let CAT = "all";
 let PAGE = 1;
-const PAGE_SIZE = 30;   // 1 hero + 4 lead + 9 standard + 16 compact/tiny ≈ 30
+const PAGE_SIZE = 30;
 
-function filtered() {
+function filteredNews() {
   const q = $("#filter").value.trim().toLowerCase();
   return STATE.mixed.filter((it) => {
-    if (CAT === "hero") return it.score >= 70;
-    if (CAT !== "all") {
-      // map category → either it.kind (whale/trade/video) or it.category (world/econ/...)
-      if (["whale", "trade", "video"].includes(CAT)) return it.kind === CAT;
-      return it.kind === "news" && it.category === CAT;
-    }
+    if (it.kind !== "news") return false;
+    if (CAT !== "all" && it.category !== CAT) return false;
     if (!q) return true;
-    const hay = `${it.title || ""} ${it.outlet || ""} ${it.channel || ""} ${it.ticker || ""} ${it.asset || ""} ${(it.tickers||[]).join(" ")}`.toLowerCase();
+    const hay = `${it.title || ""} ${it.outlet || ""} ${(it.tickers||[]).join(" ")}`.toLowerCase();
     return hay.includes(q);
   });
 }
 
-// ── Tier assignment ────────────────────────────────────────────
-function assignTier(idx, item, hasImage) {
-  if (idx === 0)          return "hero";
-  if (idx <= 4)           return hasImage ? "lead" : "compact";
-  if (idx <= 13)          return hasImage ? "standard" : "compact";
-  if (idx <= 21)          return "compact";
-  return "tiny";
-}
-
-// ── Paint ──────────────────────────────────────────────────────
 function paint() {
-  const all = filtered();
+  const all = filteredNews();
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   if (PAGE > totalPages) PAGE = totalPages;
   const startIdx = (PAGE - 1) * PAGE_SIZE;
@@ -258,31 +276,26 @@ function paint() {
 
   const paper = $("#paper");
   paper.innerHTML = "";
-  slice.forEach((item, idx) => {
-    const hasImage = !!item.image && item.kind !== "trade" && item.kind !== "whale";
-    const tier = assignTier(idx, item, hasImage);
-    paper.appendChild(renderArt(item, tier));
+  buildPage(slice).forEach(({ item, tier }) => {
+    paper.appendChild(renderNewsCard(item, tier));
   });
 
-  // chip counts
-  const cats = ["all","world","econ","tech","ai","crypto","korea","whale","trade","video"];
-  const counts = Object.fromEntries(cats.map((c) => [c, 0]));
+  // chip counts (from full STATE, not filtered)
+  const counts = { all: 0, world: 0, econ: 0, tech: 0, ai: 0, crypto: 0, korea: 0 };
   STATE.mixed.forEach((m) => {
-    counts.all += 1;
-    if (["whale","trade","video"].includes(m.kind)) counts[m.kind]++;
-    else if (m.kind === "news" && m.category && counts[m.category] != null) counts[m.category]++;
+    if (m.kind !== "news") return;
+    counts.all++;
+    if (counts[m.category] != null) counts[m.category]++;
   });
   Object.entries(counts).forEach(([k, v]) => {
     const n = document.getElementById(`ct-${k}`);
     if (n) n.textContent = v;
   });
 
-  // pager
   renderPager(totalPages);
 
-  // status
   const outlets = Object.keys(STATE.by_outlet || {}).length;
-  $("#status").textContent = `${all.length} items · page ${PAGE}/${totalPages} · ${outlets} outlets`;
+  $("#status").textContent = `${all.length} news · page ${PAGE}/${totalPages} · ${outlets} sources · ${STATE.whales.length}🐋 ${STATE.trades.length}🏛 ${STATE.youtube.length}📺`;
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -291,11 +304,10 @@ function renderPager(totalPages) {
   p.innerHTML = "";
   if (totalPages <= 1) return;
   const go = (n) => { PAGE = Math.max(1, Math.min(totalPages, n)); paint(); };
-  const prev = el("button", { type: "button" }, "‹ prev");
+  const prev = el("button", { type: "button" }, "‹ PREV");
   prev.disabled = PAGE === 1;
   prev.onclick = () => go(PAGE - 1);
   p.appendChild(prev);
-  // show up to 7 page numbers around current
   const radius = 3;
   const lo = Math.max(1, PAGE - radius);
   const hi = Math.min(totalPages, PAGE + radius);
@@ -317,7 +329,7 @@ function renderPager(totalPages) {
     b.onclick = () => go(totalPages);
     p.appendChild(b);
   }
-  const next = el("button", { type: "button" }, "next ›");
+  const next = el("button", { type: "button" }, "NEXT ›");
   next.disabled = PAGE === totalPages;
   next.onclick = () => go(PAGE + 1);
   p.appendChild(next);
@@ -330,14 +342,17 @@ async function load() {
     const r = await fetch("/api/brief");
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     STATE = await r.json();
-    // strip HTML out of summaries for dek
-    STATE.mixed.forEach((m) => {
-      if (m.dek) m.dek = stripHtml(m.dek);
-    });
+    STATE.mixed.forEach((m) => { if (m.dek) m.dek = stripHtml(m.dek); });
+
     renderTape(STATE.tape || []);
     const head = $("#headline");
     head.textContent = STATE.headline || "";
     head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
+
+    renderWhalesRail(STATE.whales || []);
+    renderTradesRail(STATE.trades || []);
+    renderVideosRail(STATE.youtube || []);
+
     PAGE = 1;
     paint();
   } catch (e) {
@@ -348,8 +363,8 @@ async function load() {
 // ── Wire up ────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   $("#today").textContent = new Date().toLocaleDateString(undefined, {
-    weekday: "long", month: "long", day: "numeric", year: "numeric",
-  });
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
+  }).toUpperCase();
 
   $("#chips").addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
@@ -360,7 +375,6 @@ document.addEventListener("DOMContentLoaded", () => {
     chip.classList.add("active");
     paint();
   });
-
   $("#filter").addEventListener("input", () => { PAGE = 1; paint(); });
   $("#refresh").addEventListener("click", async () => {
     await fetch("/api/refresh", { method: "POST" });
