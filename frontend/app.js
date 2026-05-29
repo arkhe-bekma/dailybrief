@@ -297,6 +297,59 @@ function paint() {
   const outlets = Object.keys(STATE.by_outlet || {}).length;
   $("#status").textContent = `${all.length} news · page ${PAGE}/${totalPages} · ${outlets} sources · ${STATE.whales.length}🐋 ${STATE.trades.length}🏛 ${STATE.youtube.length}📺`;
   window.scrollTo({ top: 0, behavior: "smooth" });
+
+  // After the grid lays itself out, fill any vertical slack by scaling
+  // the title up. Two RAFs because: 1st RAF paints, 2nd RAF reads final
+  // post-layout heights.
+  requestAnimationFrame(() => requestAnimationFrame(autoFitAllTitles));
+}
+
+// ── Auto-fit titles: scale up the headline to fill any leftover
+//    vertical space inside the card. Only applies to text-only tiers
+//    (HEADLINE / FLASH / SMALL) where grid stretching creates gaps.
+function autoFitAllTitles() {
+  document.querySelectorAll("#paper .art").forEach(autoFitCard);
+}
+
+function autoFitCard(card) {
+  if (!card.matches(".tier-headline, .tier-flash, .tier-small")) return;
+  const title = card.querySelector(".h");
+  if (!title) return;
+
+  // Reset to CSS-driven baseline
+  title.style.fontSize = "";
+  title.style.lineHeight = "";
+
+  const baseSize = parseFloat(getComputedStyle(title).fontSize);
+  if (!baseSize) return;
+
+  const cardH = card.clientHeight;
+  if (cardH < 60) return;
+
+  const cs = getComputedStyle(card);
+  const padTop = parseFloat(cs.paddingTop)    || 0;
+  const padBot = parseFloat(cs.paddingBottom) || 0;
+  const rowGap = parseFloat(cs.rowGap || cs.gap || 0) || 0;
+
+  // Sum siblings + gaps between them inside .art
+  const children = Array.from(card.children);
+  const others = children.filter((c) => c !== title);
+  const siblingHeights = others.reduce((sum, c) => sum + c.offsetHeight, 0);
+  const gaps = children.length > 1 ? rowGap * (children.length - 1) : 0;
+
+  const available = cardH - padTop - padBot - siblingHeights - gaps;
+  if (available <= title.offsetHeight + 8) return;  // no meaningful slack
+
+  // Binary search for the largest font-size that still fits in `available`.
+  const cap = baseSize * 2.4;        // never more than 2.4× the baseline
+  let lo = baseSize, hi = cap;
+  for (let i = 0; i < 9; i++) {
+    const mid = (lo + hi) / 2;
+    title.style.fontSize = `${mid}px`;
+    if (title.offsetHeight <= available) lo = mid;
+    else hi = mid;
+  }
+  title.style.fontSize = `${Math.max(baseSize, lo - 1)}px`;
 }
 
 function renderPager(totalPages) {
@@ -383,5 +436,13 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#density").addEventListener("click", () => {
     $("#paper").classList.toggle("dense");
   });
+
+  // Re-run auto-fit on window resize (debounced)
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(autoFitAllTitles, 120);
+  });
+
   load();
 });
