@@ -23,7 +23,14 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
-        "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR",
+        "Malgun Gothic", Helvetica, Arial, sans-serif;
+}
+
+/* CJK gets a slightly taller line-height so Hangul / Hanja breathe */
+[lang="ko"], [lang="ja"], [lang="zh"] {
+  word-break: keep-all;
+  line-height: 1.45;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -195,6 +202,19 @@ a { color: inherit; text-decoration: none; }
 .tile.video .kind { background: rgba(255, 122, 182, 0.16); color: var(--video); }
 .tile .head .src { color: var(--text); opacity: 0.8; font-weight: 500; }
 .tile .head .when { margin-left: auto; }
+
+.tile .head .lang {
+  font-size: 9.5px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  font-weight: 600;
+}
+.tile .head .lang-ko { color: #ffb86b; border-color: rgba(255,184,107,0.4); }
+.tile .head .lang-en { color: #7aa2ff; border-color: rgba(122,162,255,0.4); }
+.tile .head .lang-ja { color: #ff7ab6; border-color: rgba(255,122,182,0.4); }
 
 .tile .title {
   font-size: 13.5px;

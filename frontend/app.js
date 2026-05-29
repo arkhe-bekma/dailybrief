@@ -103,15 +103,17 @@ function renderTape(quotes) {
 
 // ── Tile renderers ─────────────────────────────────────────────
 function renderNews(item) {
+  const lang = item.lang || "en";
   const parts = [
     el("div", { class: "head" }, [
       el("span", { class: "kind" }, "NEWS"),
       el("span", { class: "src" }, item.outlet || ""),
       item.category ? el("span", {}, item.category) : null,
+      el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
       el("span", { class: "when" }, fmtWhen(item.ts)),
     ]),
-    el("div", { class: "title" }, item.title || ""),
-    item.why ? el("div", { class: "why" }, item.why) : null,
+    el("div", { class: "title", lang }, item.title || ""),
+    item.why ? el("div", { class: "why", lang }, item.why) : null,
   ];
 
   // Sparkline row
@@ -229,7 +231,9 @@ async function load() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     STATE = await r.json();
     renderTape(STATE.tape || []);
-    $("#headline").textContent = STATE.headline || "";
+    const head = $("#headline");
+    head.textContent = STATE.headline || "";
+    head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
     paint();
     const outlets = Object.keys(STATE.by_outlet || {}).length;
     $("#status").textContent = `${STATE.mixed.length} items · ${outlets} outlets · ${(STATE.tape||[]).length} tickers`;

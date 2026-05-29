@@ -53,7 +53,11 @@ async def brief():
     headline = await summary.generate(mixed)
 
     return {
-        "profile": {"bio": config.PROFILE.bio, "keywords": config.PROFILE.keywords},
+        "profile": {
+            "bio": config.PROFILE.bio,
+            "keywords": config.PROFILE.keywords,
+            "primary_lang": getattr(config.PROFILE, "primary_lang", "en"),
+        },
         "tape": [q.to_dict() for q in tape],
         "headline": headline,
         "mixed": mixed,

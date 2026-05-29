@@ -40,6 +40,7 @@ def from_news(items: list[dict]) -> list[dict]:
             "url": a.get("url"),
             "outlet": a.get("outlet"),
             "category": a.get("category"),
+            "lang": a.get("lang", "en"),
             "image": a.get("image"),
             "why": a.get("why"),
             "tickers": a.get("tickers", []),

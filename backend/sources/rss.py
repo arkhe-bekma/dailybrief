@@ -21,6 +21,7 @@ class Article:
     category: str
     summary: str
     published: str  # ISO 8601
+    lang: str = "en"
     image: str | None = None
 
     def to_dict(self) -> dict:
@@ -65,6 +66,7 @@ def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
             url=entry.get("link", ""),
             outlet=outlet["name"],
             category=outlet["category"],
+            lang=outlet.get("lang", "en"),
             summary=(entry.get("summary", "") or "").strip()[:400],
             published=_parse_date(entry),
             image=_extract_image(entry),
@@ -92,6 +94,15 @@ async def fetch_all() -> list[Article]:
     async with httpx.AsyncClient(headers=headers) as client:
         results = await asyncio.gather(*[_fetch_one(client, o) for o in config.OUTLETS])
 
-    articles = [a for batch in results for a in batch]
+    # Dedupe by URL — outlets with multiple section feeds (e.g. 연합뉴스 +
+    # 연합 경제) often repeat the same story.
+    seen: set[str] = set()
+    articles: list[Article] = []
+    for batch in results:
+        for a in batch:
+            if a.url and a.url in seen:
+                continue
+            seen.add(a.url)
+            articles.append(a)
     cache.set("rss:all", articles, config.FEED_CACHE_TTL)
     return articles

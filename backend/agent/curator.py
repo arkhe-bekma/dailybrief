@@ -41,10 +41,10 @@ async def _llm_rank(articles: list[Any], top_k: int) -> list[dict]:
 
     client = AsyncAnthropic()
 
-    # Compact payload — title + outlet + index. Body content is bulky and
-    # mostly redundant for ranking.
+    # Compact payload — title + outlet + lang. Lang tells the model which
+    # language to write the "why" line in.
     candidates = [
-        {"i": i, "title": a.title, "outlet": a.outlet, "category": a.category}
+        {"i": i, "title": a.title, "outlet": a.outlet, "category": a.category, "lang": a.lang}
         for i, a in enumerate(articles)
     ]
 
@@ -59,10 +59,13 @@ ARTICLES (JSON):
 Pick the {top_k} most relevant articles for this reader. For each, return:
   - i: original index
   - score: 0-100 (how well it matches the profile)
-  - why: one short sentence (<=18 words) explaining why this reader should care
+  - why: one short sentence (<=18 words) explaining why this reader should care.
+         IMPORTANT: write `why` in the SAME language as the article (use the `lang`
+         field — "ko" → Korean, "en" → English, etc.).
 
 Return ONLY a JSON array, no prose. Example:
-[{{"i": 3, "score": 92, "why": "Direct read on Samsung HBM share vs SK hynix."}}]
+[{{"i": 3, "score": 92, "why": "Direct read on Samsung HBM share vs SK hynix."}},
+ {{"i": 7, "score": 88, "why": "삼성 HBM 점유율이 SK하이닉스 대비 직접적으로 영향."}}]
 """
 
     resp = await client.messages.create(
