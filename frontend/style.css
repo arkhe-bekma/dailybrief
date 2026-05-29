@@ -40,13 +40,20 @@
   --up:   var(--neon-lime);
   --down: var(--neon-red);
 
-  /* fonts */
-  --serif: "Fraunces", Georgia, "Times New Roman", serif;
-  --sans:  "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-           "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --kr:    "Pretendard Variable", Pretendard, "Apple SD Gothic Neo",
-           "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
-  --mono:  "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* fonts
+     ─── English ─────────────────────────────────────────────
+     Bricolage Grotesque is a 2023 variable font by Mathieu Triay with
+     opsz/wdth/wght axes — it gets dramatic and bold at display sizes,
+     compact and readable at body sizes. Much punchier than Fraunces.
+     DM Serif Display is reserved for the hero drop-cap accent. */
+  --display: "Bricolage Grotesque", "Inter", -apple-system, BlinkMacSystemFont,
+             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --accent-serif: "DM Serif Display", Georgia, "Times New Roman", serif;
+  --sans:    "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --kr:      "Pretendard Variable", Pretendard, "Apple SD Gothic Neo",
+             "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  --mono:    "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 
   --glow-cyan:   0 0 22px rgba(0,225,255,0.45);
   --glow-mag:    0 0 22px rgba(255,43,214,0.45);
@@ -80,8 +87,8 @@ a { color: inherit; text-decoration: none; }
    Korean uses Pretendard's `palt` (proportional alt widths) for
    tighter horizontal rhythm, and a slightly smaller heading scale
    because Hangul glyphs are visually denser than Latin at the same px.
-   English uses Fraunces serif with optical sizing + small caps where
-   it suits.
+   English uses Bricolage Grotesque with optical sizing + width axis
+   for dramatic display weights.
 */
 :lang(ko), [lang="ko"] {
   font-family: var(--kr);
@@ -122,10 +129,11 @@ a { color: inherit; text-decoration: none; }
   text-shadow: var(--glow-yellow);
 }
 .brand .name {
-  font-family: var(--serif);
-  font-weight: 900;
+  font-family: var(--display);
+  font-weight: 800;
+  font-variation-settings: "opsz" 64, "wdth" 96;
   font-size: 28px;
-  letter-spacing: -1px;
+  letter-spacing: -1.5px;
   background: linear-gradient(90deg, #ffffff, var(--neon-cyan), var(--neon-mag));
   -webkit-background-clip: text;
   background-clip: text;
@@ -187,17 +195,18 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Headline ─────────────────────────────────────────────── */
 .headline {
-  padding: 14px 24px;
-  font-family: var(--serif);
-  font-size: 17px;
-  font-weight: 500;
-  font-style: italic;
-  line-height: 1.5;
+  padding: 16px 24px;
+  font-family: var(--display);
+  font-variation-settings: "opsz" 24, "wdth" 95;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
   border-bottom: 1px solid var(--line);
   color: var(--text);
   background: linear-gradient(90deg, rgba(0,225,255,0.06), transparent 80%);
+  letter-spacing: -0.3px;
 }
-.headline[lang="ko"] { font-family: var(--kr); font-style: normal; font-weight: 500; }
+.headline[lang="ko"] { font-family: var(--kr); font-weight: 600; letter-spacing: -0.4px; }
 .headline:empty { display: none; }
 .headline::before {
   content: "✦ TODAY";
@@ -412,11 +421,12 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Headline typography ──────────────────────────────────── */
 .art .h {
-  font-family: var(--serif);
+  font-family: var(--display);
   font-weight: 800;
-  letter-spacing: -0.3px;
+  font-variation-settings: "opsz" 48, "wdth" 96;
+  letter-spacing: -0.6px;
   color: var(--text);
-  line-height: 1.15;
+  line-height: 1.05;
   margin: 0;
   text-wrap: balance;
   font-optical-sizing: auto;
@@ -424,10 +434,24 @@ a { color: inherit; text-decoration: none; }
 .art .h[lang="ko"] {
   font-family: var(--kr);
   font-weight: 800;
+  font-variation-settings: normal;
   letter-spacing: -0.55px;
-  /* tighter Korean palt + manual jamo kerning */
+  line-height: 1.22;
   font-feature-settings: "palt" 1, "vpal" 1, "kern" 1;
 }
+/* dek = body snippet — make it always-visible and pretty */
+.art .dek {
+  color: var(--text-2);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+  opacity: 0.85;
+}
+.art .dek[lang="ko"] { font-family: var(--kr); }
 .art .dek {
   color: var(--text-2);
   font-size: 12.5px;
@@ -438,10 +462,10 @@ a { color: inherit; text-decoration: none; }
   margin: 0;
 }
 .art .why {
-  font-family: var(--serif);
+  font-family: var(--accent-serif);
   font-style: italic;
   color: var(--neon-yellow);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.35;
   border-left: 2px solid var(--neon-yellow);
   padding-left: 8px;
@@ -452,17 +476,18 @@ a { color: inherit; text-decoration: none; }
 
 /* ════════════════════════════════════════════════════════════
    Tier layouts — each tier is its own composition.
-   Image-less tiers grow the headline to fill the box.
+   No tier sets min-height: cards size to their actual content so the
+   grid packs densely (short story → small box, long story → big box).
+   Every tier shows the body snippet (dek) where there's room.
    ════════════════════════════════════════════════════════════ */
 
-/* ── HERO — magazine cover with split + dramatic typography ─ */
+/* ── HERO — magazine cover, dramatic display sizing ──────── */
 .tier-hero {
   display: grid;
   grid-template-columns: 1.35fr 1fr;
   gap: 26px;
   padding: 26px 28px;
   border-radius: 18px;
-  min-height: 360px;
   background:
     linear-gradient(135deg, rgba(0,225,255,0.07), rgba(255,43,214,0.07)),
     rgba(11,13,24,0.85);
@@ -471,48 +496,48 @@ a { color: inherit; text-decoration: none; }
 .tier-hero::before { display: none; }
 .tier-hero .img {
   aspect-ratio: 4/3;
-  min-height: 320px;
   border-radius: 12px;
 }
 .tier-hero .body { display: flex; flex-direction: column; gap: 14px; justify-content: center; }
 .tier-hero .h {
-  font-size: clamp(34px, 3.8vw, 50px);
-  font-weight: 900;
-  line-height: 1.04;
-  letter-spacing: -1.2px;
+  font-size: clamp(36px, 4vw, 54px);
+  font-weight: 800;
+  font-variation-settings: "opsz" 96, "wdth" 96;
+  line-height: 0.98;
+  letter-spacing: -2px;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  text-shadow: 0 0 30px rgba(255,255,255,0.08);
 }
 .tier-hero .h[lang="ko"] {
   font-size: clamp(28px, 3.1vw, 42px);
-  font-weight: 900;
+  line-height: 1.15;
   letter-spacing: -1.6px;
 }
-/* English hero gets a Fraunces drop cap. Cool magazine feel. */
+/* English hero gets a high-contrast DM Serif drop cap. */
 .tier-hero .h[lang="en"]::first-letter {
+  font-family: var(--accent-serif);
   font-style: italic;
   color: var(--neon-yellow);
   text-shadow: var(--glow-yellow);
+  font-weight: 400;
+  padding-right: 4px;
 }
-.tier-hero .dek { font-size: 15px; -webkit-line-clamp: 4; }
-.tier-hero .why { font-size: 14px; }
+.tier-hero .dek { font-size: 15px; -webkit-line-clamp: 5; }
+.tier-hero .why { font-size: 14.5px; }
 @media (max-width: 900px) {
-  .tier-hero { grid-template-columns: 1fr; min-height: 0; }
+  .tier-hero { grid-template-columns: 1fr; }
 }
 
-/* ── FEATURE — image top, big italic Fraunces headline ────── */
-.tier-feature .img {
-  aspect-ratio: 16/9;
-  min-height: 170px;
-}
+/* ── FEATURE — image top, big condensed headline ────────── */
+.tier-feature .img { aspect-ratio: 16/9; }
 .tier-feature .h {
-  font-size: clamp(22px, 1.9vw, 26px);
+  font-size: clamp(22px, 1.9vw, 28px);
   font-weight: 800;
-  font-style: italic;
-  line-height: 1.12;
+  font-variation-settings: "opsz" 72, "wdth" 90;
+  line-height: 1.08;
+  letter-spacing: -0.8px;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
@@ -520,29 +545,29 @@ a { color: inherit; text-decoration: none; }
 }
 .tier-feature .h[lang="ko"] {
   font-size: clamp(19px, 1.7vw, 23px);
-  font-style: normal;
   font-weight: 800;
+  letter-spacing: -0.8px;
 }
-.tier-feature .dek { -webkit-line-clamp: 3; }
+.tier-feature .dek { -webkit-line-clamp: 3; font-size: 13px; }
 
-/* ── LARGE — image top, big upright headline ──────────────── */
-.tier-large .img {
-  aspect-ratio: 16/9;
-  min-height: 150px;
-}
+/* ── LARGE — image top, bold headline ───────────────────── */
+.tier-large .img { aspect-ratio: 16/9; }
 .tier-large .h {
-  font-size: clamp(20px, 1.7vw, 23px);
+  font-size: clamp(20px, 1.7vw, 24px);
   font-weight: 800;
-  line-height: 1.16;
+  font-variation-settings: "opsz" 60, "wdth" 92;
+  line-height: 1.12;
+  letter-spacing: -0.6px;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .tier-large .h[lang="ko"] { font-size: clamp(17.5px, 1.55vw, 20px); }
-.tier-large .dek { -webkit-line-clamp: 2; }
+.tier-large .dek { -webkit-line-clamp: 3; font-size: 12.5px; }
 
-/* ── MEDIUM — horizontal split: square thumb left, text right ── */
+/* ── MEDIUM — horizontal split: square thumb left, text right
+       (user's "사진 래핑" pattern — image wraps with body text) */
 .tier-medium {
   display: grid;
   grid-template-columns: 120px 1fr;
@@ -550,15 +575,13 @@ a { color: inherit; text-decoration: none; }
   column-gap: 14px;
   row-gap: 6px;
   padding: 12px 14px;
-  min-height: 120px;
 }
 .tier-medium .img {
   grid-row: 1 / -1;
   grid-column: 1;
   aspect-ratio: 1 / 1;
   width: 120px;
-  height: 100%;
-  min-height: 96px;
+  height: auto;
   align-self: stretch;
   border-radius: 8px;
 }
@@ -568,91 +591,103 @@ a { color: inherit; text-decoration: none; }
 .tier-medium .why,
 .tier-medium .spark-row { grid-column: 2; }
 .tier-medium .h {
-  font-size: clamp(15px, 1.2vw, 17px);
+  font-size: clamp(15px, 1.2vw, 17.5px);
   font-weight: 800;
-  line-height: 1.22;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.tier-medium .h[lang="ko"] { font-size: clamp(14px, 1.1vw, 16px); }
-.tier-medium .dek { -webkit-line-clamp: 2; font-size: 11.5px; }
-
-/* ── SMALL — compact image top, tight title ───────────────── */
-.tier-small .img { aspect-ratio: 16/9; min-height: 100px; }
-.tier-small .h {
-  font-size: clamp(14px, 1.1vw, 16px);
-  font-weight: 800;
-  line-height: 1.22;
+  font-variation-settings: "opsz" 36, "wdth" 92;
+  line-height: 1.18;
+  letter-spacing: -0.4px;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.tier-medium .h[lang="ko"] { font-size: clamp(14px, 1.1vw, 16px); }
+.tier-medium .dek { -webkit-line-clamp: 3; font-size: 11.5px; }
+
+/* ── SMALL — compact image top, tight title ───────────────── */
+.tier-small .img { aspect-ratio: 16/9; }
+.tier-small .h {
+  font-size: clamp(14px, 1.1vw, 16.5px);
+  font-weight: 800;
+  font-variation-settings: "opsz" 30, "wdth" 90;
+  line-height: 1.18;
+  letter-spacing: -0.3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tier-small .h[lang="ko"] { font-size: clamp(13.5px, 1vw, 15.5px); }
 .tier-small .dek { -webkit-line-clamp: 2; font-size: 11.5px; }
 
-/* ── HEADLINE — NO image, HUGE italic title fills the whole box ── */
+/* ── HEADLINE — NO image, big bold display title + dek snippet
+       Box shrinks to content (no min-height). */
 .tier-headline {
-  padding: 18px 18px;
-  min-height: 200px;
+  padding: 14px 16px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--c, var(--text-2)) 8%, transparent), transparent 40%),
     rgba(11,13,24,0.82);
 }
 .tier-headline .h {
-  font-family: var(--serif);
-  font-size: clamp(26px, 2.4vw, 34px);
-  font-weight: 900;
-  font-style: italic;
-  line-height: 1.05;
-  letter-spacing: -0.6px;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  text-shadow: 0 0 20px color-mix(in srgb, var(--c, var(--text)) 18%, transparent);
+  font-family: var(--display);
+  font-size: clamp(22px, 2.1vw, 30px);
+  font-weight: 800;
+  font-variation-settings: "opsz" 88, "wdth" 85;
+  line-height: 1.02;
+  letter-spacing: -1.2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--c, var(--text)) 22%, transparent);
 }
 .tier-headline .h[lang="ko"] {
   font-family: var(--kr);
-  font-style: normal;
+  font-variation-settings: normal;
   font-weight: 900;
-  font-size: clamp(22px, 2.05vw, 28px);
+  font-size: clamp(20px, 1.85vw, 26px);
   letter-spacing: -1px;
   line-height: 1.18;
 }
 .tier-headline .dek {
   font-size: 12px;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-/* ── FLASH — no image, smaller but still bold ─────────────── */
+/* ── FLASH — no image, smaller, still bold, with one-line dek ── */
 .tier-flash {
-  padding: 13px 14px;
-  min-height: 110px;
+  padding: 11px 13px;
 }
 .tier-flash .h {
-  font-family: var(--serif);
-  font-size: clamp(17px, 1.45vw, 21px);
+  font-family: var(--display);
+  font-size: clamp(15px, 1.35vw, 18.5px);
   font-weight: 800;
-  font-style: italic;
-  line-height: 1.1;
-  letter-spacing: -0.3px;
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
+  font-variation-settings: "opsz" 36, "wdth" 88;
+  line-height: 1.16;
+  letter-spacing: -0.5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .tier-flash .h[lang="ko"] {
   font-family: var(--kr);
-  font-style: normal;
+  font-variation-settings: normal;
   font-weight: 800;
-  font-size: clamp(15px, 1.3vw, 18px);
+  font-size: clamp(14px, 1.2vw, 16.5px);
   line-height: 1.25;
   letter-spacing: -0.7px;
 }
-.tier-flash .dek { display: none; }
+.tier-flash .dek {
+  font-size: 11px;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .tier-flash .meta { font-size: 9.5px; }
 
 /* ── Sparkline row ────────────────────────────────────────── */
