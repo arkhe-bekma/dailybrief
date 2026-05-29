@@ -62,6 +62,8 @@ html, body {
   font: 14px/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
   background:
     radial-gradient(900px 600px at 12% -5%,  rgba(255, 43, 214, 0.13), transparent 60%),
     radial-gradient(900px 600px at 88% 5%,   rgba(0, 225, 255, 0.10),  transparent 60%),
@@ -73,11 +75,30 @@ html, body {
 
 a { color: inherit; text-decoration: none; }
 
-[lang="ko"], [lang="ja"], [lang="zh"] {
+/* ── Language-aware typography ─────────────────────────────
+   :lang() lets us tune the same CSS rules per content language.
+   Korean uses Pretendard's `palt` (proportional alt widths) for
+   tighter horizontal rhythm, and a slightly smaller heading scale
+   because Hangul glyphs are visually denser than Latin at the same px.
+   English uses Fraunces serif with optical sizing + small caps where
+   it suits.
+*/
+:lang(ko), [lang="ko"] {
   font-family: var(--kr);
+  font-feature-settings: "palt" 1, "vpal" 1, "kern" 1, "ss03" 1;
   word-break: keep-all;
   line-height: 1.36;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.3px;
+}
+:lang(en), [lang="en"] {
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "ss01" 1;
+}
+
+/* All headlines get auto-balanced wrapping (Chrome 114+ / Safari 17.4+).
+   This makes "최태원, 내달 TSMC회장과 회동…엔비디아 포함" wrap evenly
+   instead of leaving a sad lonely word on the last line. */
+.h, h1, h2, h3 {
+  text-wrap: balance;
 }
 
 /* ── Masthead ─────────────────────────────────────────────── */
@@ -285,12 +306,16 @@ a { color: inherit; text-decoration: none; }
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   overflow: hidden;
   backdrop-filter: blur(6px);
   transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
   animation: fadein 0.4s ease-out both;
 }
+
+/* Flex-grow: the headline fills the box on image-less cards.
+   Stops short, lonely cards from leaving empty padding wasteland. */
+.art > .h { flex: 1 1 auto; }
 .art:hover {
   transform: translateY(-3px);
   z-index: 2;
@@ -364,16 +389,26 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 0.5px;
 }
 
-/* ── Image (responsive) ───────────────────────────────────── */
+/* ── Image (responsive, with bottom gradient + category badge) ── */
 .art .img {
   background: var(--bg-2) center/cover no-repeat;
   border-radius: 8px;
   overflow: hidden;
   position: relative;
   transition: transform 0.5s ease-out, filter 0.5s ease-out;
-  filter: saturate(1.05) contrast(1.05);
+  filter: saturate(1.08) contrast(1.06);
 }
-.art:hover .img { transform: scale(1.03); filter: saturate(1.2) contrast(1.1); }
+.art .img::after {
+  /* subtle vignette so the image edge melts into the dark card */
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 55%, rgba(5,6,10,0.45) 100%);
+  pointer-events: none;
+}
+.art:hover .img {
+  transform: scale(1.04);
+  filter: saturate(1.28) contrast(1.12) brightness(1.04);
+}
 
 /* ── Headline typography ──────────────────────────────────── */
 .art .h {
@@ -383,11 +418,15 @@ a { color: inherit; text-decoration: none; }
   color: var(--text);
   line-height: 1.15;
   margin: 0;
+  text-wrap: balance;
+  font-optical-sizing: auto;
 }
 .art .h[lang="ko"] {
   font-family: var(--kr);
   font-weight: 800;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.55px;
+  /* tighter Korean palt + manual jamo kerning */
+  font-feature-settings: "palt" 1, "vpal" 1, "kern" 1;
 }
 .art .dek {
   color: var(--text-2);
@@ -411,75 +450,175 @@ a { color: inherit; text-decoration: none; }
 }
 .art .why[lang="ko"] { font-family: var(--kr); font-style: normal; font-weight: 500; }
 
-/* ── Tier-specific layouts ────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════
+   Tier layouts — each tier is its own composition.
+   Image-less tiers grow the headline to fill the box.
+   ════════════════════════════════════════════════════════════ */
 
-/* HERO — biggest, image left, headline right, glowing */
+/* ── HERO — magazine cover with split + dramatic typography ─ */
 .tier-hero {
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
-  gap: 22px;
-  padding: 22px 24px;
-  border-radius: 16px;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 26px;
+  padding: 26px 28px;
+  border-radius: 18px;
+  min-height: 360px;
   background:
-    linear-gradient(135deg, rgba(0,225,255,0.06), rgba(255,43,214,0.06)),
-    rgba(11,13,24,0.82);
+    linear-gradient(135deg, rgba(0,225,255,0.07), rgba(255,43,214,0.07)),
+    rgba(11,13,24,0.85);
+  box-shadow: 0 10px 50px rgba(0,0,0,0.35);
 }
 .tier-hero::before { display: none; }
-.tier-hero .img { aspect-ratio: 16/10; min-height: 280px; border-radius: 10px; }
-.tier-hero .body { display: flex; flex-direction: column; gap: 12px; justify-content: center; }
+.tier-hero .img {
+  aspect-ratio: 4/3;
+  min-height: 320px;
+  border-radius: 12px;
+}
+.tier-hero .body { display: flex; flex-direction: column; gap: 14px; justify-content: center; }
 .tier-hero .h {
-  font-size: 40px;
+  font-size: clamp(34px, 3.8vw, 50px);
+  font-weight: 900;
+  line-height: 1.04;
+  letter-spacing: -1.2px;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-shadow: 0 0 30px rgba(255,255,255,0.08);
 }
-.tier-hero .dek { font-size: 14.5px; -webkit-line-clamp: 4; }
+.tier-hero .h[lang="ko"] {
+  font-size: clamp(28px, 3.1vw, 42px);
+  font-weight: 900;
+  letter-spacing: -1.6px;
+}
+/* English hero gets a Fraunces drop cap. Cool magazine feel. */
+.tier-hero .h[lang="en"]::first-letter {
+  font-style: italic;
+  color: var(--neon-yellow);
+  text-shadow: var(--glow-yellow);
+}
+.tier-hero .dek { font-size: 15px; -webkit-line-clamp: 4; }
 .tier-hero .why { font-size: 14px; }
 @media (max-width: 900px) {
-  .tier-hero { grid-template-columns: 1fr; }
-  .tier-hero .h { font-size: 28px; }
+  .tier-hero { grid-template-columns: 1fr; min-height: 0; }
 }
 
-/* FEATURE / LARGE — half width with image */
-.tier-feature .img, .tier-large .img { aspect-ratio: 16/9; min-height: 160px; }
-.tier-feature .h, .tier-large .h {
-  font-size: 22px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+/* ── FEATURE — image top, big italic Fraunces headline ────── */
+.tier-feature .img {
+  aspect-ratio: 16/9;
+  min-height: 170px;
 }
-.tier-feature .dek, .tier-large .dek { -webkit-line-clamp: 2; }
-
-/* MEDIUM / SMALL — image cards */
-.tier-medium .img, .tier-small .img { aspect-ratio: 16/9; min-height: 110px; }
-.tier-medium .h, .tier-small .h {
-  font-size: 16px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.tier-medium .dek, .tier-small .dek { -webkit-line-clamp: 2; }
-
-/* HEADLINE — NO image, BIG title, tight box */
-.tier-headline {
-  padding: 14px 16px;
-  min-height: 0;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--c, var(--text-2)) 6%, transparent), transparent),
-    rgba(11,13,24,0.82);
-}
-.tier-headline .h {
-  font-size: 20px;
-  font-weight: 900;
+.tier-feature .h {
+  font-size: clamp(22px, 1.9vw, 26px);
+  font-weight: 800;
+  font-style: italic;
   line-height: 1.12;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.tier-feature .h[lang="ko"] {
+  font-size: clamp(19px, 1.7vw, 23px);
+  font-style: normal;
+  font-weight: 800;
+}
+.tier-feature .dek { -webkit-line-clamp: 3; }
+
+/* ── LARGE — image top, big upright headline ──────────────── */
+.tier-large .img {
+  aspect-ratio: 16/9;
+  min-height: 150px;
+}
+.tier-large .h {
+  font-size: clamp(20px, 1.7vw, 23px);
+  font-weight: 800;
+  line-height: 1.16;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tier-large .h[lang="ko"] { font-size: clamp(17.5px, 1.55vw, 20px); }
+.tier-large .dek { -webkit-line-clamp: 2; }
+
+/* ── MEDIUM — horizontal split: square thumb left, text right ── */
+.tier-medium {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  grid-auto-rows: min-content;
+  column-gap: 14px;
+  row-gap: 6px;
+  padding: 12px 14px;
+  min-height: 120px;
+}
+.tier-medium .img {
+  grid-row: 1 / -1;
+  grid-column: 1;
+  aspect-ratio: 1 / 1;
+  width: 120px;
+  height: 100%;
+  min-height: 96px;
+  align-self: stretch;
+  border-radius: 8px;
+}
+.tier-medium .meta,
+.tier-medium .h,
+.tier-medium .dek,
+.tier-medium .why,
+.tier-medium .spark-row { grid-column: 2; }
+.tier-medium .h {
+  font-size: clamp(15px, 1.2vw, 17px);
+  font-weight: 800;
+  line-height: 1.22;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tier-medium .h[lang="ko"] { font-size: clamp(14px, 1.1vw, 16px); }
+.tier-medium .dek { -webkit-line-clamp: 2; font-size: 11.5px; }
+
+/* ── SMALL — compact image top, tight title ───────────────── */
+.tier-small .img { aspect-ratio: 16/9; min-height: 100px; }
+.tier-small .h {
+  font-size: clamp(14px, 1.1vw, 16px);
+  font-weight: 800;
+  line-height: 1.22;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tier-small .dek { -webkit-line-clamp: 2; font-size: 11.5px; }
+
+/* ── HEADLINE — NO image, HUGE italic title fills the whole box ── */
+.tier-headline {
+  padding: 18px 18px;
+  min-height: 200px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--c, var(--text-2)) 8%, transparent), transparent 40%),
+    rgba(11,13,24,0.82);
+}
+.tier-headline .h {
+  font-family: var(--serif);
+  font-size: clamp(26px, 2.4vw, 34px);
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1.05;
+  letter-spacing: -0.6px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  text-shadow: 0 0 20px color-mix(in srgb, var(--c, var(--text)) 18%, transparent);
+}
+.tier-headline .h[lang="ko"] {
+  font-family: var(--kr);
+  font-style: normal;
+  font-weight: 900;
+  font-size: clamp(22px, 2.05vw, 28px);
+  letter-spacing: -1px;
+  line-height: 1.18;
 }
 .tier-headline .dek {
   font-size: 12px;
@@ -489,19 +628,29 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 
-/* FLASH — small no-image */
+/* ── FLASH — no image, smaller but still bold ─────────────── */
 .tier-flash {
-  padding: 10px 12px;
-  min-height: 0;
+  padding: 13px 14px;
+  min-height: 110px;
 }
 .tier-flash .h {
-  font-size: 14.5px;
+  font-family: var(--serif);
+  font-size: clamp(17px, 1.45vw, 21px);
   font-weight: 800;
-  line-height: 1.2;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  font-style: italic;
+  line-height: 1.1;
+  letter-spacing: -0.3px;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+}
+.tier-flash .h[lang="ko"] {
+  font-family: var(--kr);
+  font-style: normal;
+  font-weight: 800;
+  font-size: clamp(15px, 1.3vw, 18px);
+  line-height: 1.25;
+  letter-spacing: -0.7px;
 }
 .tier-flash .dek { display: none; }
 .tier-flash .meta { font-size: 9.5px; }
