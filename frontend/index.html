@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dailybrief</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">▮</span> dailybrief
+      <span class="date" id="today"></span>
+    </div>
+
+    <div class="chips" id="chips">
+      <button class="chip active" data-kind="all">all <span class="ct" id="ct-all"></span></button>
+      <button class="chip news"  data-kind="news">📰 news <span class="ct" id="ct-news"></span></button>
+      <button class="chip whale" data-kind="whale">🐋 whales <span class="ct" id="ct-whale"></span></button>
+      <button class="chip trade" data-kind="trade">🏛 trades <span class="ct" id="ct-trade"></span></button>
+      <button class="chip video" data-kind="video">📺 video <span class="ct" id="ct-video"></span></button>
+    </div>
+
+    <div class="actions">
+      <input id="filter" placeholder="filter…" />
+      <button id="refresh" title="refresh">↻</button>
+      <button id="density" title="toggle density">▦</button>
+    </div>
+  </header>
+
+  <div class="tape" id="tape"></div>
+
+  <div class="headline" id="headline"></div>
+
+  <main>
+    <div id="wall" class="wall"></div>
+  </main>
+
+  <footer>
+    <span class="muted">dailybrief · local · <span id="status">loading…</span></span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
