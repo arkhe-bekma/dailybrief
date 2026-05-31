@@ -412,16 +412,15 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* Spans by tier (image cards only — text-only cards are floated in
-   #paper-noimg and don't participate in this grid) */
+   #paper-noimg and don't participate in this grid).
+   All non-hero tiers span 6 so the grid is a uniform 2-per-row band
+   below the hero — no orphan boxes left over in the last row. */
 .tier-hero       { grid-column: span 12; }
 .tier-feature    { grid-column: span 6;  }
 .tier-large      { grid-column: span 6;  }
-.tier-medium     { grid-column: span 4;  }
-.tier-small      { grid-column: span 4;  }
+.tier-medium     { grid-column: span 6;  }
+.tier-small      { grid-column: span 6;  }
 
-@media (max-width: 1400px) {
-  .tier-medium, .tier-small { grid-column: span 6; }
-}
 @media (max-width: 800px) {
   .tier-hero, .tier-feature, .tier-large, .tier-medium, .tier-small {
     grid-column: span 12;
