@@ -249,7 +249,21 @@ a { color: inherit; text-decoration: none; }
   transition: all 0.15s;
   text-transform: uppercase;
 }
-.chip .ct { color: var(--dim); font-family: var(--mono); font-size: 11px; font-weight: 500; }
+.chip .ct {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+}
+.chip .ct:empty { display: none; }
+.chip.active .ct { background: rgba(0,0,0,0.18); color: inherit; opacity: 0.65; }
 .chip:hover { border-color: var(--text-2); color: var(--text); }
 .chip.active {
   background: var(--text);
@@ -266,17 +280,88 @@ a { color: inherit; text-decoration: none; }
 .chip.cat-korea.active  { background: var(--c-korea);  border-color: var(--c-korea);  color: #2a001b; box-shadow: 0 0 24px rgba(255,91,232,0.5); }
 
 /* ── Layout: main + right rail ────────────────────────────── */
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+/* Main column is now full-width — the right rail was retired and its
+   contents moved to scrolling strips under the price tape. */
+.main-col {
+  display: flex;
+  flex-direction: column;
   gap: 18px;
+  min-width: 0;
   padding: 18px 24px 30px;
   max-width: 1800px;
   margin: 0 auto;
 }
-.main-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-@media (max-width: 1080px) {
-  .layout { grid-template-columns: 1fr; }
+
+/* ── Horizontal marquee strips for whales / trades / videos ─────────
+   Match the price-tape pattern at the top: each strip is a thin
+   horizontal band that scrolls infinitely. Hover pauses. Click any
+   item opens the detail modal. ── */
+.strip {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
+}
+.strip:empty { display: none; }
+.strip-track {
+  display: flex;
+  gap: 22px;
+  padding: 7px 16px;
+  white-space: nowrap;
+  animation: marquee 100s linear infinite;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.strip:hover .strip-track { animation-play-state: paused; }
+
+.strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  padding-right: 10px;
+  border-right: 1px solid var(--line);
+  margin-right: 4px;
+}
+.strip-whales .strip-label { color: var(--neon-lime);   text-shadow: 0 0 14px rgba(182,255,60,0.45); }
+.strip-trades .strip-label { color: var(--neon-yellow); text-shadow: 0 0 14px rgba(255,230,0,0.45); }
+.strip-videos .strip-label { color: var(--neon-pink);   text-shadow: 0 0 14px rgba(255,91,232,0.45); }
+
+.strip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.strip-item:hover { background: rgba(255,255,255,0.05); }
+
+/* Whale strip item: [BTC] $79M Unknown→Binance */
+.strip-whales .asset { color: var(--neon-cyan); font-weight: 800; letter-spacing: 0.5px; }
+.strip-whales .amt   { color: var(--neon-lime); font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(182,255,60,0.35); }
+.strip-whales .flow  { color: var(--text-2); }
+.strip-whales .arrow { color: var(--muted); padding: 0 1px; }
+
+/* Trade strip item: Pelosi BUY NVDA $1M–$5M */
+.strip-trades .who    { color: var(--text); font-weight: 700; }
+.strip-trades .action { font-weight: 800; padding: 0 5px; border-radius: 3px; font-size: 10px; }
+.strip-trades .action.BUY  { background: rgba(182,255,60,0.18);  color: var(--up); }
+.strip-trades .action.SELL { background: rgba(255,77,109,0.18); color: var(--down); }
+.strip-trades .ticker { color: var(--neon-yellow); font-weight: 800; text-shadow: 0 0 8px rgba(255,230,0,0.3); }
+.strip-trades .band   { color: var(--muted); }
+
+/* Video strip item: 📺 Bloomberg · headline… */
+.strip-videos .channel { color: var(--neon-pink); font-weight: 800; }
+.strip-videos .vtitle  { color: var(--text-2); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
 }
 
 /* ── No-image cards: float layout — each card sizes to its own
@@ -800,8 +885,12 @@ a { color: inherit; text-decoration: none; }
 }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 
-/* ── Right rail ───────────────────────────────────────────── */
-#rail {
+/* ── Right rail (legacy — no longer rendered) ───────────────
+   The whales / trades / videos content lives in the horizontal
+   marquee strips at the top now. These rules stay in place purely
+   so older snapshots don't visually explode. */
+#rail { display: none !important; }
+.LEGACY_RAIL {
   position: sticky;
   top: 160px;
   align-self: start;
@@ -1045,11 +1134,12 @@ footer {
 .reader-card::-webkit-scrollbar { width: 6px; }
 .reader-card::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 .reader-close {
-  position: sticky;
-  float: right;
-  top: 0;
-  margin-top: -8px;
-  margin-right: -16px;
+  /* Pinned to a fixed slot inside .reader-card. Replaces the old
+     sticky+float combo which let multiple sibling × buttons stack at
+     the same anchor when JS accidentally appended duplicates. */
+  position: absolute;
+  top: 14px;
+  right: 14px;
   background: rgba(11,13,24,0.85);
   color: var(--text);
   border: 1px solid var(--line);

@@ -1,0 +1,25 @@
+# Caddy v2 config for dailybrief.
+#
+# Caddy auto-fetches Let's Encrypt TLS certs the first time it hears
+# from your domain. Just point an A record at the Lightsail public IP
+# and run `sudo systemctl reload caddy`.
+#
+# Replace __DOMAIN__ below with your real hostname (e.g. dailybrief.kim
+# or news.example.com) before installing.
+
+__DOMAIN__ {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+
+    # Light, sane cache headers for the static assets. /api/* stays uncached.
+    @static path /static/* /favicon.ico
+    header @static Cache-Control "public, max-age=3600"
+
+    log {
+        output file /var/log/caddy/dailybrief.log {
+            roll_size  10mb
+            roll_keep  5
+        }
+        format json
+    }
+}

@@ -100,63 +100,57 @@ function renderTape(quotes) {
   tape.appendChild(track);
 }
 
-// ── Right rail renderers ───────────────────────────────────────
-function renderWhalesRail(items) {
-  const root = $("#rail-whales");
+// ── Strip renderers (whales / trades / videos) ────────────────
+// Each strip mimics the price tape: a horizontal marquee that loops.
+// Clicking any item opens the flow modal (see openFlow). Items are
+// duplicated into two blocks for seamless scroll.
+function _renderStrip(rootId, label, items, makeItem, kind) {
+  const root = $(`#${rootId}`);
+  if (!root) return;
   root.innerHTML = "";
-  items.slice(0, 12).forEach((w) => {
-    root.appendChild(el("a", {
-      class: "w-row",
-      href: w.tx_url || "#",
-      target: "_blank",
-      rel: "noopener",
-    }, [
-      el("span", { class: "amt" }, fmtUSD(w.amount_usd || 0)),
-      el("span", { class: "asset" }, w.asset || ""),
-      el("span", { class: "flow" }, `${w.from_label} → ${w.to_label}`),
-      el("span", { class: "when" }, fmtWhen(w.timestamp)),
-    ]));
-  });
+  if (!items || !items.length) return;
+  const track = el("div", { class: "strip-track" });
+  const block = () => {
+    const frag = document.createDocumentFragment();
+    frag.appendChild(el("span", { class: "strip-label" }, label));
+    items.forEach((it, idx) => {
+      const node = makeItem(it);
+      node.classList.add("strip-item");
+      node.dataset.kind = kind;
+      node.dataset.index = String(idx);
+      frag.appendChild(node);
+    });
+    return frag;
+  };
+  track.appendChild(block());
+  track.appendChild(block());
+  root.appendChild(track);
 }
 
-function renderTradesRail(items) {
-  const root = $("#rail-trades");
-  root.innerHTML = "";
-  items.slice(0, 14).forEach((t) => {
-    root.appendChild(el("a", {
-      class: "t-row",
-      href: t.source_url || "#",
-      target: "_blank",
-      rel: "noopener",
-    }, [
-      el("span", { class: "who", lang: "ko" }, t.name || ""),
-      el("span", { class: `action ${t.action}` }, t.action || ""),
-      el("span", { class: "meta-line" }, [
-        el("span", { class: "ticker" }, t.ticker || ""),
-        el("span", {}, t.size_band || ""),
-        el("span", {}, fmtWhen(t.timestamp)),
-      ]),
-    ]));
-  });
+function renderWhalesStrip(items) {
+  _renderStrip("strip-whales", "🐋 WHALES", items, (w) => el("span", {}, [
+    el("span", { class: "asset" }, w.asset || ""),
+    el("span", { class: "amt" }, fmtUSD(w.amount_usd || 0)),
+    el("span", { class: "flow" }, w.from_label || ""),
+    el("span", { class: "arrow" }, "→"),
+    el("span", { class: "flow" }, w.to_label || ""),
+  ]), "whale");
 }
 
-function renderVideosRail(items) {
-  const root = $("#rail-videos");
-  root.innerHTML = "";
-  items.slice(0, 14).forEach((v) => {
-    root.appendChild(el("a", {
-      class: "v-row",
-      href: v.url || "#",
-      target: "_blank",
-      rel: "noopener",
-    }, [
-      el("span", { class: "thumb", style: `background-image:url('${v.thumbnail}')` }),
-      el("span", { class: "meta-block" }, [
-        el("span", { class: "ch" }, v.channel || ""),
-        el("span", { class: "title" }, v.title || ""),
-      ]),
-    ]));
-  });
+function renderTradesStrip(items) {
+  _renderStrip("strip-trades", "🏛 INSIDERS", items, (t) => el("span", {}, [
+    el("span", { class: "who", lang: "ko" }, t.name || ""),
+    el("span", { class: `action ${t.action}` }, t.action || ""),
+    el("span", { class: "ticker" }, t.ticker || ""),
+    el("span", { class: "band" }, t.size_band || ""),
+  ]), "trade");
+}
+
+function renderVideosStrip(items) {
+  _renderStrip("strip-videos", "📺 WATCH", items, (v) => el("span", {}, [
+    el("span", { class: "channel" }, v.channel || ""),
+    el("span", { class: "vtitle" }, v.title || ""),
+  ]), "video");
 }
 
 // ── News card body ─────────────────────────────────────────────
@@ -363,9 +357,9 @@ async function load() {
     head.textContent = STATE.headline || "";
     head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
 
-    renderWhalesRail(STATE.whales || []);
-    renderTradesRail(STATE.trades || []);
-    renderVideosRail(STATE.youtube || []);
+    renderWhalesStrip(STATE.whales || []);
+    renderTradesStrip(STATE.trades || []);
+    renderVideosStrip(STATE.youtube || []);
 
     LAST_LOAD = Date.now();
     PAGE = 1;
@@ -389,9 +383,9 @@ async function silentRefresh() {
     const head = $("#headline");
     head.textContent = STATE.headline || "";
     head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
-    renderWhalesRail(STATE.whales || []);
-    renderTradesRail(STATE.trades || []);
-    renderVideosRail(STATE.youtube || []);
+    renderWhalesStrip(STATE.whales || []);
+    renderTradesStrip(STATE.trades || []);
+    renderVideosStrip(STATE.youtube || []);
     paint(false);  // preserve page + scroll
   } catch (e) {
     console.warn("auto-refresh failed:", e);
@@ -424,12 +418,8 @@ async function openReader(url, item) {
 
 function renderReader(content, data, item) {
   const lang = data.lang || item.lang || "en";
-  content.innerHTML = "";
-
-  // Close button stays in the DOM
-  const closeBtn = el("button", { class: "reader-close", "aria-label": "close" }, "×");
-  closeBtn.addEventListener("click", closeReader);
-  content.appendChild(closeBtn);
+  content.innerHTML = "";   // the static .reader-close button lives OUTSIDE
+                            // .reader-content, so this clears only the body.
 
   const imgSrc = data.image || item.image;
   if (imgSrc) {
@@ -450,29 +440,14 @@ function renderReader(content, data, item) {
   content.appendChild(el("h1", { class: "reader-title", lang },
     data.title || item.title || "(no title)"));
 
-  if (data.tldr) {
-    content.appendChild(el("div", { class: "reader-tldr" }, [
-      el("span", { class: "tldr-label" }, "✦ TL;DR"),
-      el("p", { lang }, data.tldr),
-    ]));
-  }
-
-  if (data.key_points && data.key_points.length) {
-    content.appendChild(el("span", { class: "reader-section-label" }, "→ KEY POINTS"));
-    const ul = el("ul", { class: "reader-points" });
-    data.key_points.forEach((p) => ul.appendChild(el("li", { lang }, p)));
-    content.appendChild(ul);
-  }
-
   if (data.paragraphs && data.paragraphs.length) {
-    content.appendChild(el("span", { class: "reader-section-label" }, "✦ THE STORY"));
     const body = el("div", { class: "reader-body" });
     data.paragraphs.forEach((p) => body.appendChild(el("p", { lang }, p)));
     content.appendChild(body);
   }
 
   content.appendChild(el("div", { class: "reader-footer" }, [
-    el("span", { class: "badge" }, "✦ AI SUMMARY · dailybrief"),
+    el("span", { class: "badge" }, "✦ dailybrief reader"),
     el("a", {
       href: data.url || item.url,
       target: "_blank",
@@ -484,6 +459,91 @@ function renderReader(content, data, item) {
 
 function closeReader() {
   document.getElementById("reader").classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+// ── Flow detail modal (whales / trades / videos) ───────────────
+function openFlow(kind, index) {
+  const modal = document.getElementById("flow");
+  if (!modal) return;
+  const list =
+    kind === "whale" ? (STATE.whales || []) :
+    kind === "trade" ? (STATE.trades || []) :
+    kind === "video" ? (STATE.youtube || []) : [];
+  const item = list[index];
+  if (!item) return;
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+  const content = document.getElementById("flow-content");
+  content.innerHTML = "";
+
+  if (kind === "whale") {
+    content.appendChild(el("div", { class: "reader-meta" }, [
+      el("span", { class: "tag" }, "WHALE"),
+      el("span", { class: "src" }, item.asset || ""),
+      el("span", {}, fmtWhen(item.timestamp)),
+    ]));
+    content.appendChild(el("h1", { class: "reader-title" },
+      `${fmtUSD(item.amount_usd || 0)} ${item.asset || ""}`));
+    content.appendChild(el("div", { class: "reader-body" }, [
+      el("p", {}, `From: ${item.from_label || "—"}`),
+      el("p", {}, `To: ${item.to_label || "—"}`),
+    ]));
+    content.appendChild(el("div", { class: "reader-footer" }, [
+      el("span", { class: "badge" }, "✦ whale-alert"),
+      item.tx_url ? el("a", {
+        href: item.tx_url, target: "_blank", rel: "noopener",
+        class: "reader-original",
+      }, "transaction ↗") : null,
+    ]));
+  } else if (kind === "trade") {
+    content.appendChild(el("div", { class: "reader-meta" }, [
+      el("span", { class: "tag" }, "INSIDER TRADE"),
+      el("span", { class: "src" }, item.role || ""),
+      el("span", {}, fmtWhen(item.timestamp)),
+    ]));
+    content.appendChild(el("h1", { class: "reader-title", lang: "ko" },
+      `${item.name} ${item.action} ${item.ticker}`));
+    content.appendChild(el("div", { class: "reader-body" }, [
+      el("p", {}, `Company: ${item.company || item.ticker}`),
+      el("p", {}, `Size band: ${item.size_band || "—"}`),
+    ]));
+    content.appendChild(el("div", { class: "reader-footer" }, [
+      el("span", { class: "badge" }, "✦ insider trades"),
+      item.source_url ? el("a", {
+        href: item.source_url, target: "_blank", rel: "noopener",
+        class: "reader-original",
+      }, "disclosure ↗") : null,
+    ]));
+  } else if (kind === "video") {
+    content.appendChild(el("div", { class: "reader-meta" }, [
+      el("span", { class: "tag" }, "VIDEO"),
+      el("span", { class: "src" }, item.channel || ""),
+      el("span", {}, fmtWhen(item.published)),
+    ]));
+    if (item.thumbnail) {
+      content.appendChild(el("div", {
+        class: "reader-img",
+        style: `background-image:url('${item.thumbnail}')`,
+      }));
+    }
+    content.appendChild(el("h1", { class: "reader-title" }, item.title || ""));
+    content.appendChild(el("div", { class: "reader-footer" }, [
+      el("span", { class: "badge" }, "✦ youtube"),
+      item.url ? el("a", {
+        href: item.url, target: "_blank", rel: "noopener",
+        class: "reader-original",
+      }, "watch on YouTube ↗") : null,
+    ]));
+  }
+}
+
+function closeFlow() {
+  const modal = document.getElementById("flow");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
 }
 
@@ -523,10 +583,24 @@ document.addEventListener("DOMContentLoaded", () => {
     openReader(url, item);
   });
 
-  // Close-on-backdrop + Escape
-  document.querySelector(".reader-backdrop")?.addEventListener("click", closeReader);
+  // Close-on-button + backdrop + Escape for both modals. The static
+  // ×/backdrop in index.html are each wired ONCE here.
+  document.querySelector("#reader .reader-close")?.addEventListener("click", closeReader);
+  document.querySelector("#reader .reader-backdrop")?.addEventListener("click", closeReader);
+  document.querySelectorAll('#flow [data-close="flow"]').forEach((n) =>
+    n.addEventListener("click", closeFlow));
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeReader();
+    if (e.key === "Escape") { closeReader(); closeFlow(); }
+  });
+
+  // Strip clicks → flow modal. data-kind + data-index are stamped onto
+  // each .strip-item by _renderStrip.
+  document.addEventListener("click", (e) => {
+    const item = e.target.closest(".strip-item");
+    if (!item) return;
+    const kind = item.dataset.kind;
+    const idx = parseInt(item.dataset.index || "0", 10);
+    if (kind) openFlow(kind, idx);
   });
 
   load();

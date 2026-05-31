@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start dailybrief in dev mode.
+# Start dailybrief in dev mode. Reads PORT/HOST from .env if present.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,6 +16,11 @@ if [ ! -f .env ]; then
   echo "→ wrote .env (edit it to add ANTHROPIC_API_KEY for LLM curation)"
 fi
 
+# shellcheck disable=SC1091
+set -a; source .env; set +a
+: "${PORT:=8000}"
+: "${HOST:=0.0.0.0}"
+
 export PYTHONPATH="$(pwd)"
-echo "→ http://localhost:8000"
-exec uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+echo "→ http://localhost:${PORT}"
+exec uvicorn backend.main:app --reload --host "${HOST}" --port "${PORT}"

@@ -1,0 +1,21 @@
+[Unit]
+Description=dailybrief — FastAPI server + agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/dailybrief
+EnvironmentFile=/home/ubuntu/dailybrief/.env
+ExecStart=/home/ubuntu/dailybrief/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+# Cap memory so a runaway scrape doesn't take down the Lightsail box.
+MemoryMax=800M
+# Pull stdout/stderr into the journal so `journalctl -u dailybrief -f` works.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

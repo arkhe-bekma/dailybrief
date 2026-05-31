@@ -11,6 +11,7 @@ from html import unescape
 
 import feedparser
 import httpx
+import trafilatura
 
 from backend import cache, config
 from backend.agent import illustrator
@@ -108,14 +109,33 @@ _OG_HEADERS = {
 }
 
 
+def _passes_reader_check(body: str, ctype: str, page_url: str) -> bool:
+    """True only if trafilatura can actually pull a real-looking article
+    out of `body`. Catches paywalls (NYT, WSJ), Google News interstitials,
+    JS-only SPA shells, redirect pages, etc."""
+    if not body or "html" not in (ctype or "").lower() or len(body) < 1024:
+        return False
+    try:
+        text = trafilatura.extract(body, url=page_url, no_fallback=True)
+    except Exception:
+        return False
+    # 60 words ≈ 2-3 sentences — paywalls usually return short blurbs or
+    # nothing at all, interstitials return zero, real articles return 200+.
+    return bool(text) and len(text.split()) >= 60
+
+
 async def _fetch_og_image(client: httpx.AsyncClient, page_url: str) -> str | None:
     """Second pass — fetch the article page and pull og:image.
 
-    Cached per URL so we don't re-scrape on every RSS refresh.
+    Cached per URL so we don't re-scrape on every RSS refresh. Also
+    records `reader_ok:{url}` based on whether trafilatura can pull a
+    real body from the page, so fetch_all can drop dead/paywalled
+    links before they reach the feed.
     """
     if not page_url:
         return None
     key = f"og_image:{page_url}"
+    ok_key = f"reader_ok:{page_url}"
     cached = cache.get(key)
     if cached is not None:
         return cached or None  # empty-string cache = known miss
@@ -124,12 +144,18 @@ async def _fetch_og_image(client: httpx.AsyncClient, page_url: str) -> str | Non
         r = await client.get(page_url, timeout=8.0, follow_redirects=True, headers=_OG_HEADERS)
         if r.status_code >= 400:
             cache.set(key, "", 3600)
+            cache.set(ok_key, False, 3600)
             return None
+        ctype = r.headers.get("content-type", "").lower()
+        body = r.text
+        cache.set(ok_key, _passes_reader_check(body, ctype, page_url),
+                  86_400 if _passes_reader_check(body, ctype, page_url) else 3600)
         # Meta tags live in <head> — first 60KB is way more than enough.
-        html = r.text[:60_000]
+        html = body[:60_000]
     except Exception as exc:
         print(f"[og] {page_url[:60]} failed: {exc}")
         cache.set(key, "", 1800)
+        cache.set(ok_key, False, 1800)
         return None
 
     for pat in (_OG_IMAGE_RE, _OG_IMAGE_REV_RE, _TWITTER_IMAGE_RE):
@@ -143,6 +169,26 @@ async def _fetch_og_image(client: httpx.AsyncClient, page_url: str) -> str | Non
 
     cache.set(key, "", 3600)   # miss — re-try in an hour
     return None
+
+
+def _is_readable(article_url: str) -> bool:
+    """True if the page passed the trafilatura probe, or we haven't
+    tried it yet (default to keeping it; it'll be tested next cycle)."""
+    v = cache.get(f"reader_ok:{article_url}")
+    return True if v is None else bool(v)
+
+
+# URL patterns that we know are never extractable. Skip them up front
+# rather than waste an HTTP fetch.
+_DEAD_URL_PATTERNS = (
+    "news.google.com/rss/articles/",   # Google News interstitial — body is JS
+)
+
+
+def _is_obviously_dead(url: str) -> bool:
+    if not url:
+        return True
+    return any(p in url for p in _DEAD_URL_PATTERNS)
 
 
 async def _enrich_missing_images(articles: list[Article]) -> None:
@@ -161,6 +207,37 @@ async def _enrich_missing_images(articles: list[Article]) -> None:
                     article.image = got
 
         await asyncio.gather(*[_one(a) for a in missing])
+
+
+async def _probe_readability(articles: list[Article]) -> None:
+    """Make sure every article has a reader_ok verdict. Articles that
+    were probed by _fetch_og_image already have one; this pass picks
+    up articles that had an RSS image (so we never fetched their page)."""
+    todo = [
+        a for a in articles
+        if cache.get(f"reader_ok:{a.url}") is None and not _is_obviously_dead(a.url)
+    ]
+    if not todo:
+        return
+
+    sem = asyncio.Semaphore(8)
+    async with httpx.AsyncClient(headers=_OG_HEADERS, http2=False) as client:
+        async def _one(article: Article) -> None:
+            async with sem:
+                ok_key = f"reader_ok:{article.url}"
+                try:
+                    r = await client.get(article.url, timeout=8.0, follow_redirects=True)
+                    if r.status_code >= 400:
+                        cache.set(ok_key, False, 3600)
+                        return
+                    ok = _passes_reader_check(
+                        r.text, r.headers.get("content-type", ""), article.url,
+                    )
+                    cache.set(ok_key, ok, 86_400 if ok else 3600)
+                except Exception:
+                    cache.set(ok_key, False, 1800)
+
+        await asyncio.gather(*[_one(a) for a in todo])
 
 
 def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
@@ -214,16 +291,45 @@ async def fetch_all() -> list[Article]:
             seen.add(a.url)
             articles.append(a)
 
-    # Stage 2: for articles whose feed didn't include an image, hit the
-    # article page and pull og:image. Cached per URL so it only fires
-    # the first time we see each story.
+    # Stage 2a: hard-drop obvious dead URLs (Google News interstitials etc.).
+    articles = [a for a in articles if not _is_obviously_dead(a.url)]
+
+    # Stage 2b: for articles whose feed didn't include an image, hit the
+    # article page and pull og:image. Records `reader_ok:{url}` along the
+    # way based on whether trafilatura can pull a real body.
     await _enrich_missing_images(articles)
 
-    # Stage 3: still nothing? Use an AI-generated placeholder so every
-    # tile has something to show.
-    for a in articles:
-        if not a.image:
-            a.image = illustrator.ai_image_url(a.title)
+    # Stage 2c: probe articles that already had an RSS image — we still
+    # need to know if their page is readable. Cached per URL so only new
+    # articles trigger HTTP on subsequent refreshes.
+    await _probe_readability(articles)
+
+    # Stage 3: drop articles whose page failed the trafilatura probe
+    # (paywalls, JS-only pages, interstitials, dead links).
+    before = len(articles)
+    articles = [a for a in articles if _is_readable(a.url)]
+    if (n := before - len(articles)):
+        print(f"[rss] dropped {n} articles that failed extraction", flush=True)
+
+    # Stage 4: drop articles without a real photo. The user explicitly
+    # doesn't want feed tiles backed by AI-generated placeholders or
+    # publisher-brand site logos — only articles with a genuine hero
+    # image stay in the feed.
+    before = len(articles)
+    articles = [a for a in articles if a.image]
+    if (n := before - len(articles)):
+        print(f"[rss] dropped {n} articles with no image", flush=True)
+
+    # Stage 5: drop articles whose "image" is actually the publisher's
+    # generic share image. Heuristic: same (outlet, image_url) used by
+    # 2+ articles is almost certainly a logo / default OG image — real
+    # article photos are unique per story.
+    from collections import Counter
+    pair_counts = Counter((a.outlet, a.image) for a in articles)
+    before = len(articles)
+    articles = [a for a in articles if pair_counts[(a.outlet, a.image)] == 1]
+    if (n := before - len(articles)):
+        print(f"[rss] dropped {n} articles using a recycled outlet logo", flush=True)
 
     cache.set("rss:all", articles, config.FEED_CACHE_TTL)
     return articles

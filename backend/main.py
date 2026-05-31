@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import cache, config, mixer, tickers
-from backend.agent import curator, illustrator, reader, summarizer, summary
+from backend.agent import curator, illustrator, reader, summary
 from backend.sources import politicians, prices, rss, whales, youtube
 
 load_dotenv()
@@ -123,19 +124,54 @@ def _detect_lang(text: str) -> str:
     return "en"
 
 
+# Lines we don't want polluting reader paragraphs: image markdown that
+# trafilatura sometimes returns when an article opens with a hero photo,
+# and the various photo-credit / byline-on-its-own-line patterns Korean
+# and English outlets use.
+_IMG_MD_RE = re.compile(r"^!\[[^\]]*\]\([^)]+\)\s*$")
+_CREDIT_PREFIX_RE = re.compile(
+    r"^(?:사진|영상|이미지|일러스트|그래픽|자료(?:사진)?|Photo|Image|Credit|©|기자)\b",
+    re.IGNORECASE,
+)
+_CREDIT_WORDS_RE = re.compile(
+    r"\b(?:getty(?:images)?|reuters/|associated\s+press|ap\s+photo|연합뉴스\s*=|뉴시스\s*=)\b",
+    re.IGNORECASE,
+)
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Turn trafilatura's body text into reader-friendly paragraphs.
+    Drops image markdown, photo credits, and one-liner chrome."""
+    if not text:
+        return []
+    out: list[str] = []
+    for raw in text.split("\n"):
+        p = raw.strip()
+        if len(p) < 20:
+            continue
+        if _IMG_MD_RE.match(p):
+            continue
+        if _CREDIT_PREFIX_RE.match(p):
+            continue
+        if _CREDIT_WORDS_RE.search(p):
+            continue
+        out.append(p)
+    return out
+
+
 @app.get("/api/article")
 async def article(url: str):
-    """Reader-mode summary of an external article.
+    """Reader-mode view of an external article.
 
     1. Fetch the page (cached 1d per URL via reader.extract)
     2. trafilatura pulls a clean body + title + image
-    3. summarizer (Claude haiku) writes TL;DR + key points + paragraphs
-       in the article's own language
+    3. _split_paragraphs scrubs image-markdown and photo-credit lines
+       out of the body — no LLM summarisation, no TL;DR.
     """
     if not url.startswith(("http://", "https://")):
         return {"error": "invalid url"}
 
-    full_key = f"article_summary:{url}"
+    full_key = f"article_reader:{url}"
     cached = cache.get(full_key)
     if cached is not None:
         return cached
@@ -144,18 +180,15 @@ async def article(url: str):
     if not reading:
         return {"error": "could not extract the article body"}
 
-    lang = _detect_lang(reading.title or "")
-    sumr = await summarizer.summarize(reading.text, reading.title, lang)
-
     result = {
         "url": url,
         "title": reading.title,
         "image": reading.image,
         "byline": reading.byline,
         "excerpt": reading.excerpt,
-        "lang": lang,
+        "lang": _detect_lang(reading.title or ""),
         "word_count": len(reading.text.split()),
-        **sumr,
+        "paragraphs": _split_paragraphs(reading.text),
     }
     cache.set(full_key, result, 86400)
     return result

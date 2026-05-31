@@ -26,6 +26,14 @@
   </header>
 
   <div class="tape" id="tape"></div>
+
+  <!-- Compact marquee strips for whales / insider trades / videos.
+       Each row flows horizontally like the price tape; clicking any
+       item opens a detail modal. Replaces the old right rail. -->
+  <div class="strip strip-whales"  id="strip-whales"  data-kind="whale"></div>
+  <div class="strip strip-trades"  id="strip-trades"  data-kind="trade"></div>
+  <div class="strip strip-videos"  id="strip-videos"  data-kind="video"></div>
+
   <div class="headline" id="headline"></div>
 
   <nav class="chips" id="chips">
@@ -38,27 +46,10 @@
     <button class="chip cat-korea"  data-cat="korea">한국<span class="ct" id="ct-korea"></span></button>
   </nav>
 
-  <div class="layout">
-    <main class="main-col">
-      <div id="paper"></div>
-      <div id="paper-noimg"></div>
-    </main>
-
-    <aside id="rail">
-      <section class="rail-section rail-whales">
-        <div class="rail-head"><span class="dot"></span>🐋 <span class="rail-title">Whales</span></div>
-        <div id="rail-whales" class="rail-body"></div>
-      </section>
-      <section class="rail-section rail-trades">
-        <div class="rail-head"><span class="dot"></span>🏛 <span class="rail-title">Insider Trades</span></div>
-        <div id="rail-trades" class="rail-body"></div>
-      </section>
-      <section class="rail-section rail-videos">
-        <div class="rail-head"><span class="dot"></span>📺 <span class="rail-title">Watch</span></div>
-        <div id="rail-videos" class="rail-body"></div>
-      </section>
-    </aside>
-  </div>
+  <main class="main-col">
+    <div id="paper"></div>
+    <div id="paper-noimg"></div>
+  </main>
 
   <div class="pager" id="pager"></div>
 
@@ -74,6 +65,16 @@
     <div class="reader-card" role="dialog" aria-label="article reader">
       <button class="reader-close" aria-label="close">×</button>
       <div class="reader-content"></div>
+    </div>
+  </div>
+
+  <!-- Flow detail modal: clicking a whale / trade / video item opens
+       this with kind-specific body content. -->
+  <div id="flow" class="reader hidden" aria-hidden="true">
+    <div class="reader-backdrop" data-close="flow"></div>
+    <div class="reader-card" role="dialog" aria-label="detail">
+      <button class="reader-close" data-close="flow" aria-label="close">×</button>
+      <div class="reader-content" id="flow-content"></div>
     </div>
   </div>
 
