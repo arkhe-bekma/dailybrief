@@ -1,17 +1,25 @@
-"""Summarizer — turn a long article body into a TL;DR + key points +
-short paragraphs, in the article's own language.
+"""Clean, consistent article rewrite.
 
-Uses Claude Haiku when ANTHROPIC_API_KEY is set; falls back to a tiny
-heuristic that just keeps the first few paragraphs verbatim otherwise.
+Same input, same output shape, for every article — so the reader UI
+never gets a surprise emoji bomb or a section header from one outlet's
+home-baked AI summary.
+
+Output: a list of 3-5 plain-text paragraphs in the article's own
+language. No TL;DR. No bullet points. No emojis. No markdown.
+
+Uses Claude Haiku 4.5 when ANTHROPIC_API_KEY is set (about $0.001 per
+article, very cheap). Returns None otherwise; the caller falls back to
+the heuristic `_split_paragraphs` in main.py.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 
 
-LANG_NAMES = {
+_LANG_NAMES = {
     "ko": "Korean (한국어)",
     "en": "English",
     "ja": "Japanese (日本語)",
@@ -19,26 +27,42 @@ LANG_NAMES = {
 }
 
 
-PROMPT = """You are summarizing a news article for a busy reader.
+PROMPT = """Rewrite this news article as a concise, easy-to-read summary.
 
 ARTICLE TITLE:
 {title}
 
-ARTICLE BODY (may be truncated):
+ARTICLE BODY (may include the publisher's own AI analysis, photo credits,
+section headers, emojis — IGNORE that noise and write your own):
 {body}
 
-Return ONLY a valid JSON object with EXACTLY these three keys, no
-preamble, no markdown fences:
+Rules — apply to every output, identical format every time:
 
-- "tldr": ONE sentence (≤30 words) capturing the absolute core.
-- "key_points": array of 3-5 short bullet strings, each ≤14 words,
-  focusing on facts the reader should walk away knowing.
-- "paragraphs": array of 2-4 short paragraphs, each ≤80 words, that
-  walk the reader through the article's most important content in
-  order. Prefer concrete numbers, names, dates.
+1. Write 3-5 short paragraphs, each 40-90 words.
+2. Paragraph 1: who, what, when, why — the core news.
+3. Paragraphs 2-5: key facts in plain reading order (no bullets).
+4. Plain text ONLY. No emojis. No markdown. No "TL;DR". No section
+   headers like "Background:" or "1. Analysis". No glossaries.
+5. Write in {lang_name}. Keep proper nouns, tickers, and numbers exact.
+6. Strip the publisher's own commentary/AI-analysis if present.
 
-Write EVERYTHING in {lang_name}. Do not translate names or tickers.
+Output ONLY a valid JSON object:
+{{ "paragraphs": ["…", "…", "…"] }}
+
+No preamble, no code fences, no trailing prose. Just the JSON object.
 """
+
+
+# Defense in depth — strip emojis from the model's response too, in case
+# it ignores rule 4.
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "☀-➿"
+    "️"
+    "‍"
+    "]+"
+)
 
 
 def _strip_fences(s: str) -> str:
@@ -51,36 +75,22 @@ def _strip_fences(s: str) -> str:
     return s
 
 
-async def summarize(text: str, title: str, lang: str = "en") -> dict:
-    """Returns {tldr, key_points[], paragraphs[]}."""
-    empty = {"tldr": None, "key_points": [], "paragraphs": []}
-    if not text:
-        return empty
-
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        # Heuristic fallback: split into chunks, keep the first few.
-        paras = [
-            p.strip() for p in text.split("\n")
-            if p.strip() and len(p.strip()) > 40
-        ][:4]
-        return {
-            "tldr": (paras[0][:160] + "…") if paras else None,
-            "key_points": [],
-            "paragraphs": paras,
-        }
-
+async def summarize_paragraphs(text: str, title: str, lang: str = "en") -> list[str] | None:
+    """Returns 3-5 cleaned paragraphs, or None if no LLM available / failed."""
+    if not text or not os.getenv("ANTHROPIC_API_KEY"):
+        return None
     try:
         from anthropic import AsyncAnthropic
     except ImportError:
-        return empty
+        return None
 
     client = AsyncAnthropic()
-    lang_name = LANG_NAMES.get(lang, "English")
+    lang_name = _LANG_NAMES.get(lang, "English")
 
     try:
         resp = await client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1600,
+            max_tokens=1200,
             messages=[{
                 "role": "user",
                 "content": PROMPT.format(
@@ -92,17 +102,16 @@ async def summarize(text: str, title: str, lang: str = "en") -> dict:
         )
         raw = _strip_fences(resp.content[0].text)
         data = json.loads(raw)
-        return {
-            "tldr": data.get("tldr"),
-            "key_points": data.get("key_points") or [],
-            "paragraphs": data.get("paragraphs") or [],
-        }
+        paras = data.get("paragraphs") or []
+        # Belt and suspenders: scrub any stray emojis from Claude's output.
+        cleaned = []
+        for p in paras:
+            if not isinstance(p, str):
+                continue
+            p = _EMOJI_RE.sub("", p).strip()
+            if len(p) >= 30:
+                cleaned.append(p)
+        return cleaned[:5] if cleaned else None
     except Exception as exc:
         print(f"[summarizer] failed: {exc}")
-        # Fall back to heuristic if the LLM blows up
-        paras = [p.strip() for p in text.split("\n") if p.strip() and len(p.strip()) > 40][:4]
-        return {
-            "tldr": (paras[0][:160] + "…") if paras else None,
-            "key_points": [],
-            "paragraphs": paras,
-        }
+        return None

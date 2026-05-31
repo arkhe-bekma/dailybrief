@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import cache, config, mixer, tickers
-from backend.agent import curator, illustrator, reader, summary
+from backend.agent import curator, illustrator, reader, summarizer, summary
 from backend.sources import politicians, prices, rss, whales, youtube
 
 load_dotenv()
@@ -140,17 +140,47 @@ _CREDIT_WORDS_RE = re.compile(
     r"\b(?:getty(?:images)?|reuters/|associated\s+press|ap\s+photo|연합뉴스\s*=|뉴시스\s*=)\b",
     re.IGNORECASE,
 )
+# Numbered/labelled section headers that some Korean outlets paste into
+# the body when they ship their own AI summary (매일경제 etc.).
+_SECTION_HEADER_RE = re.compile(
+    r"^(?:\d+\.\s*)?"
+    r"(?:핵심|심층\s*분석|주요\s*경과|다각도\s*분석|결론|요약|용어\s*해설|"
+    r"Glossary|Timeline|Key\s*points|Background|Conclusion)",
+    re.IGNORECASE,
+)
+_BRACKETED_HEADER_RE = re.compile(r"^\[[^\]]+\]\s*$")
+# Emoji-ish stuff: pictographs, symbols, dingbats, variation selectors.
+# Sweeping range — every modern emoji codepoint falls here.
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"   # supplemental symbols, emoticons, pictographs
+    "☀-➿"             # misc symbols + dingbats
+    "️"                    # variation selector
+    "‍"                    # ZWJ used in emoji sequences
+    "]+"
+)
+# U+FFFD (replacement char) means trafilatura got mojibake. Drop the line.
+_GARBLE_CHAR = "�"
 
 
-def _split_paragraphs(text: str) -> list[str]:
+def _split_paragraphs(text: str, max_paragraphs: int = 5) -> list[str]:
     """Turn trafilatura's body text into reader-friendly paragraphs.
-    Drops image markdown, photo credits, and one-liner chrome."""
+    One consistent rule for every article:
+      - strip emojis
+      - drop section headers ('1. 심층 분석', '[Glossary]', etc.)
+      - drop image markdown + photo credits
+      - drop lines with mojibake (U+FFFD)
+      - drop very short lines
+      - cap at 5 paragraphs total
+    """
     if not text:
         return []
     out: list[str] = []
     for raw in text.split("\n"):
-        p = raw.strip()
-        if len(p) < 20:
+        p = _EMOJI_RE.sub("", raw).strip()
+        if not p or len(p) < 30:
+            continue
+        if _GARBLE_CHAR in p:
             continue
         if _IMG_MD_RE.match(p):
             continue
@@ -158,7 +188,11 @@ def _split_paragraphs(text: str) -> list[str]:
             continue
         if _CREDIT_WORDS_RE.search(p):
             continue
+        if _SECTION_HEADER_RE.match(p) or _BRACKETED_HEADER_RE.match(p):
+            continue
         out.append(p)
+        if len(out) >= max_paragraphs:
+            break
     return out
 
 
@@ -183,15 +217,24 @@ async def article(url: str):
     if not reading:
         return {"error": "could not extract the article body"}
 
+    lang = _detect_lang(reading.title or "")
+    # First try Claude (if ANTHROPIC_API_KEY is set on the server). It
+    # rewrites every article into the same 3-5-paragraph plain-text shape,
+    # so users get a consistent read regardless of how messy the source
+    # page is. Heuristic _split_paragraphs is the dependable fallback.
+    paragraphs = await summarizer.summarize_paragraphs(
+        reading.text, reading.title, lang,
+    ) or _split_paragraphs(reading.text)
+
     result = {
         "url": url,
         "title": reading.title,
         "image": reading.image,
         "byline": reading.byline,
         "excerpt": reading.excerpt,
-        "lang": _detect_lang(reading.title or ""),
+        "lang": lang,
         "word_count": len(reading.text.split()),
-        "paragraphs": _split_paragraphs(reading.text),
+        "paragraphs": paragraphs,
     }
     cache.set(full_key, result, 86400)
     return result
