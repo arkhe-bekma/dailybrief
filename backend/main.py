@@ -131,7 +131,15 @@ def _detect_lang(text: str) -> str:
 # trafilatura sometimes returns when an article opens with a hero photo,
 # and the various photo-credit / byline-on-its-own-line patterns Korean
 # and English outlets use.
-_IMG_MD_RE = re.compile(r"^!\[[^\]]*\]\([^)]+\)\s*$")
+#
+# Image-markdown regex catches:
+#   - standalone lines:      ![alt](url)
+#   - lines with prefix:     blah ![alt](url) blah
+#   - NESTED brackets in alt: ![소니 PS5 로고. [로이터 = 연합뉴스]](url)
+# Inner alt: non-bracket chars OR one level of nested [...]
+_IMG_MD_RE = re.compile(
+    r"!\[(?:[^\]\[]|\[[^\]]*\])*\]\([^)]+\)"
+)
 _CREDIT_PREFIX_RE = re.compile(
     r"^(?:사진|영상|이미지|일러스트|그래픽|자료(?:사진)?|Photo|Image|Credit|©|기자)\b",
     re.IGNORECASE,
@@ -187,12 +195,15 @@ def _split_paragraphs(text: str) -> list[str]:
     out: list[str] = []
     total_chars = 0
     for raw in text.split("\n"):
-        p = _EMOJI_RE.sub("", raw).strip()
+        # Strip embedded image markdown BEFORE the length check, so a
+        # paragraph that's mostly "![alt](url) plus a sentence" gets
+        # rescued (the sentence stays) instead of being dropped because
+        # the markdown puffed it past the threshold.
+        p = _IMG_MD_RE.sub("", raw)
+        p = _EMOJI_RE.sub("", p).strip()
         if not p or len(p) < 30:
             continue
         if _GARBLE_CHAR in p:
-            continue
-        if _IMG_MD_RE.match(p):
             continue
         if _CREDIT_PREFIX_RE.match(p):
             continue

@@ -50,6 +50,14 @@ def _parse_date(entry) -> str:
 
 
 _IMG_TAG_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
+# Bigger pattern that pulls width/height attrs alongside src — used by
+# _find_body_hero_image to pick the largest in-body photo when the og:image
+# turns out to be a generic brand logo.
+_IMG_TAG_RICH_RE = re.compile(
+    r"""<img\b(?P<attrs>[^>]*?)>""", re.IGNORECASE
+)
+_SRC_ATTR_RE = re.compile(r"""(?:src|data-src|data-original)=["']([^"']+)["']""", re.IGNORECASE)
+_WIDTH_ATTR_RE = re.compile(r"""width=["']?(\d+)""", re.IGNORECASE)
 _OG_IMAGE_RE = re.compile(
     r"""<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']""",
     re.IGNORECASE,
@@ -191,6 +199,58 @@ def _is_obviously_dead(url: str) -> bool:
     return any(p in url for p in _DEAD_URL_PATTERNS)
 
 
+# URL fragments / filenames that strongly suggest a generic share image
+# (publisher logo, default fallback, social-card placeholder).
+_LOGO_HINT_PATTERNS = (
+    "logo", "default", "share", "og-image",
+    "og_default", "site-image", "favicon",
+)
+
+
+def _looks_like_logo(image_url: str) -> bool:
+    if not image_url:
+        return False
+    u = image_url.lower()
+    return any(p in u for p in _LOGO_HINT_PATTERNS)
+
+
+def _find_body_hero_image(html: str, base_url: str = "") -> str | None:
+    """Scan the article body for the largest <img> tag we can find — the
+    one most likely to be the hero photo. Used to rescue articles whose
+    og:image is just the publisher's brand share-card."""
+    if not html:
+        return None
+    best_url: str | None = None
+    best_width = 0
+    # Cap how much HTML we scan — body photos almost always appear in the
+    # first ~80KB; anything later is recommendations / footer chrome.
+    for m in _IMG_TAG_RICH_RE.finditer(html[:80_000]):
+        attrs = m.group("attrs")
+        src_m = _SRC_ATTR_RE.search(attrs)
+        if not src_m:
+            continue
+        src = unescape(src_m.group(1)).strip()
+        if not src or src.startswith("data:"):
+            continue
+        if _looks_like_logo(src):
+            continue
+        # Skip very small icons / favicons by URL hint
+        if any(s in src.lower() for s in ("/icon", "spinner", "spacer", "1x1")):
+            continue
+        # Width = best signal we have. Default to a hopeful 600 if not given.
+        w_m = _WIDTH_ATTR_RE.search(attrs)
+        width = int(w_m.group(1)) if w_m else 600
+        # Require at least 300 px wide to count as a story photo.
+        if width < 300:
+            continue
+        if width > best_width:
+            best_width = width
+            best_url = src
+    if best_url and best_url.startswith("//"):
+        best_url = "https:" + best_url
+    return best_url
+
+
 async def _enrich_missing_images(articles: list[Article]) -> None:
     """For articles without an image, scrape og:image from the article page
     in parallel (limited concurrency to be polite)."""
@@ -304,6 +364,37 @@ async def fetch_all() -> list[Article]:
     return articles
 
 
+async def _rescue_logo_images(items: list[dict]) -> int:
+    """For each item whose image is a known/recycled logo, refetch the
+    article page and grab the largest in-body <img> as a replacement.
+    Returns the count of rescues that actually swapped in a new URL."""
+    if not items:
+        return 0
+
+    sem = asyncio.Semaphore(8)
+    rescued = 0
+
+    async with httpx.AsyncClient(headers=_OG_HEADERS, http2=False) as client:
+        async def _one(item: dict) -> bool:
+            nonlocal rescued
+            async with sem:
+                try:
+                    r = await client.get(item["url"], timeout=8.0, follow_redirects=True)
+                    if r.status_code >= 400:
+                        return False
+                    body_img = _find_body_hero_image(r.text, base_url=item["url"])
+                    if body_img and body_img != item.get("image"):
+                        item["image"] = body_img
+                        rescued += 1
+                        return True
+                except Exception:
+                    pass
+                return False
+
+        await asyncio.gather(*[_one(it) for it in items])
+    return rescued
+
+
 async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
     """Probe + filter only the first `top_n` curator-ranked items. Returns
     the survivors as a fresh list (other items can still be paginated to
@@ -351,19 +442,38 @@ async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
             continue
         keep.append(box._src)
 
-    # Stage D: drop recycled outlet logos (same image used by 2+ items
-    # from the same outlet).
+    # Stage D: identify recycled outlet logos (same image used by 2+
+    # items from the same outlet) AND known-logo URL patterns.
     from collections import Counter
     pair_counts = Counter((d.get("outlet"), d.get("image")) for d in keep)
-    before = len(keep)
-    keep = [d for d in keep if pair_counts[(d.get("outlet"), d.get("image"))] == 1]
-    dropped_logo = before - len(keep)
+    needs_rescue: list[dict] = []
+    for d in keep:
+        img = d.get("image", "")
+        if pair_counts[(d.get("outlet"), img)] >= 2 or _looks_like_logo(img):
+            needs_rescue.append(d)
 
-    if dropped_unread or dropped_noimg or dropped_logo:
+    # Stage E: instead of dropping logo-image articles, try to rescue
+    # them by going back into the article page and pulling the biggest
+    # in-body <img>. Anything we can't rescue does get dropped.
+    rescued = await _rescue_logo_images(needs_rescue) if needs_rescue else 0
+    after_rescue: list[dict] = []
+    dropped_logo = 0
+    pair_counts = Counter((d.get("outlet"), d.get("image")) for d in keep)
+    for d in keep:
+        img = d.get("image", "")
+        # If the image is STILL the same recycled logo, drop the article.
+        if (pair_counts[(d.get("outlet"), img)] >= 2 or _looks_like_logo(img)):
+            dropped_logo += 1
+            continue
+        after_rescue.append(d)
+    keep = after_rescue
+
+    if dropped_unread or dropped_noimg or dropped_logo or rescued:
         print(
             f"[rss] enrich_top probed {len(boxes)}: "
-            f"dropped {dropped_unread} unread + {dropped_noimg} no-image "
-            f"+ {dropped_logo} logo → {len(keep)} kept",
+            f"dropped {dropped_unread} unread + {dropped_noimg} no-image, "
+            f"rescued {rescued} logo→hero, dropped {dropped_logo} unrescued → "
+            f"{len(keep)} kept",
             flush=True,
         )
     return keep
