@@ -127,14 +127,48 @@ function _renderStrip(rootId, label, items, makeItem, kind) {
   root.appendChild(track);
 }
 
+// Known centralized exchanges. Movement TO one = sell pressure
+// (the holder is depositing to sell); movement FROM one = buy pressure
+// (the holder is withdrawing to hold long).
+const EXCHANGES = [
+  "binance", "coinbase", "kraken", "bitfinex", "bitstamp",
+  "okx", "bybit", "kucoin", "huobi", "gate.io", "mexc",
+  "upbit", "bithumb",
+];
+function isExchange(label) {
+  if (!label) return false;
+  const l = label.toLowerCase();
+  return EXCHANGES.some((e) => l.includes(e));
+}
+function shortWallet(label) {
+  if (!label) return "—";
+  const l = label.toLowerCase();
+  if (l.includes("unknown wallet") || l.includes("unknown")) return "UNK";
+  if (l.includes("tether treasury")) return "Tether";
+  if (l.includes("treasury")) return "Treasury";
+  // strip trailing " wallet"
+  return label.replace(/\s*wallet\s*$/i, "").trim();
+}
+function whaleDirection(w) {
+  const fromX = isExchange(w.from_label);
+  const toX   = isExchange(w.to_label);
+  if (toX && !fromX) return "SELL";  // deposit → likely sell pressure
+  if (fromX && !toX) return "BUY";   // withdraw → likely buy / accumulation
+  return null;                       // wallet ↔ wallet, or exchange ↔ exchange
+}
+
 function renderWhalesStrip(items) {
-  _renderStrip("strip-whales", "🐋 WHALES", items, (w) => el("span", {}, [
-    el("span", { class: "asset" }, w.asset || ""),
-    el("span", { class: "amt" }, fmtUSD(w.amount_usd || 0)),
-    el("span", { class: "flow" }, w.from_label || ""),
-    el("span", { class: "arrow" }, "→"),
-    el("span", { class: "flow" }, w.to_label || ""),
-  ]), "whale");
+  _renderStrip("strip-whales", "🐋 WHALES", items, (w) => {
+    const dir = whaleDirection(w);
+    return el("span", {}, [
+      el("span", { class: "asset" }, w.asset || ""),
+      dir ? el("span", { class: `action ${dir}` }, dir) : null,
+      el("span", { class: "amt" }, fmtUSD(w.amount_usd || 0)),
+      el("span", { class: "flow" }, shortWallet(w.from_label)),
+      el("span", { class: "arrow" }, "→"),
+      el("span", { class: "flow" }, shortWallet(w.to_label)),
+    ]);
+  }, "whale");
 }
 
 function renderTradesStrip(items) {
