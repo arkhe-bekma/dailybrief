@@ -113,13 +113,12 @@ a { color: inherit; text-decoration: none; }
   text-wrap: balance;
 }
 
-/* ── Masthead — single row, brand left, refresh + date right ──── */
+/* ── Masthead — strict 2-column grid so brand and actions CANNOT stack ── */
 .masthead {
-  display: flex;
-  flex-wrap: nowrap;       /* never stack */
+  display: grid !important;
+  grid-template-columns: 1fr auto;   /* brand fills left, actions stays right */
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  column-gap: 12px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--line);
   background: rgba(5, 6, 10, 0.85);
@@ -129,12 +128,16 @@ a { color: inherit; text-decoration: none; }
   z-index: 30;
 }
 .brand {
+  grid-column: 1;
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;            /* allow logo+name to shrink instead of overflowing */
-  flex: 1 1 auto;
+  min-width: 0;            /* let logo+name shrink instead of overflowing */
   overflow: hidden;
+}
+.actions {
+  grid-column: 2;
+  justify-self: end;       /* hug the right edge */
 }
 .brand .logo {
   color: var(--neon-yellow);
