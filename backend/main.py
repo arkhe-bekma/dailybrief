@@ -20,34 +20,23 @@ load_dotenv()
 app = FastAPI(title="dailybrief")
 
 
-# ── Background agent ─────────────────────────────────────────────────
-# Runs on a 1-hour cycle. Each tick:
-#   1. Clears the source caches so RSS is re-pulled
-#   2. Fetches articles (rss.fetch_all already attaches ai_image URLs
-#      to any article that doesn't have a real photo)
-#   3. Warms the Pollinations CDN for those AI URLs so the browser
-#      hits cached images instead of waiting for generation
-# Real article images are never inspected or modified here.
+# ── Background refresh agent ─────────────────────────────────────────
+# Runs hourly. Each tick clears the feed cache so the next /api/brief
+# hits fresh RSS. We deliberately do NOT pre-probe anything here —
+# probing is now done lazily inside /api/brief on just the top-N items.
 AGENT_INTERVAL_SECONDS = 3600
 
 
-async def _illustrator_agent():
-    await asyncio.sleep(20)  # give the app a moment to start serving
+async def _refresh_agent():
+    await asyncio.sleep(20)  # let the app start serving first
     while True:
         try:
-            cache.clear()
-            articles = await rss.fetch_all()
-            # AI URLs are the ones served by Pollinations.ai
-            ai_urls = [
-                a.image for a in articles
-                if a.image and a.image.startswith("https://image.pollinations.ai/")
-            ]
-            warmed = await illustrator.warm_urls(ai_urls) if ai_urls else 0
-            print(
-                f"[agent] {len(articles)} articles, "
-                f"{len(ai_urls)} AI images, warmed {warmed}",
-                flush=True,
-            )
+            # Drop the feed-level cache. Per-URL probe caches stay
+            # (24h success, 1h fail) so we don't re-fetch known-good URLs.
+            for k in list(cache._store.keys()):
+                if k.startswith("rss:") or k.startswith("article_reader:"):
+                    cache._store.pop(k, None)
+            print(f"[agent] refresh cycle: cleared feed cache", flush=True)
         except Exception as exc:
             print(f"[agent] tick failed: {exc}", flush=True)
         await asyncio.sleep(AGENT_INTERVAL_SECONDS)
@@ -55,7 +44,7 @@ async def _illustrator_agent():
 
 @app.on_event("startup")
 async def _start_agent():
-    asyncio.create_task(_illustrator_agent())
+    asyncio.create_task(_refresh_agent())
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -71,7 +60,13 @@ async def brief():
         prices.fetch_tape(),
     )
 
-    top = await curator.rank(articles, top_k=config.TOP_K)
+    # Over-fetch so we still hit TOP_K visible items after enrich_top
+    # throws out paywalls / logos.
+    raw_top = await curator.rank(articles, top_k=int(config.TOP_K * 1.7))
+    # Probe + filter only this ranked head — way cheaper than touching
+    # every RSS candidate.
+    top = await rss.enrich_top(raw_top, top_n=int(config.TOP_K * 1.5))
+    top = top[: config.TOP_K]
     await tickers.enrich_with_sparks(top)
 
     by_outlet: dict[str, list[dict]] = {}

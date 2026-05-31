@@ -272,6 +272,11 @@ async def _fetch_one(client: httpx.AsyncClient, outlet: dict) -> list[Article]:
 
 
 async def fetch_all() -> list[Article]:
+    """Fast pass — RSS only. No HTTP probes, no body parsing. The expensive
+    og:image scrape + trafilatura readability check is deferred to
+    enrich_top() and runs only on the visible top-N items per refresh.
+    On a 512MB Lightsail box, probing every one of 340 candidates was
+    eating ~3 minutes of CPU per refresh. Probing 60 takes ~5 seconds."""
     cached = cache.get("rss:all")
     if cached is not None:
         return cached
@@ -291,45 +296,74 @@ async def fetch_all() -> list[Article]:
             seen.add(a.url)
             articles.append(a)
 
-    # Stage 2a: hard-drop obvious dead URLs (Google News interstitials etc.).
+    # Cheap pattern-only filter: obvious dead URLs (Google News
+    # interstitials etc.). No HTTP.
     articles = [a for a in articles if not _is_obviously_dead(a.url)]
-
-    # Stage 2b: for articles whose feed didn't include an image, hit the
-    # article page and pull og:image. Records `reader_ok:{url}` along the
-    # way based on whether trafilatura can pull a real body.
-    await _enrich_missing_images(articles)
-
-    # Stage 2c: probe articles that already had an RSS image — we still
-    # need to know if their page is readable. Cached per URL so only new
-    # articles trigger HTTP on subsequent refreshes.
-    await _probe_readability(articles)
-
-    # Stage 3: drop articles whose page failed the trafilatura probe
-    # (paywalls, JS-only pages, interstitials, dead links).
-    before = len(articles)
-    articles = [a for a in articles if _is_readable(a.url)]
-    if (n := before - len(articles)):
-        print(f"[rss] dropped {n} articles that failed extraction", flush=True)
-
-    # Stage 4: drop articles without a real photo. The user explicitly
-    # doesn't want feed tiles backed by AI-generated placeholders or
-    # publisher-brand site logos — only articles with a genuine hero
-    # image stay in the feed.
-    before = len(articles)
-    articles = [a for a in articles if a.image]
-    if (n := before - len(articles)):
-        print(f"[rss] dropped {n} articles with no image", flush=True)
-
-    # Stage 5: drop articles whose "image" is actually the publisher's
-    # generic share image. Heuristic: same (outlet, image_url) used by
-    # 2+ articles is almost certainly a logo / default OG image — real
-    # article photos are unique per story.
-    from collections import Counter
-    pair_counts = Counter((a.outlet, a.image) for a in articles)
-    before = len(articles)
-    articles = [a for a in articles if pair_counts[(a.outlet, a.image)] == 1]
-    if (n := before - len(articles)):
-        print(f"[rss] dropped {n} articles using a recycled outlet logo", flush=True)
 
     cache.set("rss:all", articles, config.FEED_CACHE_TTL)
     return articles
+
+
+async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
+    """Probe + filter only the first `top_n` curator-ranked items. Returns
+    the survivors as a fresh list (other items can still be paginated to
+    but won't have been quality-checked).
+
+    Operates on the dict shape that curator.rank returns, not on Article
+    dataclasses, because by the time we get here the curator has already
+    converted them.
+    """
+    head = list(articles[:top_n])
+    if not head:
+        return head
+
+    # Wrap dicts in lightweight objects so the existing probe helpers
+    # (which read .url and .image) just work.
+    class _Box:
+        __slots__ = ("url", "image", "outlet", "_src")
+        def __init__(self, d):
+            self.url = d.get("url", "")
+            self.image = d.get("image")
+            self.outlet = d.get("outlet", "")
+            self._src = d
+
+    boxes = [_Box(d) for d in head]
+
+    # Stage A: pull og:image for the ones missing a feed image. Also
+    # records reader_ok:{url} as a side effect.
+    await _enrich_missing_images(boxes)
+
+    # Stage B: probe readability of the ones that already had an image.
+    # (Cached per URL → only fresh URLs touch the network.)
+    await _probe_readability(boxes)
+
+    # Stage C: drop unreachable / paywalled / image-less items.
+    keep: list[dict] = []
+    dropped_unread = dropped_noimg = 0
+    for box in boxes:
+        if not _is_readable(box.url):
+            dropped_unread += 1
+            continue
+        if box.image:
+            box._src["image"] = box.image  # propagate any newly-scraped image
+        if not box._src.get("image"):
+            dropped_noimg += 1
+            continue
+        keep.append(box._src)
+
+    # Stage D: drop recycled outlet logos (same image used by 2+ items
+    # from the same outlet).
+    from collections import Counter
+    pair_counts = Counter((d.get("outlet"), d.get("image")) for d in keep)
+    before = len(keep)
+    keep = [d for d in keep if pair_counts[(d.get("outlet"), d.get("image"))] == 1]
+    dropped_logo = before - len(keep)
+
+    if dropped_unread or dropped_noimg or dropped_logo:
+        print(
+            f"[rss] enrich_top probed {len(boxes)}: "
+            f"dropped {dropped_unread} unread + {dropped_noimg} no-image "
+            f"+ {dropped_logo} logo → {len(keep)} kept",
+            flush=True,
+        )
+    return keep

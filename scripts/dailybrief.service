@@ -11,8 +11,11 @@ EnvironmentFile=/home/ubuntu/dailybrief/.env
 ExecStart=/home/ubuntu/dailybrief/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
-# Cap memory so a runaway scrape doesn't take down the Lightsail box.
-MemoryMax=800M
+# No MemoryMax — on a 1GB Lightsail box the 200-article og:image +
+# trafilatura pass briefly spikes over 800MB and would get OOM-killed.
+# Pair this with a 2GB swap file (see DEPLOY.md) so the box can absorb
+# the spike via swap instead of crashing.
+MemoryMax=infinity
 # Pull stdout/stderr into the journal so `journalctl -u dailybrief -f` works.
 StandardOutput=journal
 StandardError=journal
