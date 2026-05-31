@@ -113,21 +113,29 @@ a { color: inherit; text-decoration: none; }
   text-wrap: balance;
 }
 
-/* ── Masthead ─────────────────────────────────────────────── */
+/* ── Masthead — single row, brand left, refresh + date right ──── */
 .masthead {
   display: flex;
-  align-items: baseline;
+  flex-wrap: nowrap;       /* never stack */
+  align-items: center;
   justify-content: space-between;
-  padding: 14px 24px 12px;
+  gap: 12px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--line);
   background: rgba(5, 6, 10, 0.85);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
   z-index: 30;
-  /* So .brand .date can absolute-position itself top-right of the bar */
 }
-.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;            /* allow logo+name to shrink instead of overflowing */
+  flex: 1 1 auto;
+  overflow: hidden;
+}
 .brand .logo {
   color: var(--neon-yellow);
   font-size: 24px;
@@ -185,39 +193,21 @@ a { color: inherit; text-decoration: none; }
 }
 .actions button:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); box-shadow: var(--glow-cyan); }
 
-/* ── Phone + small tablet (≤ 1024px) ─────────────────────────
-   Stack the masthead so the search bar can fill the full width and
-   the refresh/density buttons sit flush at the right edge. Date
-   drops onto its own line under the brand name so the inline wrap
-   doesn't push everything left. EVERY sticky/horizontal container
-   gets the same 12px side padding so they line up edge-to-edge.
-   `!important` on the structural overrides so any later cascade or
-   stale browser-cached desktop rule can't accidentally win. */
-@media (max-width: 1024px) {
-  .masthead {
-    /* Now everything fits in one row, even on a phone — brand on left,
-       refresh + date pill on right. No need to stack anymore. */
-    flex-direction: row !important;
-    align-items: center !important;
-    gap: 8px;
-    padding: 10px 12px !important;
+/* ── Mobile (≤ 768px) — just tighten the spacing, layout stays row ── */
+@media (max-width: 768px) {
+  .masthead { padding: 10px 12px; gap: 8px; }
+  .brand .logo { font-size: 20px; }
+  .brand .name {
+    font-size: 20px;
+    /* Truncate cleanly if room runs out instead of pushing actions off */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    flex: 1;       /* take leftover width so refresh/date stay flush right */
-  }
-  .brand .logo { font-size: 22px; }
-  .brand .name { font-size: 22px; }
-  .actions { gap: 6px; flex-shrink: 0; }
-  .actions button { padding: 5px 9px; font-size: 13px; min-width: 28px; }
-  .date {
-    padding: 4px 9px;
-    font-size: 9.5px;
-    letter-spacing: 1px;
-  }
+  .actions { gap: 6px; }
+  .actions .date { margin-left: 8px; }
+  .actions button { padding: 5px 9px; min-width: 28px; font-size: 13px; }
+  .date { padding: 3px 8px; font-size: 9.5px; letter-spacing: 0.8px; }
   .actions {
     display: flex !important;
     width: 100% !important;
