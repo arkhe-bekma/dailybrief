@@ -595,11 +595,6 @@ document.addEventListener("DOMContentLoaded", () => {
     chip.classList.add("active");
     paint();
   });
-  $("#refresh").addEventListener("click", async () => {
-    await fetch("/api/refresh", { method: "POST" });
-    await load();
-  });
-
   // Intercept article-card clicks → open the reader modal.
   // ⌘/Ctrl/Shift/middle-click keeps the default behaviour (new tab).
   document.addEventListener("click", (e) => {
