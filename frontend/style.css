@@ -78,6 +78,11 @@ html, body {
     linear-gradient(180deg, var(--bg-0), var(--bg-1));
   background-attachment: fixed;
   min-height: 100vh;
+  /* Kill horizontal scroll caused by overflowing marquee strips or
+     fixed-width children — on mobile, this was making the page look
+     like a chunk of content was missing on one edge. */
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -162,20 +167,19 @@ a { color: inherit; text-decoration: none; }
 .actions input:focus { outline: none; border-color: var(--neon-cyan); box-shadow: 0 0 0 3px rgba(0,225,255,0.15); }
 .actions button:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); box-shadow: var(--glow-cyan); }
 
-/* ── Phone portrait mode (≤ 640px) ──────────────────────────
-   The desktop layout puts logo/name/date in one row and the search
-   + refresh + density buttons in another row to the right. On a
-   narrow portrait screen that pushes everything left and leaves the
-   right half visually empty. So: stack the brand row, drop the date
-   onto its own line under the logo, and let the actions row span
-   full width with a flexible search input so the buttons sit flush
-   to the right edge. */
-@media (max-width: 640px) {
+/* ── Phone portrait + small tablet (≤ 768px) ─────────────────
+   Stack the masthead so the search bar can fill the full width and
+   the refresh/density buttons sit flush at the right edge. Date
+   drops onto its own line under the brand name so the inline wrap
+   doesn't push everything left. EVERY sticky/horizontal container
+   gets the same 12px side padding so they line up edge-to-edge —
+   no more visually-empty strip on either side. */
+@media (max-width: 768px) {
   .masthead {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
-    padding: 10px 16px 10px;
+    padding: 10px 12px;
   }
   .brand {
     display: grid;
@@ -193,6 +197,9 @@ a { color: inherit; text-decoration: none; }
     grid-area: date;
     margin-left: 0;
     font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .actions {
     display: flex;
@@ -201,10 +208,45 @@ a { color: inherit; text-decoration: none; }
   }
   .actions input {
     flex: 1 1 auto;
-    width: auto;        /* let it fill instead of the fixed 220px */
+    width: auto;
     min-width: 0;
   }
   .actions button { flex: 0 0 auto; }
+
+  /* Match the side padding on every other top-level horizontal band
+     so left and right edges of all the bars line up exactly. */
+  .tape-track,
+  .strip-track,
+  .headline,
+  .chips,
+  .main-col {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  /* Chip nav: smaller, allow wrap, no horizontal scroll */
+  .chips { gap: 5px; }
+  .chip { padding: 4px 9px; font-size: 11px; }
+
+  /* The headline (top-of-day brief) was 17px italic — too big on a
+     phone. Shrink so it doesn't wrap into 4 lines. */
+  .headline { font-size: 14px; padding-top: 12px; padding-bottom: 12px; }
+
+  /* The price tape and the three flow strips were inheriting desktop
+     padding (24px) but now share the same 12px. Same with the chip
+     scroll gutter. */
+  .tape { font-size: 11px; }
+
+  /* Main column padding too — same edge alignment as everything above */
+  .main-col {
+    padding-top: 12px;
+    padding-bottom: 30px;
+  }
+  /* In #paper grid, force single-column at this size so cards stretch
+     edge-to-edge instead of squishing in a 12-col template. */
+  #paper {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 /* ── Tape ─────────────────────────────────────────────────── */
