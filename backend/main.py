@@ -52,6 +52,12 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 @app.get("/api/brief")
 async def brief():
     """The main payload: ticker tape + mixed feed + sidebars + summary."""
+    # Full-response cache — saves the user 5-15 s of curator + sparkline
+    # work on every load. Short TTL so freshness is preserved.
+    cached = cache.get("brief:response")
+    if cached is not None:
+        return cached
+
     articles, whale_moves_raw, insider_trades_raw, yt_raw, tape = await asyncio.gather(
         rss.fetch_all(),
         whales.fetch(),
@@ -86,7 +92,7 @@ async def brief():
 
     headline = await summary.generate(mixed)
 
-    return {
+    payload = {
         "profile": {
             "bio": config.PROFILE.bio,
             "keywords": config.PROFILE.keywords,
@@ -101,6 +107,8 @@ async def brief():
         "trades": insider_trades,
         "youtube": yt,
     }
+    cache.set("brief:response", payload, 30)
+    return payload
 
 
 @app.post("/api/refresh")
