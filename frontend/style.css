@@ -656,8 +656,9 @@ a { color: inherit; text-decoration: none; }
   border-radius: 8px;
   overflow: hidden;
   position: relative;
-  transition: transform 0.5s ease-out, filter 0.5s ease-out;
-  filter: saturate(1.08) contrast(1.06);
+  transition: transform 0.5s ease-out;
+  /* No saturate/contrast filter — show the publisher's photo at its
+     real colors. The user explicitly preferred unmodified images. */
 }
 /* Per-category neon backdrop that peeks through when the photo fails
    to load. Lives behind .img via ::before so the inline image URL on
@@ -683,7 +684,6 @@ a { color: inherit; text-decoration: none; }
 }
 .art:hover .img {
   transform: scale(1.04);
-  filter: saturate(1.28) contrast(1.12) brightness(1.04);
 }
 
 /* ── Headline typography ──────────────────────────────────── */
@@ -766,7 +766,6 @@ a { color: inherit; text-decoration: none; }
   aspect-ratio: 21/9;          /* cinematic, ~50% of the card */
   min-height: 420px;
   border-radius: 0;            /* image fills to the card edge */
-  filter: saturate(1.15) contrast(1.08);
 }
 .tier-hero .body {
   display: flex;
@@ -819,7 +818,6 @@ a { color: inherit; text-decoration: none; }
   aspect-ratio: 16/10;
   min-height: 280px;
   border-radius: 11px;
-  filter: saturate(1.12) contrast(1.07);
 }
 .tier-feature .h {
   font-size: clamp(22px, 1.9vw, 28px);
@@ -848,7 +846,6 @@ a { color: inherit; text-decoration: none; }
   aspect-ratio: 16/10;
   min-height: 220px;
   border-radius: 10px;
-  filter: saturate(1.1) contrast(1.06);
 }
 .tier-large .h {
   font-size: clamp(20px, 1.7vw, 24px);
