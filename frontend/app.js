@@ -580,11 +580,63 @@ function closeFlow() {
   document.body.style.overflow = "";
 }
 
+// ── Settings popover ───────────────────────────────────────────
+// Tiny menu hung off the ⚙ gear next to the date. Two practical
+// knobs only: text-size (S/M/L/XL) and a manual refresh trigger.
+function applyTextScale(scale) {
+  document.documentElement.style.setProperty("--text-scale", String(scale));
+  try { localStorage.setItem("dailybrief.textScale", String(scale)); } catch {}
+  document.querySelectorAll("#text-scale-segs .seg").forEach((b) => {
+    b.classList.toggle("active", parseFloat(b.dataset.scale) === scale);
+  });
+}
+function toggleSettings(force) {
+  const pop = document.getElementById("settings-pop");
+  if (!pop) return;
+  const show = typeof force === "boolean" ? force : pop.classList.contains("hidden");
+  pop.classList.toggle("hidden", !show);
+  pop.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
 // ── Wire up ────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   $("#today").textContent = new Date().toLocaleDateString(undefined, {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
   }).toUpperCase();
+
+  // Restore saved text scale
+  let savedScale = 1;
+  try {
+    const s = parseFloat(localStorage.getItem("dailybrief.textScale") || "1");
+    if (s >= 0.7 && s <= 2) savedScale = s;
+  } catch {}
+  applyTextScale(savedScale);
+
+  // Settings ⚙
+  $("#settings-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSettings();
+  });
+  $("#text-scale-segs")?.addEventListener("click", (e) => {
+    const seg = e.target.closest(".seg");
+    if (!seg) return;
+    applyTextScale(parseFloat(seg.dataset.scale));
+  });
+  $("#settings-refresh")?.addEventListener("click", async () => {
+    toggleSettings(false);
+    await fetch("/api/refresh", { method: "POST" });
+    await load();
+  });
+  // Click outside / Escape closes the popover
+  document.addEventListener("click", (e) => {
+    const pop = document.getElementById("settings-pop");
+    if (!pop || pop.classList.contains("hidden")) return;
+    if (e.target.closest("#settings-pop") || e.target.closest("#settings-btn")) return;
+    toggleSettings(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") toggleSettings(false);
+  });
 
   $("#chips").addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
