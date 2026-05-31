@@ -87,6 +87,28 @@ nano ~/dailybrief/.env
 sudo systemctl restart dailybrief
 ```
 
+## Auto-deploy (optional, recommended)
+
+To have the Lightsail box pull every new commit on `main` automatically:
+
+```bash
+# On the Lightsail box, once:
+chmod +x ~/dailybrief/scripts/auto-update.sh
+( sudo crontab -l 2>/dev/null | grep -v dailybrief; \
+  echo "* * * * * /home/ubuntu/dailybrief/scripts/auto-update.sh \
+>> /var/log/dailybrief-deploy.log 2>&1" ) | sudo crontab -
+```
+
+Every minute, root checks `origin/main` for a new SHA. If there's one,
+it pulls + restarts the service. No restart unless the SHA actually
+changed, so there's no needless downtime.
+
+Watch deploys land:
+
+```bash
+sudo tail -f /var/log/dailybrief-deploy.log
+```
+
 ## Day-2 ops
 
 | Need | Command |

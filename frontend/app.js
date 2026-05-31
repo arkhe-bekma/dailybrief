@@ -244,8 +244,10 @@ let STATE = { mixed: [], tape: [], whales: [], trades: [], youtube: [] };
 let CAT = "all";
 let PAGE = 1;
 let LAST_LOAD = null;
-const PAGE_SIZE = 30;
-const AUTO_REFRESH_MS = 5 * 60 * 1000;  // 5 minutes
+// Odd page size so HERO (always 1) + the rest is even, which packs
+// cleanly into the 2-per-row tiers below the hero.
+const PAGE_SIZE = 31;
+const AUTO_REFRESH_MS = 2 * 60 * 1000;  // 2 minutes — near-real-time
 
 function filteredNews() {
   const q = $("#filter").value.trim().toLowerCase();

@@ -93,9 +93,11 @@ OUTLETS: list[dict] = [
 # Per-outlet limit before curating. ~15 per outlet × 34 outlets ≈ 510 candidates.
 PER_OUTLET_LIMIT = 15
 
-# Cache TTL for fetched feeds (seconds). 5 min so refreshes pick up new stories
-# without hammering source feeds.
-FEED_CACHE_TTL = 300
+# Cache TTL for fetched feeds (seconds). 1 min — most RSS sources only
+# update every couple of minutes anyway, so this is the tightest useful
+# value. Per-URL og:image / reader_ok caches still live 24 h, so RSS
+# refreshes do NOT trigger fresh probes.
+FEED_CACHE_TTL = 60
 
 # How many items the curator returns. Pagination on the client splits these
 # into pages — 200 / 30 ≈ 7 pages of content.
