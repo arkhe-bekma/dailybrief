@@ -581,30 +581,48 @@ function closeFlow() {
 }
 
 // ── Swipe-to-close (iOS-style sheet) ──────────────────────────
-// The gesture only ARMS once the user reaches the natural edge of
-// the article body:
-//   • scrolled to TOP    → an additional pull-DOWN closes
-//   • scrolled to BOTTOM → an additional pull-UP   closes
-// Mid-article touches just scroll like usual.
+// Arms only at scroll edges (top → pull-down closes, bottom →
+// pull-up closes); mid-article touches scroll normally. Smooth
+// quart-out fly-off on commit, spring back on cancel.
 function attachSwipeToClose(modalSelector, closeFn) {
   const modal = document.querySelector(modalSelector);
   if (!modal) return;
   const card = modal.querySelector(".reader-card");
   if (!card) return;
 
+  // Easing curves
+  const EASE_FLY  = "cubic-bezier(0.22, 1, 0.36, 1)";   // ease-out-quart
+  const EASE_SNAP = "cubic-bezier(0.34, 1.56, 0.64, 1)"; // spring-back overshoot
+  const FLY_MS    = 380;
+  const SNAP_MS   = 320;
+
+  // Rubber-band damping — drag past the threshold and resistance grows.
+  function damp(delta) {
+    const t = Math.min(1, Math.abs(delta) / 400);
+    const k = 1 - (1 - t) * (1 - t);   // ease-out-quad
+    const factor = 1 - k * 0.35;       // shrink the trailing portion
+    return delta * factor;
+  }
+
   let startY = null;
   let lastY = null;
   let atTop = false;
   let atBottom = false;
-  let armed = false;        // true once we decide this is a dismiss gesture
-  const ARM_PX = 6;          // travel before we commit to dismiss intent
-  const DISMISS_DELTA = 110; // travel to actually close
+  let armed = false;
+  const ARM_PX = 6;
+  const DISMISS_DELTA = 110;
+
+  function clearTransitions() {
+    card.style.transition = "";
+    card.style.willChange = "";
+    const bd = modal.querySelector(".reader-backdrop");
+    if (bd) bd.style.transition = "";
+  }
 
   card.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) return;
     startY = e.touches[0].clientY;
     lastY = startY;
-    // Snapshot scroll position at gesture start — only edges arm.
     atTop = card.scrollTop <= 0;
     atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - 1;
     armed = false;
@@ -613,47 +631,58 @@ function attachSwipeToClose(modalSelector, closeFn) {
   card.addEventListener("touchmove", (e) => {
     if (startY === null) return;
     lastY = e.touches[0].clientY;
-    const delta = lastY - startY;
+    const rawDelta = lastY - startY;
 
     if (!armed) {
-      // Only arm if user is at an edge AND pulling further past it.
-      if (delta > ARM_PX && atTop) armed = true;
-      else if (delta < -ARM_PX && atBottom) armed = true;
-      else return;   // let the card scroll normally
+      if (rawDelta > ARM_PX && atTop) armed = true;
+      else if (rawDelta < -ARM_PX && atBottom) armed = true;
+      else return;
     }
 
+    const d = damp(rawDelta);
     card.style.transition = "none";
-    card.style.transform = `translateY(${delta}px)`;
+    card.style.willChange = "transform, opacity";
+    // Subtle scale + fade as the user drags further — gives "weight"
+    const progress = Math.min(1, Math.abs(rawDelta) / 320);
+    const scale = 1 - progress * 0.05;          // shrinks toward 0.95
+    const opacity = 1 - progress * 0.25;        // fades toward 0.75
+    card.style.transform = `translateY(${d}px) scale(${scale})`;
+    card.style.opacity = String(opacity);
     const backdrop = modal.querySelector(".reader-backdrop");
-    if (backdrop) backdrop.style.opacity = String(Math.max(0.2, 1 - Math.abs(delta) / 400));
+    if (backdrop) backdrop.style.opacity = String(Math.max(0.1, 1 - progress * 0.85));
   }, { passive: true });
 
   card.addEventListener("touchend", () => {
     if (startY === null) return;
     if (!armed) { startY = null; lastY = null; return; }
 
-    const delta = (lastY ?? startY) - startY;
-    card.style.transition = "transform 0.24s ease-out";
+    const rawDelta = (lastY ?? startY) - startY;
     const backdrop = modal.querySelector(".reader-backdrop");
-    if (backdrop) backdrop.style.transition = "opacity 0.24s";
 
-    if (Math.abs(delta) > DISMISS_DELTA) {
-      card.style.transform = `translateY(${delta > 0 ? "120vh" : "-120vh"})`;
+    if (Math.abs(rawDelta) > DISMISS_DELTA) {
+      // Commit close: smooth fly-off, fade, scale-down, then closeFn.
+      card.style.transition = `transform ${FLY_MS}ms ${EASE_FLY}, opacity ${FLY_MS}ms ${EASE_FLY}`;
+      if (backdrop) backdrop.style.transition = `opacity ${FLY_MS}ms ${EASE_FLY}`;
+      card.style.transform = `translateY(${rawDelta > 0 ? "100vh" : "-100vh"}) scale(0.92)`;
+      card.style.opacity = "0";
       if (backdrop) backdrop.style.opacity = "0";
       setTimeout(() => {
         closeFn();
         card.style.transform = "";
-        card.style.transition = "";
-        if (backdrop) { backdrop.style.opacity = ""; backdrop.style.transition = ""; }
-      }, 240);
+        card.style.opacity = "";
+        if (backdrop) backdrop.style.opacity = "";
+        clearTransitions();
+      }, FLY_MS);
     } else {
+      // Snap back with a soft spring.
+      card.style.transition = `transform ${SNAP_MS}ms ${EASE_SNAP}, opacity ${SNAP_MS}ms ${EASE_SNAP}`;
+      if (backdrop) backdrop.style.transition = `opacity ${SNAP_MS}ms ${EASE_SNAP}`;
       card.style.transform = "";
+      card.style.opacity = "";
       if (backdrop) backdrop.style.opacity = "";
-      setTimeout(() => {
-        card.style.transition = "";
-        if (backdrop) backdrop.style.transition = "";
-      }, 250);
+      setTimeout(clearTransitions, SNAP_MS + 20);
     }
+
     startY = null;
     lastY = null;
     armed = false;

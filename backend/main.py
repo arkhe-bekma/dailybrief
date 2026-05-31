@@ -157,6 +157,12 @@ _SECTION_HEADER_RE = re.compile(
     re.IGNORECASE,
 )
 _BRACKETED_HEADER_RE = re.compile(r"^\[[^\]]+\]\s*$")
+# Decorative dividers: long runs of box-drawing or separator chars.
+# Catches lines like
+#   ─────── ⊹ ࣪ ˖ ૮( ˶ᵔ ᵕ ᵔ˶ )っ Odysseus vers. 1.0 ───────
+# Three or more box-drawing chars (U+2500-257F) anywhere in the line
+# is a strong signal it's an ASCII-art header, not article body.
+_DECORATIVE_DIVIDER_RE = re.compile(r"[─-╿]{3,}|[━═─–—]{4,}")
 # Emoji-ish stuff: pictographs, symbols, dingbats, variation selectors.
 # Sweeping range — every modern emoji codepoint falls here.
 _EMOJI_RE = re.compile(
@@ -210,6 +216,8 @@ def _split_paragraphs(text: str) -> list[str]:
         if _CREDIT_WORDS_RE.search(p):
             continue
         if _SECTION_HEADER_RE.match(p) or _BRACKETED_HEADER_RE.match(p):
+            continue
+        if _DECORATIVE_DIVIDER_RE.search(p):
             continue
         out.append(p)
         total_chars += len(p)
