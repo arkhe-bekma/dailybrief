@@ -538,12 +538,34 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Image (responsive, with bottom gradient + category badge) ── */
 .art .img {
-  background: var(--bg-2) center/cover no-repeat;
+  /* Layered background:
+     1. inline `background-image: url('…')` set by JS (top, covers when loaded)
+     2. category-color gradient fallback below — if the publisher's CDN
+        404s or stalls, this is what the user sees instead of an empty box. */
+  background-color: var(--bg-2);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   border-radius: 8px;
   overflow: hidden;
   position: relative;
   transition: transform 0.5s ease-out, filter 0.5s ease-out;
   filter: saturate(1.08) contrast(1.06);
+}
+/* Per-category neon backdrop that peeks through when the photo fails
+   to load. Lives behind .img via ::before so the inline image URL on
+   .img keeps its precedence when the photo IS available. */
+.art .img::before {
+  content: "";
+  position: absolute; inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(120% 80% at 30% 20%,
+      color-mix(in srgb, var(--c, var(--neon-cyan)) 35%, transparent),
+      transparent 70%),
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--c, var(--neon-mag)) 22%, transparent),
+      color-mix(in srgb, var(--c, var(--neon-cyan)) 14%, transparent));
 }
 .art .img::after {
   /* subtle vignette so the image edge melts into the dark card */
