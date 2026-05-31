@@ -535,27 +535,35 @@ a { color: inherit; text-decoration: none; }
    Every tier shows the body snippet (dek) where there's room.
    ════════════════════════════════════════════════════════════ */
 
-/* ── HERO — image ON TOP, cinematic, dominates card height ── */
+/* ── HERO — image covers the TOP HALF (full width), text below ── */
 .tier-hero {
-  padding: 22px 24px;
+  padding: 0;                  /* image flush with card edges */
   border-radius: 18px;
+  overflow: hidden;
   background:
     linear-gradient(135deg, rgba(0,225,255,0.07), rgba(255,43,214,0.07)),
     rgba(11,13,24,0.85);
   box-shadow: 0 10px 50px rgba(0,0,0,0.35);
-  gap: 16px;
-  /* default flex-column from .art — image goes on top */
+  gap: 0;
+  /* default flex-column from .art → image on top */
 }
 .tier-hero::before { display: none; }
 .tier-hero .img {
   width: 100%;
-  aspect-ratio: 21/9;
-  max-height: 620px;
-  min-height: 380px;
-  border-radius: 14px;
+  aspect-ratio: 21/9;          /* cinematic, ~50% of the card */
+  min-height: 420px;
+  border-radius: 0;            /* image fills to the card edge */
   filter: saturate(1.15) contrast(1.08);
 }
-.tier-hero .body { display: flex; flex-direction: column; gap: 12px; }
+.tier-hero .body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 28px 26px;
+}
+@media (max-width: 900px) {
+  .tier-hero .img { min-height: 240px; aspect-ratio: 16/9; }
+}
 .tier-hero .body { display: flex; flex-direction: column; gap: 14px; justify-content: center; }
 .tier-hero .h {
   font-size: clamp(36px, 4vw, 54px);
@@ -1001,3 +1009,215 @@ footer {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Reader modal ─────────────────────────────────────────── */
+.reader.hidden { display: none; }
+.reader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  animation: fadein 0.18s ease-out;
+}
+.reader-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 4, 8, 0.72);
+  backdrop-filter: blur(10px);
+}
+.reader-card {
+  position: relative;
+  width: min(820px, calc(100vw - 32px));
+  max-height: 92vh;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent),
+    var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: auto;
+  padding: 30px 36px 36px;
+  box-shadow: 0 30px 100px rgba(0,0,0,0.5),
+              0 0 60px rgba(0,225,255,0.08);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.reader-card::-webkit-scrollbar { width: 6px; }
+.reader-card::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+.reader-close {
+  position: sticky;
+  float: right;
+  top: 0;
+  margin-top: -8px;
+  margin-right: -16px;
+  background: rgba(11,13,24,0.85);
+  color: var(--text);
+  border: 1px solid var(--line);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  font-family: var(--sans);
+  z-index: 5;
+}
+.reader-close:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); }
+
+.reader-loading {
+  font-family: var(--mono);
+  color: var(--muted);
+  text-align: center;
+  padding: 100px 0;
+  font-size: 13px;
+  letter-spacing: 1.5px;
+}
+
+.reader-img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--bg-2);
+  border-radius: 12px;
+  margin-bottom: 22px;
+  filter: saturate(1.1);
+}
+
+.reader-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 14px;
+}
+.reader-meta .src { color: var(--text-2); font-weight: 700; }
+.reader-meta .tag {
+  background: rgba(0,225,255,0.14);
+  color: var(--neon-cyan);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 800;
+}
+
+.reader-title {
+  font-family: var(--display);
+  font-weight: 800;
+  font-variation-settings: "opsz" 88, "wdth" 92;
+  font-size: clamp(26px, 3vw, 40px);
+  line-height: 1.05;
+  letter-spacing: -1.2px;
+  margin: 0 0 22px;
+  color: var(--text);
+}
+.reader-title[lang="ko"] {
+  font-family: var(--kr);
+  font-variation-settings: normal;
+  letter-spacing: -1.2px;
+  line-height: 1.18;
+}
+
+.reader-tldr {
+  background:
+    linear-gradient(90deg, rgba(255,230,0,0.08), transparent 80%),
+    rgba(255,255,255,0.02);
+  border-left: 3px solid var(--neon-yellow);
+  padding: 16px 20px;
+  border-radius: 10px;
+  margin: 0 0 22px;
+}
+.reader-tldr .tldr-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--neon-yellow);
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+  font-weight: 700;
+  text-shadow: var(--glow-yellow);
+}
+.reader-tldr p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--text);
+  font-family: var(--display);
+  font-variation-settings: "opsz" 30, "wdth" 96;
+}
+.reader-tldr p[lang="ko"] { font-family: var(--kr); font-variation-settings: normal; }
+
+.reader-section-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--neon-cyan);
+  letter-spacing: 2px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  text-shadow: var(--glow-cyan);
+}
+
+.reader-points {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reader-points li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.reader-points li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--neon-cyan);
+  font-weight: 800;
+  font-family: var(--mono);
+}
+
+.reader-body p {
+  font-size: 14.5px;
+  line-height: 1.7;
+  margin: 0 0 14px;
+  color: var(--text-2);
+}
+.reader-body p[lang="ko"] { font-family: var(--kr); line-height: 1.65; }
+
+.reader-footer {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.reader-footer .badge {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.reader-original {
+  color: var(--neon-cyan);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.6px;
+  font-weight: 700;
+}
+.reader-original:hover { text-shadow: var(--glow-cyan); }

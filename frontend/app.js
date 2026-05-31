@@ -26,6 +26,9 @@ const fmtPrice = (p) => {
 const fmtPct = (p) => `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 const stripHtml = (s) => (s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
+// Backend already merges real + AI URLs into item.image.
+const pickImage = (item) => item.image || null;
+
 const el = (tag, props = {}, children = []) => {
   const node = document.createElement(tag);
   Object.entries(props).forEach(([k, v]) => {
@@ -199,51 +202,43 @@ function renderNewsCard(item, tier) {
   });
 
   const wantsImage = ["hero", "feature", "large", "medium", "small"].includes(tier);
-  if (wantsImage && item.image) {
+  const imgUrl = wantsImage ? pickImage(item) : null;
+  if (imgUrl) {
+    const imgEl = el("div", { class: "img", style: `background-image:url('${imgUrl}')` });
     if (tier === "hero") {
-      node.appendChild(el("div", { class: "img", style: `background-image:url('${item.image}')` }));
+      node.appendChild(imgEl);
       node.appendChild(el("div", { class: "body" }, [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow]));
     } else {
-      node.appendChild(el("div", { class: "img", style: `background-image:url('${item.image}')` }));
+      node.appendChild(imgEl);
       [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
     }
   } else {
-    // No image — use one of the text tiers
     [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
   }
   return node;
 }
 
 // ── Score-based tier assignment ────────────────────────────────
-// Goal: visually weight by importance, never waste vertical space on
-// image-less items. We allow at most one HERO per page.
+// Image-bearing items (real photo or backend AI-image) fill HERO →
+// FEATURE → LARGE → MEDIUM → SMALL. Items that are missing both fall
+// to HEADLINE/FLASH text tiers, which live in the float section.
 function buildPage(news) {
-  // sort by score desc (already sorted by mixer, but be defensive)
   const sorted = [...news].sort((a, b) => b.score - a.score);
   const out = [];
   let usedHero = false;
-  let imageBudget = { feature: 2, large: 4, medium: 8, small: Infinity };
+  const budget = { feature: 2, large: 4, medium: 8 };
 
   for (const item of sorted) {
-    const hasImage = !!item.image;
+    const hasImage = !!pickImage(item);
     let tier;
-    const s = item.score;
-
     if (hasImage) {
-      if (!usedHero && s >= 80) {
-        tier = "hero";
-        usedHero = true;
-      } else if (imageBudget.feature > 0 && s >= 75) {
-        tier = "feature"; imageBudget.feature--;
-      } else if (imageBudget.large > 0 && s >= 65) {
-        tier = "large"; imageBudget.large--;
-      } else if (imageBudget.medium > 0) {
-        tier = "medium"; imageBudget.medium--;
-      } else {
-        tier = "small";
-      }
+      if (!usedHero) { tier = "hero"; usedHero = true; }
+      else if (budget.feature > 0)     { tier = "feature"; budget.feature--; }
+      else if (budget.large > 0)       { tier = "large";   budget.large--; }
+      else if (budget.medium > 0)      { tier = "medium";  budget.medium--; }
+      else                             { tier = "small"; }
     } else {
-      tier = s >= 70 ? "headline" : "flash";
+      tier = item.score >= 70 ? "headline" : "flash";
     }
     out.push({ item, tier });
   }
@@ -254,7 +249,9 @@ function buildPage(news) {
 let STATE = { mixed: [], tape: [], whales: [], trades: [], youtube: [] };
 let CAT = "all";
 let PAGE = 1;
+let LAST_LOAD = null;
 const PAGE_SIZE = 30;
+const AUTO_REFRESH_MS = 5 * 60 * 1000;  // 5 minutes
 
 function filteredNews() {
   const q = $("#filter").value.trim().toLowerCase();
@@ -267,7 +264,15 @@ function filteredNews() {
   });
 }
 
-function paint() {
+function fmtAge(ts) {
+  if (!ts) return "—";
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60)        return `${diff}s ago`;
+  if (diff < 3600)      return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
+function paint(scrollTop = true) {
   const all = filteredNews();
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   if (PAGE > totalPages) PAGE = totalPages;
@@ -304,8 +309,8 @@ function paint() {
   renderPager(totalPages);
 
   const outlets = Object.keys(STATE.by_outlet || {}).length;
-  $("#status").textContent = `${all.length} news · page ${PAGE}/${totalPages} · ${outlets} sources · ${STATE.whales.length}🐋 ${STATE.trades.length}🏛 ${STATE.youtube.length}📺`;
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  $("#status").textContent = `${all.length} news · page ${PAGE}/${totalPages} · ${outlets} sources · updated ${fmtAge(LAST_LOAD)}`;
+  if (scrollTop) window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function renderPager(totalPages) {
@@ -362,11 +367,124 @@ async function load() {
     renderTradesRail(STATE.trades || []);
     renderVideosRail(STATE.youtube || []);
 
+    LAST_LOAD = Date.now();
     PAGE = 1;
     paint();
   } catch (e) {
     $("#status").textContent = `error: ${e.message}`;
   }
+}
+
+// Silent auto-refresh: pull /api/brief, swap data, redraw current page
+// without resetting pagination or scrolling. Triggered on a timer.
+async function silentRefresh() {
+  try {
+    const r = await fetch("/api/brief");
+    if (!r.ok) return;
+    const fresh = await r.json();
+    fresh.mixed.forEach((m) => { if (m.dek) m.dek = stripHtml(m.dek); });
+    STATE = fresh;
+    LAST_LOAD = Date.now();
+    renderTape(STATE.tape || []);
+    const head = $("#headline");
+    head.textContent = STATE.headline || "";
+    head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
+    renderWhalesRail(STATE.whales || []);
+    renderTradesRail(STATE.trades || []);
+    renderVideosRail(STATE.youtube || []);
+    paint(false);  // preserve page + scroll
+  } catch (e) {
+    console.warn("auto-refresh failed:", e);
+  }
+}
+
+// ── Reader modal ───────────────────────────────────────────────
+async function openReader(url, item) {
+  const modal = document.getElementById("reader");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  const content = modal.querySelector(".reader-content");
+  content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
+
+  try {
+    const r = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
+    const data = await r.json();
+    if (data.error) {
+      content.innerHTML =
+        `<div class="reader-loading">⚠ ${data.error}<br><br>` +
+        `<a class="reader-original" href="${url}" target="_blank" rel="noopener">open original ↗</a></div>`;
+      return;
+    }
+    renderReader(content, data, item || {});
+  } catch (e) {
+    content.innerHTML = `<div class="reader-loading">error: ${e.message}</div>`;
+  }
+}
+
+function renderReader(content, data, item) {
+  const lang = data.lang || item.lang || "en";
+  content.innerHTML = "";
+
+  // Close button stays in the DOM
+  const closeBtn = el("button", { class: "reader-close", "aria-label": "close" }, "×");
+  closeBtn.addEventListener("click", closeReader);
+  content.appendChild(closeBtn);
+
+  const imgSrc = data.image || item.image;
+  if (imgSrc) {
+    content.appendChild(el("div", {
+      class: "reader-img",
+      style: `background-image:url('${imgSrc}')`,
+    }));
+  }
+
+  content.appendChild(el("div", { class: "reader-meta" }, [
+    item.outlet ? el("span", { class: "src" }, item.outlet) : null,
+    item.category ? el("span", { class: "tag" }, item.category.toUpperCase()) : null,
+    data.byline ? el("span", {}, data.byline) : null,
+    item.ts ? el("span", {}, fmtWhen(item.ts)) : null,
+    data.word_count ? el("span", {}, `${data.word_count} words`) : null,
+  ]));
+
+  content.appendChild(el("h1", { class: "reader-title", lang },
+    data.title || item.title || "(no title)"));
+
+  if (data.tldr) {
+    content.appendChild(el("div", { class: "reader-tldr" }, [
+      el("span", { class: "tldr-label" }, "✦ TL;DR"),
+      el("p", { lang }, data.tldr),
+    ]));
+  }
+
+  if (data.key_points && data.key_points.length) {
+    content.appendChild(el("span", { class: "reader-section-label" }, "→ KEY POINTS"));
+    const ul = el("ul", { class: "reader-points" });
+    data.key_points.forEach((p) => ul.appendChild(el("li", { lang }, p)));
+    content.appendChild(ul);
+  }
+
+  if (data.paragraphs && data.paragraphs.length) {
+    content.appendChild(el("span", { class: "reader-section-label" }, "✦ THE STORY"));
+    const body = el("div", { class: "reader-body" });
+    data.paragraphs.forEach((p) => body.appendChild(el("p", { lang }, p)));
+    content.appendChild(body);
+  }
+
+  content.appendChild(el("div", { class: "reader-footer" }, [
+    el("span", { class: "badge" }, "✦ AI SUMMARY · dailybrief"),
+    el("a", {
+      href: data.url || item.url,
+      target: "_blank",
+      rel: "noopener",
+      class: "reader-original",
+    }, "open original ↗"),
+  ]));
+}
+
+function closeReader() {
+  document.getElementById("reader").classList.add("hidden");
+  document.body.style.overflow = "";
 }
 
 // ── Wire up ────────────────────────────────────────────────────
@@ -392,5 +510,41 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#density").addEventListener("click", () => {
     $("#paper").classList.toggle("dense");
   });
+
+  // Intercept article-card clicks → open the reader modal.
+  // ⌘/Ctrl/Shift/middle-click keeps the default behaviour (new tab).
+  document.addEventListener("click", (e) => {
+    const art = e.target.closest("#paper .art, #paper-noimg .art");
+    if (!art) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    const url = art.getAttribute("href");
+    const item = STATE.mixed.find((m) => m.url === url) || {};
+    openReader(url, item);
+  });
+
+  // Close-on-backdrop + Escape
+  document.querySelector(".reader-backdrop")?.addEventListener("click", closeReader);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeReader();
+  });
+
   load();
+
+  // Auto-refresh every 5 minutes — quietly pulls the freshest data and
+  // updates the page without disturbing the user's pagination or scroll.
+  setInterval(silentRefresh, AUTO_REFRESH_MS);
+
+  // Tick the "updated Xm ago" label every 30s so it stays accurate
+  // between refreshes.
+  setInterval(() => {
+    if (!LAST_LOAD) return;
+    const status = $("#status");
+    if (status && status.textContent.includes("updated")) {
+      status.textContent = status.textContent.replace(
+        /updated [^·]+$/,
+        `updated ${fmtAge(LAST_LOAD)}`
+      );
+    }
+  }, 30 * 1000);
 });

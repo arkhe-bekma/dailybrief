@@ -90,11 +90,13 @@ OUTLETS: list[dict] = [
 ]
 
 
-# Per-outlet limit before curating. ~10 per outlet × 34 outlets = 340 candidates.
-PER_OUTLET_LIMIT = 10
+# Per-outlet limit before curating. ~15 per outlet × 34 outlets ≈ 510 candidates.
+PER_OUTLET_LIMIT = 15
 
-# Cache TTL for fetched feeds (seconds)
-FEED_CACHE_TTL = 600
+# Cache TTL for fetched feeds (seconds). 5 min so refreshes pick up new stories
+# without hammering source feeds.
+FEED_CACHE_TTL = 300
 
-# How many items the curator returns (the wall + pagination work off this).
-TOP_K = 60
+# How many items the curator returns. Pagination on the client splits these
+# into pages — 200 / 30 ≈ 7 pages of content.
+TOP_K = 200

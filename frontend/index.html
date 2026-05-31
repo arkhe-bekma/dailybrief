@@ -66,6 +66,17 @@
     <span class="muted">dailybrief · local · <span id="status">loading…</span></span>
   </footer>
 
+  <!-- Reader modal: clicking a card opens a Claude-summarized reader-mode
+       view of the article in-app instead of redirecting. ⌘/Ctrl+click
+       still opens the original in a new tab. -->
+  <div id="reader" class="reader hidden" aria-hidden="true">
+    <div class="reader-backdrop"></div>
+    <div class="reader-card" role="dialog" aria-label="article reader">
+      <button class="reader-close" aria-label="close">×</button>
+      <div class="reader-content"></div>
+    </div>
+  </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>
