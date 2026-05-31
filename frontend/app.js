@@ -580,6 +580,81 @@ function closeFlow() {
   document.body.style.overflow = "";
 }
 
+// ── Swipe-to-close: drag the top or bottom edge of a modal card
+//    up or down to dismiss it. Threshold ~110 px of travel; under
+//    that, the card snaps back. ─────────────────────────────────
+function attachSwipeToClose(modalSelector, closeFn) {
+  const modal = document.querySelector(modalSelector);
+  if (!modal) return;
+  const card = modal.querySelector(".reader-card");
+  if (!card) return;
+
+  let startY = null;
+  let startedNear = null;   // "top" | "bottom"
+  let lastY = null;
+
+  const EDGE = 100;          // px from top/bottom where drag is armed
+  const DISMISS_DELTA = 110; // px travel to commit the close
+
+  card.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    const rect = card.getBoundingClientRect();
+    const y = e.touches[0].clientY;
+    const fromTop = y - rect.top;
+    const fromBottom = rect.bottom - y;
+    if (fromTop < EDGE) startedNear = "top";
+    else if (fromBottom < EDGE) startedNear = "bottom";
+    else return;             // ignore — let the body scroll
+    startY = y;
+    lastY = y;
+    card.style.transition = "none";
+  }, { passive: true });
+
+  card.addEventListener("touchmove", (e) => {
+    if (startY === null) return;
+    lastY = e.touches[0].clientY;
+    let delta = lastY - startY;
+    // Top-edge swipe only follows downward drag; bottom-edge only follows upward.
+    if (startedNear === "top" && delta < 0) delta = 0;
+    if (startedNear === "bottom" && delta > 0) delta = 0;
+    card.style.transform = `translateY(${delta}px)`;
+    // Fade backdrop in proportion to drag distance for a "weight" feel
+    const backdrop = modal.querySelector(".reader-backdrop");
+    if (backdrop) backdrop.style.opacity = String(Math.max(0.2, 1 - Math.abs(delta) / 400));
+  }, { passive: true });
+
+  card.addEventListener("touchend", () => {
+    if (startY === null) return;
+    const delta = (lastY ?? startY) - startY;
+    card.style.transition = "transform 0.24s ease-out";
+    const backdrop = modal.querySelector(".reader-backdrop");
+    if (backdrop) backdrop.style.transition = "opacity 0.24s";
+
+    if (Math.abs(delta) > DISMISS_DELTA) {
+      // Commit: fly the card off in the drag direction, then close.
+      card.style.transform = `translateY(${delta > 0 ? "120vh" : "-120vh"})`;
+      if (backdrop) backdrop.style.opacity = "0";
+      setTimeout(() => {
+        closeFn();
+        card.style.transform = "";
+        card.style.transition = "";
+        if (backdrop) { backdrop.style.opacity = ""; backdrop.style.transition = ""; }
+      }, 240);
+    } else {
+      // Snap back.
+      card.style.transform = "";
+      if (backdrop) backdrop.style.opacity = "";
+      setTimeout(() => {
+        card.style.transition = "";
+        if (backdrop) backdrop.style.transition = "";
+      }, 250);
+    }
+    startY = null;
+    startedNear = null;
+    lastY = null;
+  });
+}
+
 // ── Settings popover ───────────────────────────────────────────
 // Tiny menu hung off the ⚙ gear next to the date. Two practical
 // knobs only: text-size (S/M/L/XL) and a manual refresh trigger.
@@ -603,6 +678,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#today").textContent = new Date().toLocaleDateString(undefined, {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
   }).toUpperCase();
+
+  // Swipe gestures on the reader + flow modals (mobile dismiss UX)
+  attachSwipeToClose("#reader", closeReader);
+  attachSwipeToClose("#flow",   closeFlow);
 
   // Restore saved text scale
   let savedScale = 1;

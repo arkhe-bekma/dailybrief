@@ -147,26 +147,27 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 10px;
 }
+/* Gear — small neon square that matches the date pill on the left */
 #settings-btn {
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--text-2);
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(0,225,255,0.10), rgba(122,162,255,0.05));
+  border: 1px solid rgba(0,225,255,0.35);
+  color: var(--neon-cyan);
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;     /* square w/ tiny rounded corners */
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.25s, color 0.15s, border-color 0.15s;
+  text-shadow: 0 0 8px rgba(0,225,255,0.5);
+  transition: transform 0.25s, box-shadow 0.15s;
 }
 #settings-btn:hover {
-  color: var(--neon-cyan);
-  border-color: var(--neon-cyan);
   transform: rotate(45deg);
+  box-shadow: 0 0 16px rgba(0,225,255,0.45);
 }
 
 /* ── Settings popover ─────────────────────────────────────── */
@@ -259,14 +260,12 @@ a { color: inherit; text-decoration: none; }
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-/* Date is now in the .actions row next to the refresh button —
-   styled as the same neon-yellow pill but in normal flow. */
+/* Date — neon square chip that matches the gear button next to it. */
 .date {
-  padding: 5px 11px;
-  background:
-    linear-gradient(135deg, rgba(255,230,0,0.10), rgba(255,154,60,0.06));
+  padding: 4px 10px;
+  background: linear-gradient(135deg, rgba(255,230,0,0.10), rgba(255,154,60,0.06));
   border: 1px solid rgba(255,230,0,0.35);
-  border-radius: 999px;
+  border-radius: 5px;   /* same corner radius as #settings-btn */
   color: var(--neon-yellow);
   font-family: var(--mono);
   font-size: 10.5px;
@@ -275,6 +274,9 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase;
   text-shadow: 0 0 10px rgba(255,230,0,0.45);
   white-space: nowrap;
+  height: 22px;        /* line up with the 22px gear */
+  display: inline-flex;
+  align-items: center;
 }
 
 .actions {
