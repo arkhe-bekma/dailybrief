@@ -580,9 +580,12 @@ function closeFlow() {
   document.body.style.overflow = "";
 }
 
-// ── Swipe-to-close: drag the top or bottom edge of a modal card
-//    up or down to dismiss it. Threshold ~110 px of travel; under
-//    that, the card snaps back. ─────────────────────────────────
+// ── Swipe-to-close (iOS-style sheet) ──────────────────────────
+// The gesture only ARMS once the user reaches the natural edge of
+// the article body:
+//   • scrolled to TOP    → an additional pull-DOWN closes
+//   • scrolled to BOTTOM → an additional pull-UP   closes
+// Mid-article touches just scroll like usual.
 function attachSwipeToClose(modalSelector, closeFn) {
   const modal = document.querySelector(modalSelector);
   if (!modal) return;
@@ -590,48 +593,51 @@ function attachSwipeToClose(modalSelector, closeFn) {
   if (!card) return;
 
   let startY = null;
-  let startedNear = null;   // "top" | "bottom"
   let lastY = null;
-
-  const EDGE = 100;          // px from top/bottom where drag is armed
-  const DISMISS_DELTA = 110; // px travel to commit the close
+  let atTop = false;
+  let atBottom = false;
+  let armed = false;        // true once we decide this is a dismiss gesture
+  const ARM_PX = 6;          // travel before we commit to dismiss intent
+  const DISMISS_DELTA = 110; // travel to actually close
 
   card.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) return;
-    const rect = card.getBoundingClientRect();
-    const y = e.touches[0].clientY;
-    const fromTop = y - rect.top;
-    const fromBottom = rect.bottom - y;
-    if (fromTop < EDGE) startedNear = "top";
-    else if (fromBottom < EDGE) startedNear = "bottom";
-    else return;             // ignore — let the body scroll
-    startY = y;
-    lastY = y;
-    card.style.transition = "none";
+    startY = e.touches[0].clientY;
+    lastY = startY;
+    // Snapshot scroll position at gesture start — only edges arm.
+    atTop = card.scrollTop <= 0;
+    atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - 1;
+    armed = false;
   }, { passive: true });
 
   card.addEventListener("touchmove", (e) => {
     if (startY === null) return;
     lastY = e.touches[0].clientY;
-    let delta = lastY - startY;
-    // Top-edge swipe only follows downward drag; bottom-edge only follows upward.
-    if (startedNear === "top" && delta < 0) delta = 0;
-    if (startedNear === "bottom" && delta > 0) delta = 0;
+    const delta = lastY - startY;
+
+    if (!armed) {
+      // Only arm if user is at an edge AND pulling further past it.
+      if (delta > ARM_PX && atTop) armed = true;
+      else if (delta < -ARM_PX && atBottom) armed = true;
+      else return;   // let the card scroll normally
+    }
+
+    card.style.transition = "none";
     card.style.transform = `translateY(${delta}px)`;
-    // Fade backdrop in proportion to drag distance for a "weight" feel
     const backdrop = modal.querySelector(".reader-backdrop");
     if (backdrop) backdrop.style.opacity = String(Math.max(0.2, 1 - Math.abs(delta) / 400));
   }, { passive: true });
 
   card.addEventListener("touchend", () => {
     if (startY === null) return;
+    if (!armed) { startY = null; lastY = null; return; }
+
     const delta = (lastY ?? startY) - startY;
     card.style.transition = "transform 0.24s ease-out";
     const backdrop = modal.querySelector(".reader-backdrop");
     if (backdrop) backdrop.style.transition = "opacity 0.24s";
 
     if (Math.abs(delta) > DISMISS_DELTA) {
-      // Commit: fly the card off in the drag direction, then close.
       card.style.transform = `translateY(${delta > 0 ? "120vh" : "-120vh"})`;
       if (backdrop) backdrop.style.opacity = "0";
       setTimeout(() => {
@@ -641,7 +647,6 @@ function attachSwipeToClose(modalSelector, closeFn) {
         if (backdrop) { backdrop.style.opacity = ""; backdrop.style.transition = ""; }
       }, 240);
     } else {
-      // Snap back.
       card.style.transform = "";
       if (backdrop) backdrop.style.opacity = "";
       setTimeout(() => {
@@ -650,8 +655,8 @@ function attachSwipeToClose(modalSelector, closeFn) {
       }, 250);
     }
     startY = null;
-    startedNear = null;
     lastY = null;
+    armed = false;
   });
 }
 
