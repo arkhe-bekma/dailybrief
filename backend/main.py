@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import cache, config, mixer, tickers
-from backend.agent import curator, illustrator, reader, summarizer, summary
+from backend.agent import curator, illustrator, reader, summary
 from backend.sources import politicians, prices, rss, whales, youtube
 
 load_dotenv()
@@ -163,19 +163,29 @@ _EMOJI_RE = re.compile(
 _GARBLE_CHAR = "�"
 
 
-def _split_paragraphs(text: str, max_paragraphs: int = 5) -> list[str]:
-    """Turn trafilatura's body text into reader-friendly paragraphs.
+# Adaptive ceiling on what the reader modal shows. Short articles render
+# every paragraph; long ones get clipped where the reader almost certainly
+# stops scrolling. Picked from feel — covers ~95% of real articles without
+# truncation, keeps the modal from becoming a wall of text.
+_PARA_CHAR_BUDGET = 3500   # ≈ 700-800 words of body
+_PARA_HARD_MAX = 14        # never more than this many paragraphs
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Clean trafilatura's body into reader-friendly paragraphs.
     One consistent rule for every article:
       - strip emojis
       - drop section headers ('1. 심층 분석', '[Glossary]', etc.)
       - drop image markdown + photo credits
       - drop lines with mojibake (U+FFFD)
       - drop very short lines
-      - cap at 5 paragraphs total
+      - stop after ~3500 characters of body OR 14 paragraphs, whichever
+        comes first (short articles still render fully)
     """
     if not text:
         return []
     out: list[str] = []
+    total_chars = 0
     for raw in text.split("\n"):
         p = _EMOJI_RE.sub("", raw).strip()
         if not p or len(p) < 30:
@@ -191,7 +201,8 @@ def _split_paragraphs(text: str, max_paragraphs: int = 5) -> list[str]:
         if _SECTION_HEADER_RE.match(p) or _BRACKETED_HEADER_RE.match(p):
             continue
         out.append(p)
-        if len(out) >= max_paragraphs:
+        total_chars += len(p)
+        if len(out) >= _PARA_HARD_MAX or total_chars >= _PARA_CHAR_BUDGET:
             break
     return out
 
@@ -217,24 +228,19 @@ async def article(url: str):
     if not reading:
         return {"error": "could not extract the article body"}
 
-    lang = _detect_lang(reading.title or "")
-    # First try Claude (if ANTHROPIC_API_KEY is set on the server). It
-    # rewrites every article into the same 3-5-paragraph plain-text shape,
-    # so users get a consistent read regardless of how messy the source
-    # page is. Heuristic _split_paragraphs is the dependable fallback.
-    paragraphs = await summarizer.summarize_paragraphs(
-        reading.text, reading.title, lang,
-    ) or _split_paragraphs(reading.text)
-
+    # No LLM rewrite — show the publisher's body directly, just cleaned
+    # of emojis / section headers / photo credits / mojibake. Cheaper,
+    # faster, and the user explicitly asked for the original article
+    # ("괜히 에이아이로 돌리지말고 그냥 바로 기사 보여줘").
     result = {
         "url": url,
         "title": reading.title,
         "image": reading.image,
         "byline": reading.byline,
         "excerpt": reading.excerpt,
-        "lang": lang,
+        "lang": _detect_lang(reading.title or ""),
         "word_count": len(reading.text.split()),
-        "paragraphs": paragraphs,
+        "paragraphs": _split_paragraphs(reading.text),
     }
     cache.set(full_key, result, 86400)
     return result
