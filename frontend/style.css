@@ -145,14 +145,10 @@ a { color: inherit; text-decoration: none; }
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.brand .date {
-  /* Designed top-right pill — yellow neon ring + soft glow.
-     Stays out of the brand row's flexbox so the logo/name stay clean. */
-  position: absolute;
-  top: 12px;
-  right: 18px;
-  margin-left: 0;
-  padding: 4px 10px;
+/* Date is now in the .actions row next to the refresh button —
+   styled as the same neon-yellow pill but in normal flow. */
+.date {
+  padding: 5px 11px;
   background:
     linear-gradient(135deg, rgba(255,230,0,0.10), rgba(255,154,60,0.06));
   border: 1px solid rgba(255,230,0,0.35);
@@ -164,23 +160,22 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 1.2px;
   text-transform: uppercase;
   text-shadow: 0 0 10px rgba(255,230,0,0.45);
-  z-index: 31;
-  pointer-events: none;
+  white-space: nowrap;
 }
 
-.actions { display: flex; gap: 6px; }
-.actions input, .actions button {
+.actions { display: flex; gap: 8px; align-items: center; }
+.actions button {
   background: rgba(255,255,255,0.05);
   color: var(--text);
   border: 1px solid var(--line);
   padding: 6px 11px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--sans);
+  cursor: pointer;
+  min-width: 32px;
+  font-weight: 700;
 }
-.actions input { width: 220px; }
-.actions button { cursor: pointer; min-width: 32px; font-weight: 700; }
-.actions input:focus { outline: none; border-color: var(--neon-cyan); box-shadow: 0 0 0 3px rgba(0,225,255,0.15); }
 .actions button:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); box-shadow: var(--glow-cyan); }
 
 /* ── Phone + small tablet (≤ 1024px) ─────────────────────────
@@ -193,8 +188,10 @@ a { color: inherit; text-decoration: none; }
    stale browser-cached desktop rule can't accidentally win. */
 @media (max-width: 1024px) {
   .masthead {
-    flex-direction: column !important;
-    align-items: stretch !important;
+    /* Now everything fits in one row, even on a phone — brand on left,
+       refresh + date pill on right. No need to stack anymore. */
+    flex-direction: row !important;
+    align-items: center !important;
     gap: 8px;
     padding: 10px 12px !important;
   }
@@ -202,18 +199,17 @@ a { color: inherit; text-decoration: none; }
     display: flex;
     align-items: center;
     gap: 8px;
-    /* date is absolute-positioned, so nothing extra needed here */
-    /* leave room on the right so the date pill doesn't overlap text */
-    padding-right: 96px;
+    min-width: 0;
+    flex: 1;       /* take leftover width so refresh/date stay flush right */
   }
   .brand .logo { font-size: 22px; }
-  .brand .name { font-size: 24px; }
-  .brand .date {
-    /* Smaller pill on mobile */
-    top: 10px;
-    right: 12px;
-    padding: 3px 8px;
+  .brand .name { font-size: 22px; }
+  .actions { gap: 6px; flex-shrink: 0; }
+  .actions button { padding: 5px 9px; font-size: 13px; min-width: 28px; }
+  .date {
+    padding: 4px 9px;
     font-size: 9.5px;
+    letter-spacing: 1px;
   }
   .actions {
     display: flex !important;
@@ -278,7 +274,7 @@ a { color: inherit; text-decoration: none; }
   gap: 28px;
   padding: 8px 24px;
   white-space: nowrap;
-  animation: marquee 110s linear infinite;
+  animation: marquee 30s linear infinite;   /* was 110s — 3.7× faster */
   font-family: var(--mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -409,7 +405,7 @@ a { color: inherit; text-decoration: none; }
   gap: 22px;
   padding: 7px 16px;
   white-space: nowrap;
-  animation: marquee 100s linear infinite;
+  animation: marquee 28s linear infinite;   /* was 100s — 3.6× faster */
   font-family: var(--mono);
   font-size: 11.5px;
 }
