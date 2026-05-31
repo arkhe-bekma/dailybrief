@@ -284,13 +284,10 @@ const PAGE_SIZE = 31;
 const AUTO_REFRESH_MS = 2 * 60 * 1000;  // 2 minutes — near-real-time
 
 function filteredNews() {
-  const q = $("#filter").value.trim().toLowerCase();
   return STATE.mixed.filter((it) => {
     if (it.kind !== "news") return false;
     if (CAT !== "all" && it.category !== CAT) return false;
-    if (!q) return true;
-    const hay = `${it.title || ""} ${it.outlet || ""} ${(it.tickers||[]).join(" ")}`.toLowerCase();
-    return hay.includes(q);
+    return true;
   });
 }
 
@@ -598,13 +595,9 @@ document.addEventListener("DOMContentLoaded", () => {
     chip.classList.add("active");
     paint();
   });
-  $("#filter").addEventListener("input", () => { PAGE = 1; paint(); });
   $("#refresh").addEventListener("click", async () => {
     await fetch("/api/refresh", { method: "POST" });
     await load();
-  });
-  $("#density").addEventListener("click", () => {
-    $("#paper").classList.toggle("dense");
   });
 
   // Intercept article-card clicks → open the reader modal.
