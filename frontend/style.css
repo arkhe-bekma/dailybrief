@@ -687,11 +687,9 @@ a { color: inherit; text-decoration: none; }
 
 .art::before { background: var(--c, var(--line-2)); }
 .art:hover {
-  border-color: var(--c, var(--neon-cyan));
-  box-shadow:
-    0 6px 28px rgba(0,0,0,0.45),
-    0 0 0 1px var(--c, var(--neon-cyan)),
-    0 0 28px color-mix(in srgb, var(--c, var(--neon-cyan)) 40%, transparent);
+  /* User explicitly asked to drop the neon outline + glow on hover.
+     Only the lift (transform: translateY) defined above + the photo
+     ken-burns zoom remain. */
 }
 
 /* ── Meta line ────────────────────────────────────────────── */
@@ -912,7 +910,7 @@ a { color: inherit; text-decoration: none; }
   font-weight: 400;
   padding-right: 4px;
 }
-.tier-hero .dek { font-size: 15px; -webkit-line-clamp: 5; }
+.tier-hero .dek { font-size: 15px; -webkit-line-clamp: 8; }
 .tier-hero .why { font-size: 14.5px; }
 @media (max-width: 900px) {
   .tier-hero { grid-template-columns: 1fr; }
@@ -945,7 +943,7 @@ a { color: inherit; text-decoration: none; }
   font-weight: 800;
   letter-spacing: -0.8px;
 }
-.tier-feature .dek { -webkit-line-clamp: 6; font-size: 13px; }
+.tier-feature .dek { -webkit-line-clamp: 9; font-size: 13px; }
 
 /* ── LARGE — image ON TOP, full card width ──────────────── */
 .tier-large {
@@ -969,7 +967,7 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 .tier-large .h[lang="ko"] { font-size: calc(clamp(17.5px, 1.55vw, 20px) * var(--text-scale, 1)); }
-.tier-large .dek { -webkit-line-clamp: 5; font-size: 12.5px; }
+.tier-large .dek { -webkit-line-clamp: 8; font-size: 12.5px; }
 
 /* ── MEDIUM — image ON TOP, full card width ─────────────── */
 .tier-medium {
@@ -997,7 +995,7 @@ a { color: inherit; text-decoration: none; }
   font-size: calc(clamp(16px, 1.25vw, 19px) * var(--text-scale, 1));
   letter-spacing: -0.8px;
 }
-.tier-medium .dek { -webkit-line-clamp: 5; font-size: 12px; }
+.tier-medium .dek { -webkit-line-clamp: 8; font-size: 12px; }
 
 /* ── SMALL — image ON TOP, dominates card height ──────── */
 .tier-small {
@@ -1025,7 +1023,7 @@ a { color: inherit; text-decoration: none; }
   font-size: calc(clamp(14.5px, 1.1vw, 17px) * var(--text-scale, 1));
   letter-spacing: -0.7px;
 }
-.tier-small .dek { -webkit-line-clamp: 4; font-size: 11.5px; }
+.tier-small .dek { -webkit-line-clamp: 7; font-size: 11.5px; }
 
 /* ── HEADLINE — NO image, big bold display title + dek snippet
        Box shrinks to content (no min-height). */
