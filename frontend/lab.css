@@ -450,3 +450,190 @@ body.lab {
   text-align: center;
   letter-spacing: 1px;
 }
+
+/* ════════════════════════════════════════════════════════════
+   Typography polish — apply per-language fonts everywhere on lab
+   ════════════════════════════════════════════════════════════ */
+
+/* Korean text inside the lab should pick up Pretendard automatically
+   wherever lang="ko" is set on a cell or element. This was already
+   partially in place for outlet-name; extend to every text holder. */
+body.lab [lang="ko"] {
+  font-family: var(--kr);
+  font-feature-settings: "palt" 1, "vpal" 1, "kern" 1;
+  letter-spacing: -0.3px;
+  word-break: keep-all;
+}
+body.lab [lang="en"] {
+  font-family: var(--sans);
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+}
+
+/* English headings + KPI numbers across the dashboard use the display
+   face. Hex digits and large numbers get the variable axis love. */
+.kpi-v {
+  font-variation-settings: "opsz" 64, "wdth" 92, "wght" 800;
+  font-variant-numeric: tabular-nums;
+}
+.lab-brand .name {
+  font-variation-settings: "opsz" 64, "wdth" 96, "wght" 800;
+}
+.wf-label,
+.agent-name {
+  font-variation-settings: "opsz" 40, "wdth" 92, "wght" 800;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Mobile layout (≤ 640px) — table fits on phone, KPIs reflow,
+   workflow + agent cards stack cleanly
+   ════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .lab-grid {
+    padding: 12px;
+    gap: 10px;
+  }
+  .card {
+    padding: 12px 12px 14px;
+    min-height: 0;
+    border-radius: 10px;
+  }
+  .card-head {
+    font-size: 9.5px;
+    letter-spacing: 1.4px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* KPI numbers smaller so 2-per-row doesn't overflow */
+  .kpi-v { font-size: 22px; }
+  .kpi-stack .kpi-v { font-size: 16px; }
+  .kpi-stack .kpi { gap: 8px; }
+  .kpi-label { font-size: 8.5px; letter-spacing: 1px; }
+
+  /* Workflow + agent cards lay out single-column with tighter padding */
+  .workflow-list, .agent-list {
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+  .wf-item, .agent-card { padding: 10px 12px; }
+  .wf-label { font-size: 14px; }
+  .wf-desc, .agent-summary { font-size: 11.5px; line-height: 1.45; }
+  .wf-chips { gap: 3px; }
+  .wf-chip { font-size: 8.5px; padding: 1px 5px; }
+  .agent-head { gap: 4px; }
+  .agent-name { font-size: 14px; }
+  .agent-role { font-size: 9px; letter-spacing: 0.8px; }
+
+  /* Outlet roster — collapses from 7-column table into stacked cards
+     so it actually fits a phone screen. Each row becomes a mini-block
+     with the article count + status as bold accents. */
+  #outlet-table thead { display: none; }
+  #outlet-table, #outlet-table tbody, #outlet-table tr, #outlet-table td {
+    display: block;
+    width: 100%;
+    border: 0;
+  }
+  #outlet-table tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name  count"
+      "meta  status"
+      "ago   ago";
+    gap: 2px 8px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  #outlet-table td {
+    padding: 0;
+    line-height: 1.3;
+  }
+  #outlet-table td.outlet-name { grid-area: name; font-size: 13px; }
+  #outlet-table td.num:nth-of-type(4) {
+    grid-area: count;
+    font-size: 16px;
+    color: var(--neon-cyan);
+    font-weight: 800;
+    text-shadow: 0 0 8px rgba(0,225,255,0.3);
+  }
+  #outlet-table td.num:nth-of-type(6) {
+    /* SHARE column — squeezed under cat/lang */
+    display: none;
+  }
+  /* Category + lang chips on the same row as a meta line */
+  #outlet-table td.cat-tag {
+    grid-area: meta;
+    font-size: 8.5px;
+    color: var(--neon-cyan);
+  }
+  #outlet-table td.cat-tag::after {
+    content: " · ";
+    color: var(--muted);
+  }
+  #outlet-table td.lang-tag {
+    grid-area: meta;
+    justify-self: start;
+    margin-left: 36px;
+    font-size: 8.5px;
+  }
+  #outlet-table td.ago { grid-area: ago; font-size: 9.5px; }
+  #outlet-table td:last-child {       /* STATUS column */
+    grid-area: status;
+    justify-self: end;
+  }
+  .outlet-scroll {
+    max-height: 420px;
+    /* Vertical-only scroll on phone — horizontal scroll disabled by the
+       block-stacking above. */
+    overflow-x: hidden;
+  }
+  .outlet-summary {
+    margin-left: 0;
+    font-size: 9px;
+    letter-spacing: 0.6px;
+    width: 100%;
+  }
+
+  /* Agent activity log table — drop the duration column on phone,
+     it's cosmetic and the row is otherwise crammed. */
+  #runs-table th:nth-child(4),
+  #runs-table td:nth-child(4) { display: none; }
+  #runs-table th, #runs-table td {
+    padding: 5px 6px;
+    font-size: 11px;
+  }
+  #runs-table td.ago { font-size: 10px; }
+
+  /* Cache prefix bars: smaller label column + bar fits */
+  .bar-row {
+    grid-template-columns: 88px 1fr auto;
+    gap: 6px;
+  }
+  .bar-label { font-size: 9.5px; }
+  .bar-n { font-size: 10px; }
+
+  /* Settings row inside SCHEDULE MASTER */
+  .settings-row input[type=number] { width: 92px; }
+  .btn { padding: 5px 10px; font-size: 10px; }
+
+  /* Masthead — keep the brand tight on phone */
+  .lab-mast { padding: 10px 12px; }
+  .lab-brand .name { font-size: 18px; }
+  .lab-brand .logo { font-size: 18px; }
+  .lab-brand .lab-tag { font-size: 8.5px; padding: 1px 5px; letter-spacing: 1.4px; }
+  .lab-actions { gap: 8px; }
+  .lab-back { font-size: 9.5px; padding: 4px 8px; }
+  .live { font-size: 9px; letter-spacing: 1px; }
+}
+
+/* Extra-narrow phones (≤ 380px) — cards tighten one more notch */
+@media (max-width: 380px) {
+  .lab-grid { padding: 10px; gap: 8px; }
+  .card { padding: 10px 10px 12px; }
+  .kpi-v { font-size: 19px; }
+  #outlet-table td.outlet-name { font-size: 12px; }
+  #outlet-table td.num:nth-of-type(4) { font-size: 14px; }
+}
