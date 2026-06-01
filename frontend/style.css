@@ -540,9 +540,11 @@ a { color: inherit; text-decoration: none; }
     padding-left: 12px;
     padding-right: 12px;
   }
-  /* Chip nav: smaller, allow wrap, no horizontal scroll */
-  .chips { gap: 5px; }
-  .chip { padding: 4px 9px; font-size: 11px; }
+  /* Chip nav: very tight on phone so the whole row fits in one strip.
+     Smaller pad + font + tighter counter pill = more chips per row. */
+  .chips { gap: 3px; padding-left: 12px; padding-right: 12px; padding-top: 4px; padding-bottom: 4px; }
+  .chip { padding: 2px 7px; font-size: 10.5px; gap: 3px; letter-spacing: 0.2px; }
+  .chip .ct { min-width: 12px; padding: 0 3px; font-size: 9px; }
 
   /* The headline (top-of-day brief) was 17px italic — too big on a
      phone. Shrink so it doesn't wrap into 4 lines. */
@@ -551,7 +553,20 @@ a { color: inherit; text-decoration: none; }
   /* The price tape and the three flow strips were inheriting desktop
      padding (24px) but now share the same 12px. Same with the chip
      scroll gutter. */
-  .tape { font-size: 11px; }
+  .tape {
+    font-size: 11px;
+    /* On mobile the tape's backdrop-filter halo + z-index 20 was
+       bleeding into the whales strip below, making the bottom edge of
+       the tape look like it was covering the top of WHALES. Drop the
+       blur on small screens (the tape is short enough that no blur is
+       visible anyway) and let the strips share a flat stacking
+       context with the tape. */
+    backdrop-filter: none;
+    z-index: 1;
+  }
+  /* Give the whales / trades / videos strips a clear z-index so the
+     tape above cannot visually overlap them. */
+  .strip { position: relative; z-index: 2; }
 
   /* Main column padding too — same edge alignment as everything above */
   .main-col {
@@ -629,8 +644,8 @@ a { color: inherit; text-decoration: none; }
 /* ── Chips ────────────────────────────────────────────────── */
 .chips {
   display: flex;
-  gap: 5px;
-  padding: 6px 18px;
+  gap: 4px;
+  padding: 5px 18px;
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
   background: rgba(5,6,10,0.85);
@@ -643,26 +658,27 @@ a { color: inherit; text-decoration: none; }
   background: transparent;
   border: 1px solid var(--line-2);
   color: var(--text-2);
-  padding: 5px 13px;
+  padding: 3px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
   cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 4px;
   transition: all 0.15s;
   text-transform: uppercase;
+  line-height: 1.25;
 }
 .chip .ct {
   display: inline-block;
-  min-width: 18px;
-  padding: 0 6px;
-  margin-left: 2px;
+  min-width: 14px;
+  padding: 0 4px;
+  margin-left: 1px;
   border-radius: 999px;
   background: rgba(255,255,255,0.08);
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 700;
   text-align: center;
 }
