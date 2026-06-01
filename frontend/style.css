@@ -540,13 +540,54 @@ a { color: inherit; text-decoration: none; }
     padding-left: 12px;
     padding-right: 12px;
   }
-  /* Chip nav: very tight on phone so the whole row fits in two lines.
-     Was overflowing K-연예 onto a 3rd line; tightening padding + font
-     + gap shaves ~3-4 px per chip, which is enough for all 12 to
-     pack into 2 lines on 360px-wide screens. */
-  .chips { gap: 2px; padding-left: 10px; padding-right: 10px; padding-top: 4px; padding-bottom: 4px; }
+  /* Chip nav on phone: cap at exactly 2 visible rows. flex-wrap leaves
+     gaps when the next chip can't fit on the current row (K-연예 is the
+     widest; AI / 한국 leave the largest tail-gaps). Rather than shrink
+     fonts more, clamp the container with max-height and put a small
+     ▾ toggle on the right edge of line 2 — tap it and the rest unfurl.
+     Tighter padding + gap so the visible rows pack densely. */
+  .chips {
+    gap: 2px;
+    padding: 4px 36px 4px 10px;       /* right pad reserves space for ▾ */
+    max-height: 50px;                 /* ≈ 2 chip rows + container pad */
+    overflow: hidden;
+    transition: max-height 220ms ease-out;
+  }
+  .chips.expanded { max-height: 260px; }
   .chip { padding: 1px 6px; font-size: 9.5px; gap: 2px; letter-spacing: 0.1px; }
   .chip .ct { min-width: 12px; padding: 0 3px; font-size: 9px; }
+
+  /* ▾ toggle — pinned bottom-right of the chips container. Stays
+     visible whether collapsed or expanded; its glyph flips on toggle. */
+  .chip-toggle:not([hidden]) { display: inline-flex; }
+  .chip-toggle {
+    position: absolute;
+    right: 6px;
+    bottom: 4px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 999px;
+    background: rgba(11,13,24,0.92);
+    border: 1px solid var(--line-2);
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 220ms ease-out, border-color 120ms, color 120ms;
+  }
+  .chip-toggle:hover {
+    border-color: var(--neon-cyan);
+    color: var(--neon-cyan);
+    box-shadow: 0 0 12px rgba(0,225,255,0.35);
+  }
+  .chips.expanded .chip-toggle { transform: rotate(180deg); }
 
   /* The headline (top-of-day brief) was 17px italic — too big on a
      phone. Shrink so it doesn't wrap into 4 lines. */
@@ -678,6 +719,9 @@ a { color: inherit; text-decoration: none; }
 .chip .ct:empty { display: none; }
 .chip.active .ct { background: rgba(0,0,0,0.18); color: inherit; opacity: 0.65; }
 .chip:hover { border-color: var(--text-2); color: var(--text); }
+
+/* Desktop: chips never need the clamp + toggle. */
+.chip-toggle { display: none; }
 .chip.active {
   background: var(--text);
   color: var(--bg-0);

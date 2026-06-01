@@ -1143,6 +1143,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("#chips").addEventListener("click", async (e) => {
+    // The ▾ expand toggle lives inside the nav but isn't a chip.
+    if (e.target.closest("#chip-toggle")) return;
     const chip = e.target.closest(".chip");
     if (!chip) return;
     CAT = chip.dataset.cat;
@@ -1155,6 +1157,38 @@ document.addEventListener("DOMContentLoaded", () => {
     if (CAT !== "all") await fetchPage(1);
     paint();
   });
+
+  // ── Chip nav overflow / expand toggle (phone) ────────────────
+  // On mobile, .chips is clamped to ~2 rows. If the natural height
+  // exceeds the clamp, show the ▾ button; clicking it flips the
+  // .expanded state and the glyph rotates 180°.
+  const chipsEl = document.getElementById("chips");
+  const chipToggleEl = document.getElementById("chip-toggle");
+  function syncChipToggle() {
+    if (!chipsEl || !chipToggleEl) return;
+    // Desktop / tablet ≥ 769px: clamp + toggle both inactive.
+    if (window.matchMedia("(min-width: 769px)").matches) {
+      chipsEl.classList.remove("expanded");
+      chipToggleEl.hidden = true;
+      return;
+    }
+    // Measure natural height by temporarily lifting the clamp.
+    const wasExpanded = chipsEl.classList.contains("expanded");
+    chipsEl.classList.add("expanded");
+    const natural = chipsEl.scrollHeight;
+    if (!wasExpanded) chipsEl.classList.remove("expanded");
+    // Threshold: anything noticeably taller than ~2 rows worth.
+    chipToggleEl.hidden = natural <= 52;
+  }
+  chipToggleEl?.addEventListener("click", () => {
+    chipsEl?.classList.toggle("expanded");
+  });
+  syncChipToggle();
+  window.addEventListener("resize", syncChipToggle);
+  // Re-check after fonts load (chip widths shift a touch).
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(syncChipToggle).catch(() => {});
+  }
   // Intercept article-card clicks → open the reader modal.
   // ⌘/Ctrl/Shift/middle-click keeps the default behaviour (new tab).
   document.addEventListener("click", (e) => {
