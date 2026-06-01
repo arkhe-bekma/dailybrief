@@ -596,23 +596,46 @@ a { color: inherit; text-decoration: none; }
   /* The price tape and the three flow strips were inheriting desktop
      padding (24px) but now share the same 12px. Same with the chip
      scroll gutter. */
-  /* Tape + strips share a flat stacking context AND identical track
-     dimensions on phone, so the tape's bottom edge lines up cleanly
-     with the WHALES line below — no more visual overlap during
-     sticky scroll. The semi-transparent background was the other half
-     of the bug: when the tape stickied over the strip, the strip
-     content bled through. Make the tape opaque on phone. */
+  /* Mobile tape — definitive overlap fix. Earlier passes didn't
+     fully kill the visible bite the tape was taking out of the
+     WHALES strip on portrait phones. The remaining causes were
+     subpixel-level:
+       (a) iOS Safari sticky + inner transform (marquee animation)
+           occasionally bleeds 1-2px past the parent's overflow:hidden
+           clip when the layer isn't its own compositing layer.
+       (b) `border-bottom: 1px solid` lives ON the box edge, so when
+           the browser rounds the box's bottom to the nearest device
+           pixel and the strip below rounds the OTHER way, you get a
+           half-pixel overlap.
+     Defenses, in order:
+       1. transform: translateZ(0) → forces a fresh GPU layer so the
+          sticky+marquee combo composites cleanly.
+       2. contain: paint → strict clip, nothing renders past the box.
+       3. box-shadow inset replaces border-bottom → never paints
+          outside the box.
+       4. margin-bottom: 2px → guaranteed pixel gap so even if all of
+          the above somehow fail there's clear separation.  */
   .tape {
     font-size: 11px;
     backdrop-filter: none;
-    background: rgba(11,13,24,0.96);
-    border-bottom: 1px solid var(--line);
+    background: var(--bg-1);
+    border-bottom: 0;
+    box-shadow: inset 0 -1px 0 var(--line);
     z-index: 1;
+    transform: translateZ(0);
+    contain: paint;
+    margin-bottom: 2px;
   }
   /* Strips get their own z-index so the natural document flow is
      preserved; once the tape stickies, the strip slides cleanly
      underneath instead of being half-covered. */
-  .strip { position: relative; z-index: 2; }
+  .strip {
+    position: relative;
+    z-index: 2;
+    /* Opaque strip background so even an edge-case overlap with the
+       tape can't visually bleed into the strip. */
+    background: var(--bg-1);
+  }
   /* Match track dimensions exactly between tape and strips so all
      four horizontal bands have the same height — the user reported
      the stock row sitting taller than the rest, which is what made
