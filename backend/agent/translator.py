@@ -153,7 +153,12 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
         response_mime_type="application/json",
         response_schema=_TRANSLATE_SCHEMA,
         temperature=0.4,
-        max_output_tokens=4096,
+        # 8192 = Gemini 2.5 Flash output ceiling. Korean tokenises ~2x
+        # denser than English, so EN→KO at 4096 was getting truncated
+        # mid-JSON for any article over ~400 English words — json.loads
+        # then failed and the user saw a spinner that ended with no
+        # Korean. Going to the model's max keeps full articles intact.
+        max_output_tokens=8192,
     )
     client = genai.Client(api_key=api_key)
     resp = None
@@ -194,7 +199,20 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        print(f"[translator] gemini returned non-JSON: {exc!r}", flush=True)
+        # Surface the actual response shape so we can spot truncation
+        # (Korean output hitting max_output_tokens) vs. real parse fail.
+        finish = getattr(resp, "candidates", [{}])
+        finish_reason = None
+        try:
+            finish_reason = finish[0].finish_reason if finish else None
+        except Exception:
+            pass
+        print(
+            f"[translator] gemini returned non-JSON: {exc!r} | "
+            f"finish_reason={finish_reason} | "
+            f"text_head={text[:200]!r} | text_tail={text[-200:]!r}",
+            flush=True,
+        )
         return None
 
 

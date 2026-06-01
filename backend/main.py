@@ -372,6 +372,46 @@ def _scrub_html_artifacts(line: str) -> str:
     return s
 
 
+def _scrub_paragraph(p: str) -> str:
+    """Run the paragraph-scrub steps that _split_paragraphs would have
+    applied at fetch time — but on a single string. Used to clean
+    cached paragraphs on read, since the reader_results table holds
+    pre-existing payloads that pre-date current filter improvements
+    (e.g. CoinDesk's `![alt](/_next/image?…)` markdown leaks)."""
+    if not p:
+        return ""
+    p = _IMG_MD_RE.sub("", p)
+    p = _scrub_html_artifacts(p)
+    p = _EMOJI_RE.sub("", p).strip()
+    if _GARBLE_CHAR in p:
+        return ""
+    if _CREDIT_PREFIX_RE.match(p):
+        return ""
+    if _CREDIT_WORDS_RE.search(p):
+        return ""
+    if _SECTION_HEADER_RE.match(p) or _BRACKETED_HEADER_RE.match(p):
+        return ""
+    if _DECORATIVE_DIVIDER_RE.search(p):
+        return ""
+    if _ATTR_FRAG_RE.search(p) and len(_ATTR_FRAG_RE.findall(p)) >= 2:
+        return ""
+    return p
+
+
+def _scrub_cached_paragraphs(payload: dict) -> dict:
+    """Defensive: re-run paragraph filters on a cached reader payload
+    before returning. No-op for fresh paragraphs."""
+    paras = payload.get("paragraphs") or []
+    cleaned: list[str] = []
+    for p in paras:
+        s = _scrub_paragraph(p)
+        if s and len(s) >= 30:
+            cleaned.append(s)
+    if cleaned != paras:
+        payload = {**payload, "paragraphs": cleaned}
+    return payload
+
+
 def _split_paragraphs(text: str) -> list[str]:
     """Clean trafilatura's body into reader-friendly paragraphs.
     One consistent rule for every article:
@@ -430,12 +470,16 @@ async def article(url: str):
     cached = cache.get(full_key)
     if cached is not None:
         await db.bump_counter("reader_cache_hits_mem")
-        return cached
+        return _scrub_cached_paragraphs(cached)
 
     # SQLite second-level cache — survives restart. Keeps trafilatura
     # work that's already been paid for.
     saved = await db.get_reader(url)
     if saved is not None:
+        # Apply the latest paragraph filters before serving, so stored
+        # paragraphs from before a filter improvement get cleaned up on
+        # the fly without forcing a re-extract.
+        saved = _scrub_cached_paragraphs(saved)
         cache.set(full_key, saved, 86400)
         await db.bump_counter("reader_cache_hits_disk")
         return saved
