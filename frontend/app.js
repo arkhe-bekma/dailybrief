@@ -37,6 +37,24 @@ function decodeEntities(s) {
   return _ent.value;
 }
 
+// Formal "DD MON YYYY H:MM AM/PM" — used in the reader modal next to
+// the word count. Example: "14 MAY 2026 7:13 PM".
+function fmtFormal(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const day = d.getDate();
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+  let hour = d.getHours();
+  const ampm = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${day} ${month} ${year} ${hour}:${min} ${ampm}`;
+}
+
 // More natural "when" display, mixed Korean/English to match the
 // reader's primary language.  Format:
 //   - Same day:  "오늘 14:32"
@@ -236,15 +254,14 @@ function renderVideosStrip(items) {
 // ── News card body ─────────────────────────────────────────────
 function newsBody(item) {
   const lang = item.lang || "en";
-  const whenLabel = fmtPub(item.ts);
+  // Date/time intentionally NOT shown on cards — it lives on the
+  // reader modal next to the word count, in a formal "14 MAY 2026
+  // 7:13 PM" format.
   const meta = el("div", { class: "meta" }, [
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
     item.premium ? el("span", { class: "premium-pip", title: "premium outlet" }, "★ PREMIUM") : null,
     el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
-    whenLabel
-      ? el("span", { class: "when", title: item.ts || "" }, `◷ ${whenLabel}`)
-      : null,
     item.score != null ? el("span", { class: "score-pill" }, `★${item.score}`) : null,
   ]);
   const head = el("h2", { class: "h", lang }, decodeEntities(item.title) || "");
@@ -622,12 +639,17 @@ function renderReader(content, data, item) {
     }));
   }
 
+  // Build the meta strip. Word-count and formal date sit as separate
+  // spans so they inherit the same mono-uppercase style from
+  // .reader-meta and the natural gap keeps them visually paired.
+  // Format: "562 WORDS    14 MAY 2026 7:13 PM"
+  const dateLabel = fmtFormal(item.ts);
   content.appendChild(el("div", { class: "reader-meta" }, [
     item.outlet ? el("span", { class: "src" }, item.outlet) : null,
     item.category ? el("span", { class: "tag" }, item.category.toUpperCase()) : null,
     data.byline ? el("span", {}, data.byline) : null,
-    item.ts ? el("span", {}, fmtWhen(item.ts)) : null,
-    data.word_count ? el("span", {}, `${data.word_count} words`) : null,
+    data.word_count ? el("span", { class: "reader-stats" }, `${data.word_count} WORDS`) : null,
+    dateLabel ? el("span", { class: "reader-stats" }, dateLabel) : null,
   ]));
 
   content.appendChild(el("h1", { class: "reader-title", lang },
