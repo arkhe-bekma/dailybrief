@@ -1718,7 +1718,11 @@ footer {
 .reader-card {
   position: relative;
   width: min(820px, calc(100vw - 32px));
-  max-height: 92vh;
+  /* Was 92vh — left only ~4vh top breathing room which made the
+     close + translate buttons feel pinned to the viewport edge.
+     86vh keeps content full-height while pushing the card ~7vh
+     below the top with the same 'place-items: center' parent. */
+  max-height: 86vh;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent),
     var(--bg-1);
@@ -1759,7 +1763,10 @@ footer {
    payload arrives and we know the source is non-Korean. */
 .reader-translate {
   position: absolute;
-  top: 16px;
+  /* Vertical center alignment with the × close button:
+     close: top 14px + height 34px → center @ 31px
+     pill : top ?  + height 26px → center @ 31px ⇒ top = 18px */
+  top: 18px;
   right: 56px;
   display: inline-flex;
   align-items: center;
