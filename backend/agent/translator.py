@@ -62,28 +62,35 @@ BODY:
 {body}
 
 REQUIREMENTS:
+- Default behavior: FULL TRANSLATION, paragraph by paragraph. Don't
+  drop anything. Keep every fact, number, name, quote, date in place.
 - Use newspaper register by default, but READ the article first and
-  match the energy of the original. A market-flash translation should
-  feel urgent; an op-ed should feel argued; a K-pop card should keep
-  its playful tone. Don't sterilise vivid writing.
+  match the energy of the original. A market-flash should feel urgent;
+  an op-ed should feel argued; a K-pop card should stay playful.
 - It is FINE to keep proper nouns, technical terms, ticker symbols,
   brand names, and well-known English acronyms (AI, GPU, ETF, SaaS,
   IPO …) in the source language. Mixing the two languages where it
   reads more naturally is preferred over forced literal translation.
-- If the article is long and rambling, you MAY compress it — keep all
-  load-bearing facts (numbers, names, dates, direct quotes) and drop
-  filler. Aim for ~70-90% of the original length when summarising;
-  full translation otherwise.
+- ONLY summarize if the article is genuinely long AND rambling
+  (typically > 1500 words AND obviously filler-heavy). When you DO
+  summarize, set summarized=true. Otherwise summarized MUST be false,
+  even if your output happens to be shorter than the input due to
+  language compactness. Length differences from language alone are
+  NOT summarization.
 - Do NOT add commentary, hedges, or "as a translator I …" framing.
   Output reads like a newspaper, not like a model.
+- The `note` field should almost always be empty (""). Only fill it
+  if there is genuinely useful context for the reader (e.g.
+  "이미지 캡션은 번역에서 제외" / "originally a paid op-ed"). Never
+  include filler like "AI translation" — the UI already labels that.
 - Preserve paragraph structure (~one input paragraph → one output
-  paragraph), unless compression merges or drops a paragraph.
+  paragraph), unless an explicit summarization merges or drops one.
 
 Return the result strictly in the requested JSON schema:
   title       — translated title
   paragraphs  — array of translated paragraph strings, in order
-  summarized  — true if you compressed, false if straight translation
-  note        — optional 1-line translator note in {tgt_name}, or ""
+  summarized  — true ONLY for genuine summarization (see above)
+  note        — usually empty; one short line of context if needed
 """
 
 

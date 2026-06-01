@@ -302,6 +302,29 @@ function _persistCardKo() {
   try { localStorage.setItem(CARD_KO_KEY, JSON.stringify([...CARD_KO_URLS])); } catch {}
 }
 
+// Mark a single item in every in-memory list (wire payload + DB-served
+// page override) as freshly translated. Used right after a successful
+// reader-modal /api/translate response so the main-feed card gains
+// the ✦한 badge + neon border without waiting for the next refresh.
+function markItemTranslated(url, td) {
+  if (!url || !td) return;
+  const dek = (td.paragraphs && td.paragraphs[0]) || "";
+  const title_ko = td.title || "";
+  const translated_at = Math.floor(Date.now() / 1000);
+  const apply = (list) => {
+    if (!Array.isArray(list)) return;
+    for (const m of list) {
+      if (m && m.url === url) {
+        m.title_ko = title_ko;
+        m.dek_ko = dek.slice(0, 280);
+        m.translated_at = translated_at;
+      }
+    }
+  };
+  apply(STATE.mixed);
+  apply(PAGE_OVERRIDE);
+}
+
 // Surgical re-render: swap a single .art element in place, preserving
 // its scroll position + leaving every other card untouched. Replaces
 // the old "paint(false) → rebuild everything" path that flashed the
@@ -807,6 +830,14 @@ async function toggleTranslation() {
     READER_STATE.view = "translated";
     renderReader(content, data, READER_STATE.item);
     updateTranslateButton();
+    // Live-update the underlying feed card so the ✦한 badge + neon
+    // border show up the instant the translation lands — no /api/brief
+    // refresh needed. Persist the toggle state too so closing the
+    // reader leaves the card in its Korean view.
+    markItemTranslated(READER_STATE.url, data);
+    CARD_KO_URLS.add(READER_STATE.url);
+    _persistCardKo();
+    rerenderCard(READER_STATE.url);
   } catch (e) {
     console.warn("translate failed:", e);
   } finally {
@@ -843,13 +874,13 @@ function renderReader(content, data, item) {
   content.appendChild(el("h1", { class: "reader-title", lang },
     data.title || item.title || "(no title)"));
 
-  // Translator note — shown only when the body is the translated view
-  // and the model added a one-line note (e.g. "요약본임" or
-  // "summarised from 1200 words").
-  if (data.translated && (data.note || data.summarized)) {
-    const noteText = data.note
-      || (lang === "ko" ? "AI 번역 · 요약본" : "AI translation · summarised");
-    content.appendChild(el("div", { class: "reader-tnote", lang }, noteText));
+  // Translator note — ONLY shown when the model explicitly added one
+  // (e.g. "이미지 캡션 생략" / "summarised from 1200 words"). The old
+  // behaviour of showing a generic "AI 번역 · 요약본" pip whenever
+  // data.summarized was true was misleading on short articles where
+  // nothing was actually compressed.
+  if (data.translated && data.note && data.note.trim()) {
+    content.appendChild(el("div", { class: "reader-tnote", lang }, data.note.trim()));
   }
 
   if (data.paragraphs && data.paragraphs.length) {
