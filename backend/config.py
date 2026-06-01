@@ -111,11 +111,11 @@ OUTLETS: list[dict] = [
     {"name": "Tom's Hardware","category": "tech", "lang": "en", "url": "https://www.tomshardware.com/feeds/all"},
     {"name": "Wired",        "category": "tech",  "lang": "en", "url": "https://www.wired.com/feed/rss"},
     {"name": "Engadget",     "category": "tech",  "lang": "en", "url": "https://www.engadget.com/rss.xml"},
-    {"name": "AnandTech",    "category": "tech",  "lang": "en", "url": "https://www.anandtech.com/rss/"},
+    {"name": "AnandTech",    "category": "tech",  "lang": "en", "url": "https://news.google.com/rss/search?q=site:anandtech.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "9to5Mac",      "category": "tech",  "lang": "en", "url": "https://9to5mac.com/feed/"},
 
     # AI / LLM (en)
-    {"name": "OpenAI",       "category": "ai",    "lang": "en", "url": "https://openai.com/blog/rss.xml"},
+    {"name": "OpenAI",       "category": "ai",    "lang": "en", "url": "https://openai.com/news/rss.xml"},
     {"name": "Hugging Face", "category": "ai",    "lang": "en", "url": "https://huggingface.co/blog/feed.xml"},
     {"name": "MIT Tech Rev", "category": "ai",    "lang": "en", "url": "https://www.technologyreview.com/feed/"},
     {"name": "VentureBeat AI","category": "ai",   "lang": "en", "url": "https://venturebeat.com/category/ai/feed/"},
@@ -124,7 +124,7 @@ OUTLETS: list[dict] = [
     # Crypto (en)
     {"name": "CoinDesk",     "category": "crypto","lang": "en", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"},
     {"name": "Decrypt",      "category": "crypto","lang": "en", "url": "https://decrypt.co/feed"},
-    {"name": "The Block",    "category": "crypto","lang": "en", "url": "https://www.theblock.co/rss.xml"},
+    {"name": "The Block",    "category": "crypto","lang": "en", "url": "https://news.google.com/rss/search?q=site:theblock.co&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Cointelegraph","category": "crypto","lang": "en", "url": "https://cointelegraph.com/rss"},
 
     # Korea — native (ko)
@@ -191,8 +191,8 @@ OUTLETS: list[dict] = [
     {"name": "Forbes",           "category": "biz", "lang": "en", "url": "https://www.forbes.com/business/feed/"},
     {"name": "Business Insider", "category": "biz", "lang": "en", "url": "https://feeds.businessinsider.com/custom/all"},
     {"name": "Fast Company",     "category": "biz", "lang": "en", "url": "https://www.fastcompany.com/latest/rss"},
-    {"name": "Inc.",             "category": "biz", "lang": "en", "url": "https://www.inc.com/rss.xml"},
-    {"name": "HBR",              "category": "biz", "lang": "en", "url": "https://hbr.org/feed"},
+    {"name": "Inc.",             "category": "biz", "lang": "en", "url": "https://news.google.com/rss/search?q=site:inc.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "HBR",              "category": "biz", "lang": "en", "url": "https://news.google.com/rss/search?q=site:hbr.org&hl=en-US&gl=US&ceid=US:en"},
 
     # Geopolitics (en) — 지정학 / 외교 / 안보
     {"name": "Foreign Policy",   "category": "geo", "lang": "en", "url": "https://foreignpolicy.com/feed/"},
@@ -203,7 +203,7 @@ OUTLETS: list[dict] = [
 
     # Korean entertainment — 한국 연예 (kent)
     {"name": "네이버 연예",     "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:entertain.naver.com&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "네이버 연예 종합", "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:n.news.naver.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "네이버 연예 종합", "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=%EC%97%B0%EC%98%88+%EC%A2%85%ED%95%A9&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "네이버 K-Pop",    "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:entertain.naver.com+%EC%BC%80%EC%9D%B4%ED%8C%9D&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "네이버 드라마",    "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:entertain.naver.com+%EB%93%9C%EB%9D%BC%EB%A7%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "네이버 영화",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:entertain.naver.com+%EC%98%81%ED%99%94&hl=ko&gl=KR&ceid=KR:ko"},
@@ -215,7 +215,7 @@ OUTLETS: list[dict] = [
     {"name": "텐아시아",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:tenasia.hankyung.com&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "일간스포츠",      "category": "kent", "lang": "ko", "url": "https://isplus.com/rss"},
     {"name": "TV리포트",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:tvreport.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "스포츠조선 연예",  "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:sports.chosun.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "스포츠조선 연예",  "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=%EC%8A%A4%ED%8F%AC%EC%B8%A0%EC%A1%B0%EC%84%A0+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "스포츠경향 연예",  "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:sports.khan.co.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "스포츠동아 연예",  "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:sports.donga.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "헤럴드POP",       "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:pop.heraldcorp.com&hl=ko&gl=KR&ceid=KR:ko"},
@@ -238,7 +238,7 @@ OUTLETS: list[dict] = [
     {"name": "Koreaboo",       "category": "kent", "lang": "en", "url": "https://www.koreaboo.com/feed"},
     {"name": "allkpop",        "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:allkpop.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Hellokpop",      "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:hellokpop.com&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "K-Pop Herald",   "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:kpopherald.koreaherald.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "K-Pop Herald",   "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=K-Pop+Herald&hl=en-US&gl=US&ceid=US:en"},
 ]
 
 

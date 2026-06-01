@@ -961,7 +961,17 @@ a { color: inherit; text-decoration: none; }
   text-overflow: ellipsis;
 }
 .art .meta .src { color: var(--text-2); }
-.art .meta .when { color: var(--dim); }
+.art .meta .when {
+  color: var(--neon-cyan);
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-shadow: 0 0 8px rgba(0,225,255,0.35);
+  /* Sit at the end of the meta row so the timestamp is easy to spot
+     even when an outlet name truncates with ellipsis. */
+  margin-left: auto;
+  padding-left: 4px;
+  flex-shrink: 0;
+}
 .art .meta .lang {
   padding: 0 5px;
   border-radius: 3px;
@@ -980,12 +990,12 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 0.6px;
 }
 .art .meta .score-pill {
-  margin-left: auto;
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 700;
   color: var(--neon-yellow);
   letter-spacing: 0.5px;
+  padding-left: 4px;
 }
 .art .meta .premium-pip {
   font-family: var(--mono);

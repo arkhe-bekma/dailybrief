@@ -95,6 +95,31 @@ async def brief():
         prices.fetch_tape(),
     )
 
+    # ── Stage A: persist EVERY fetched article first. ───────────────
+    # Before this fix the curator picked top 250 and only those got
+    # saved to the DB — which meant a lot of outlets fetched articles
+    # but the lab "Quality Inspector" still showed NO ARTICLES because
+    # the article never made it past the in-memory curator. Now the
+    # DB holds the full archive of what each outlet actually delivered.
+    try:
+        baseline_rows = [
+            {
+                "url": a.url,
+                "title": a.title,
+                "image": a.image,
+                "outlet": a.outlet,
+                "category": a.category,
+                "lang": a.lang,
+                "summary": a.summary,
+                "published_at": a.published,
+            }
+            for a in articles if a.url
+        ]
+        if baseline_rows:
+            await db.upsert_articles(baseline_rows)
+    except Exception as exc:
+        print(f"[db] baseline upsert failed: {exc!r}", flush=True)
+
     # Over-fetch so we still hit TOP_K visible items after enrich_top
     # throws out paywalls / logos.
     raw_top = await curator.rank(articles, top_k=int(config.TOP_K * 1.7))

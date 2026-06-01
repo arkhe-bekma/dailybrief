@@ -37,7 +37,12 @@ function decodeEntities(s) {
   return _ent.value;
 }
 
-// More natural "when" display: "오늘 14:32" / "어제 09:11" / "May 28"
+// More natural "when" display, mixed Korean/English to match the
+// reader's primary language.  Format:
+//   - Same day:  "오늘 14:32"
+//   - Yesterday: "어제 09:11"
+//   - This year: "5월 28일 14:32"  /  "May 28 14:32"
+//   - Older:     "2024.05.28"      /  "May 28, 2024"
 function fmtPub(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -46,11 +51,25 @@ function fmtPub(iso) {
   const sameDay = d.toDateString() === now.toDateString();
   const yest = new Date(now); yest.setDate(now.getDate() - 1);
   const isYest = d.toDateString() === yest.toDateString();
+  const sameYear = d.getFullYear() === now.getFullYear();
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
-  if (sameDay)  return `${hh}:${mm}`;
-  if (isYest)   return `Y · ${hh}:${mm}`;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  // Detect Korean preference from the page lang or the brief profile.
+  const lang =
+    (STATE.profile && STATE.profile.primary_lang) ||
+    document.documentElement.lang ||
+    "en";
+  const ko = lang === "ko";
+  if (sameDay)  return ko ? `오늘 ${hh}:${mm}` : `TODAY ${hh}:${mm}`;
+  if (isYest)   return ko ? `어제 ${hh}:${mm}` : `YEST ${hh}:${mm}`;
+  if (sameYear) {
+    return ko
+      ? `${d.getMonth() + 1}월 ${d.getDate()}일 ${hh}:${mm}`
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ` ${hh}:${mm}`;
+  }
+  return ko
+    ? `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`
+    : d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
 // Backend already merges real + AI URLs into item.image.
@@ -217,12 +236,15 @@ function renderVideosStrip(items) {
 // ── News card body ─────────────────────────────────────────────
 function newsBody(item) {
   const lang = item.lang || "en";
+  const whenLabel = fmtPub(item.ts);
   const meta = el("div", { class: "meta" }, [
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
     item.premium ? el("span", { class: "premium-pip", title: "premium outlet" }, "★ PREMIUM") : null,
     el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
-    el("span", { class: "when" }, fmtPub(item.ts)),
+    whenLabel
+      ? el("span", { class: "when", title: item.ts || "" }, `◷ ${whenLabel}`)
+      : null,
     item.score != null ? el("span", { class: "score-pill" }, `★${item.score}`) : null,
   ]);
   const head = el("h2", { class: "h", lang }, decodeEntities(item.title) || "");
