@@ -597,6 +597,17 @@ async function silentRefresh() {
 }
 
 // ── Reader modal ───────────────────────────────────────────────
+// State the translate button consults: which article is currently
+// open, its original payload, its translated payload (if any), and
+// which view is showing.
+let READER_STATE = {
+  url: null,
+  item: null,
+  original: null,
+  translated: null,
+  view: "original",   // "original" | "translated"
+};
+
 async function openReader(url, item) {
   const modal = document.getElementById("reader");
   if (!modal) return;
@@ -607,6 +618,10 @@ async function openReader(url, item) {
   lockBodyScroll();
   const content = modal.querySelector(".reader-content");
   content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
+  READER_STATE = {
+    url, item: item || {}, original: null, translated: null, view: "original",
+  };
+  updateTranslateButton();
 
   try {
     const r = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
@@ -617,9 +632,84 @@ async function openReader(url, item) {
         `<a class="reader-original" href="${url}" target="_blank" rel="noopener">open original ↗</a></div>`;
       return;
     }
+    READER_STATE.original = data;
+    updateTranslateButton();
     renderReader(content, data, item || {});
   } catch (e) {
     content.innerHTML = `<div class="reader-loading">error: ${e.message}</div>`;
+  }
+}
+
+// Decide the target language: if the article is English, go to KR.
+// If Korean, go to EN. Otherwise, default to KR.
+function targetLangFor(srcLang) {
+  if (srcLang === "ko") return "en";
+  return "ko";
+}
+
+function updateTranslateButton() {
+  const btn = document.getElementById("reader-translate");
+  if (!btn) return;
+  const data = READER_STATE.original;
+  if (!data) {
+    btn.classList.remove("active", "loading");
+    return;
+  }
+  const tgt = targetLangFor(data.lang || "en");
+  const label = btn.querySelector(".rt-label");
+  if (label) {
+    // Glyph reflects what you'll see AFTER toggling.
+    if (READER_STATE.view === "translated") {
+      // Currently showing translated → button takes you back to source.
+      label.textContent = (data.lang || "en").toUpperCase() === "KO" ? "한" : "EN";
+    } else {
+      label.textContent = tgt === "ko" ? "한" : "EN";
+    }
+  }
+  btn.classList.toggle("active", READER_STATE.view === "translated");
+}
+
+async function toggleTranslation() {
+  const btn = document.getElementById("reader-translate");
+  if (!btn || !READER_STATE.original) return;
+  const content = document.querySelector("#reader .reader-content");
+  // If we already have a translation, just flip the view.
+  if (READER_STATE.translated && READER_STATE.view === "original") {
+    READER_STATE.view = "translated";
+    renderReader(content, READER_STATE.translated, READER_STATE.item);
+    updateTranslateButton();
+    return;
+  }
+  if (READER_STATE.view === "translated") {
+    READER_STATE.view = "original";
+    renderReader(content, READER_STATE.original, READER_STATE.item);
+    updateTranslateButton();
+    return;
+  }
+  // First-time translate: fire the API.
+  btn.classList.add("loading");
+  try {
+    const tgt = targetLangFor(READER_STATE.original.lang || "en");
+    const r = await fetch(
+      `/api/translate?url=${encodeURIComponent(READER_STATE.url)}&lang=${tgt}`,
+    );
+    const data = await r.json();
+    if (data.error || !data.paragraphs) {
+      btn.classList.remove("loading");
+      btn.title = data.error || "translation failed";
+      // Briefly flash the button red — no toast framework here.
+      btn.style.borderColor = "var(--down)";
+      setTimeout(() => { btn.style.borderColor = ""; }, 1500);
+      return;
+    }
+    READER_STATE.translated = data;
+    READER_STATE.view = "translated";
+    renderReader(content, data, READER_STATE.item);
+    updateTranslateButton();
+  } catch (e) {
+    console.warn("translate failed:", e);
+  } finally {
+    btn.classList.remove("loading");
   }
 }
 
@@ -652,6 +742,15 @@ function renderReader(content, data, item) {
   content.appendChild(el("h1", { class: "reader-title", lang },
     data.title || item.title || "(no title)"));
 
+  // Translator note — shown only when the body is the translated view
+  // and the model added a one-line note (e.g. "요약본임" or
+  // "summarised from 1200 words").
+  if (data.translated && (data.note || data.summarized)) {
+    const noteText = data.note
+      || (lang === "ko" ? "AI 번역 · 요약본" : "AI translation · summarised");
+    content.appendChild(el("div", { class: "reader-tnote", lang }, noteText));
+  }
+
   if (data.paragraphs && data.paragraphs.length) {
     const body = el("div", { class: "reader-body" });
     data.paragraphs.forEach((p) => body.appendChild(el("p", { lang }, p)));
@@ -672,6 +771,13 @@ function renderReader(content, data, item) {
 function closeReader() {
   document.getElementById("reader").classList.add("hidden");
   unlockBodyScroll();
+  // Reset translation state so the next article starts fresh.
+  READER_STATE = { url: null, item: null, original: null, translated: null, view: "original" };
+  const btn = document.getElementById("reader-translate");
+  if (btn) {
+    btn.classList.remove("active", "loading");
+    btn.style.borderColor = "";
+  }
 }
 
 // ── Flow detail modal (whales / trades / videos) ───────────────
@@ -988,6 +1094,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // ×/backdrop in index.html are each wired ONCE here.
   document.querySelector("#reader .reader-close")?.addEventListener("click", closeReader);
   document.querySelector("#reader .reader-backdrop")?.addEventListener("click", closeReader);
+  // Translation toggle (local-only feature) — single click, switches
+  // the article body between original and AI-translated views.
+  document.getElementById("reader-translate")?.addEventListener("click", toggleTranslation);
   document.querySelectorAll('#flow [data-close="flow"]').forEach((n) =>
     n.addEventListener("click", closeFlow));
   document.addEventListener("keydown", (e) => {

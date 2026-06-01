@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import cache, config, db, mixer, tickers
-from backend.agent import curator, illustrator, reader, registry, sorter, summary
+from backend.agent import curator, illustrator, reader, registry, sorter, summary, translator
 from backend.sources import politicians, prices, rss, whales, youtube
 
 load_dotenv()
@@ -76,6 +76,39 @@ async def _start():
         print(f"[startup] refresh agent failed to schedule: {exc!r}", flush=True)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
+
+@app.get("/api/translate")
+async def api_translate(url: str, lang: str = "ko"):
+    """Translate an article into `lang`. Pulls the reader payload from
+    the SQLite cache (so the user must have opened the article at
+    least once via /api/article — usually true since the reader modal
+    opens the translation request)."""
+    if not url.startswith(("http://", "https://")):
+        return {"error": "invalid url"}
+    payload = await db.get_reader(url)
+    if not payload:
+        # Lazily fetch the reader body before translating, so the
+        # translate button works the first time on any article too.
+        reading = await reader.extract(url)
+        if not reading:
+            return {"error": "could not extract the article body"}
+        payload = {
+            "url": url,
+            "title": reading.title or "",
+            "image": reading.image,
+            "byline": reading.byline,
+            "excerpt": reading.excerpt or "",
+            "lang": _detect_lang(reading.title or ""),
+            "word_count": len((reading.text or "").split()),
+            "paragraphs": _split_paragraphs(reading.text or ""),
+        }
+        await db.save_reader(url, payload)
+
+    out = await translator.translate(payload, target_lang=lang)
+    if out is None:
+        return {"error": "translation unavailable — check ANTHROPIC_API_KEY or model error"}
+    return out
 
 
 @app.get("/api/health")
