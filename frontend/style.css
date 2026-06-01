@@ -1046,28 +1046,21 @@ a { color: inherit; text-decoration: none; }
 /* Body snippet — keep it centered to match the title rhythm. */
 .art .dek { text-align: center; }
 .art .meta { justify-content: center; }
-/* dek = body snippet — make it always-visible and pretty */
+/* dek = body snippet — make it always-visible and pretty.
+   Slightly bumped from 12.5 → 13.5 base so the body is comfortable
+   reading on desktop; per-tier overrides below tune it further. */
 .art .dek {
   color: var(--text-2);
   font-family: var(--sans);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.55;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0;
-  opacity: 0.85;
+  opacity: 0.92;
 }
 .art .dek[lang="ko"] { font-family: var(--kr); }
-.art .dek {
-  color: var(--text-2);
-  font-size: 12.5px;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin: 0;
-}
 .art .why {
   font-family: var(--accent-serif);
   font-style: italic;
@@ -1160,7 +1153,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 11px;
 }
 .tier-feature .h {
-  font-size: calc(clamp(22px, 1.9vw, 28px) * var(--text-scale, 1));
+  font-size: calc(clamp(24px, 2.1vw, 32px) * var(--text-scale, 1));
   font-weight: 800;
   font-variation-settings: "opsz" 72, "wdth" 90;
   line-height: 1.08;
@@ -1171,11 +1164,11 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 .tier-feature .h[lang="ko"] {
-  font-size: calc(clamp(19px, 1.7vw, 23px) * var(--text-scale, 1));
+  font-size: calc(clamp(21px, 1.85vw, 26px) * var(--text-scale, 1));
   font-weight: 800;
   letter-spacing: -0.8px;
 }
-.tier-feature .dek { -webkit-line-clamp: 9; font-size: 13px; }
+.tier-feature .dek { -webkit-line-clamp: 9; font-size: 14px; line-height: 1.55; }
 
 /* ── LARGE — image ON TOP, full card width ──────────────── */
 .tier-large {
@@ -1188,7 +1181,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 10px;
 }
 .tier-large .h {
-  font-size: calc(clamp(20px, 1.7vw, 24px) * var(--text-scale, 1));
+  font-size: calc(clamp(22px, 1.9vw, 28px) * var(--text-scale, 1));
   font-weight: 800;
   font-variation-settings: "opsz" 60, "wdth" 92;
   line-height: 1.12;
@@ -1198,8 +1191,8 @@ a { color: inherit; text-decoration: none; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.tier-large .h[lang="ko"] { font-size: calc(clamp(17.5px, 1.55vw, 20px) * var(--text-scale, 1)); }
-.tier-large .dek { -webkit-line-clamp: 8; font-size: 12.5px; }
+.tier-large .h[lang="ko"] { font-size: calc(clamp(19px, 1.7vw, 23px) * var(--text-scale, 1)); }
+.tier-large .dek { -webkit-line-clamp: 8; font-size: 13.5px; line-height: 1.5; }
 
 /* ── MEDIUM — image ON TOP, full card width ─────────────── */
 .tier-medium {
@@ -1213,7 +1206,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 9px;
 }
 .tier-medium .h {
-  font-size: calc(clamp(18px, 1.4vw, 22px) * var(--text-scale, 1));    /* >2× the 9.5px meta */
+  font-size: calc(clamp(20px, 1.55vw, 26px) * var(--text-scale, 1));
   font-weight: 800;
   font-variation-settings: "opsz" 48, "wdth" 90;
   line-height: 1.12;
@@ -1224,10 +1217,10 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 .tier-medium .h[lang="ko"] {
-  font-size: calc(clamp(16px, 1.25vw, 19px) * var(--text-scale, 1));
+  font-size: calc(clamp(17.5px, 1.4vw, 22px) * var(--text-scale, 1));
   letter-spacing: -0.8px;
 }
-.tier-medium .dek { -webkit-line-clamp: 8; font-size: 12px; }
+.tier-medium .dek { -webkit-line-clamp: 8; font-size: 13px; line-height: 1.5; }
 
 /* ── SMALL — image ON TOP, dominates card height ──────── */
 .tier-small {
@@ -1241,7 +1234,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 8px;
 }
 .tier-small .h {
-  font-size: calc(clamp(16px, 1.25vw, 19px) * var(--text-scale, 1));
+  font-size: calc(clamp(18px, 1.4vw, 22px) * var(--text-scale, 1));
   font-weight: 800;
   font-variation-settings: "opsz" 36, "wdth" 88;
   line-height: 1.14;
@@ -1252,10 +1245,10 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 .tier-small .h[lang="ko"] {
-  font-size: calc(clamp(14.5px, 1.1vw, 17px) * var(--text-scale, 1));
+  font-size: calc(clamp(16px, 1.25vw, 19px) * var(--text-scale, 1));
   letter-spacing: -0.7px;
 }
-.tier-small .dek { -webkit-line-clamp: 7; font-size: 11.5px; }
+.tier-small .dek { -webkit-line-clamp: 7; font-size: 12.5px; line-height: 1.5; }
 
 /* ── HEADLINE — NO image, big bold display title + dek snippet
        Box shrinks to content (no min-height). */
@@ -1267,7 +1260,7 @@ a { color: inherit; text-decoration: none; }
 }
 .tier-headline .h {
   font-family: var(--display);
-  font-size: calc(clamp(22px, 2.1vw, 30px) * var(--text-scale, 1));
+  font-size: calc(clamp(24px, 2.3vw, 34px) * var(--text-scale, 1));
   font-weight: 800;
   font-variation-settings: "opsz" 88, "wdth" 85;
   line-height: 1.02;
@@ -1282,12 +1275,13 @@ a { color: inherit; text-decoration: none; }
   font-family: var(--kr);
   font-variation-settings: normal;
   font-weight: 900;
-  font-size: calc(clamp(20px, 1.85vw, 26px) * var(--text-scale, 1));
+  font-size: calc(clamp(22px, 2vw, 28px) * var(--text-scale, 1));
   letter-spacing: -1px;
   line-height: 1.18;
 }
 .tier-headline .dek {
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.5;
   -webkit-line-clamp: 3;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1300,7 +1294,7 @@ a { color: inherit; text-decoration: none; }
 }
 .tier-flash .h {
   font-family: var(--display);
-  font-size: calc(clamp(17px, 1.55vw, 22px) * var(--text-scale, 1));   /* >2× meta */
+  font-size: calc(clamp(19px, 1.7vw, 24px) * var(--text-scale, 1));
   font-weight: 800;
   font-variation-settings: "opsz" 44, "wdth" 86;
   line-height: 1.12;
@@ -1314,12 +1308,13 @@ a { color: inherit; text-decoration: none; }
   font-family: var(--kr);
   font-variation-settings: normal;
   font-weight: 800;
-  font-size: calc(clamp(15.5px, 1.4vw, 19px) * var(--text-scale, 1));
+  font-size: calc(clamp(17px, 1.5vw, 21px) * var(--text-scale, 1));
   line-height: 1.22;
   letter-spacing: -0.8px;
 }
 .tier-flash .dek {
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.5;
   -webkit-line-clamp: 2;
   display: -webkit-box;
   -webkit-box-orient: vertical;
