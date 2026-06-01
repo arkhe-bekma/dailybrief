@@ -103,6 +103,14 @@ def _init_sync() -> None:
             "ALTER TABLE articles ADD COLUMN weight REAL DEFAULT 1.0",
             "ALTER TABLE articles ADD COLUMN premium_body TEXT",
             "ALTER TABLE articles ADD COLUMN quality REAL DEFAULT 0",
+            # Card-level translation fields. Populated when /api/translate
+            # successfully translates an article: title_ko gets the
+            # translated headline, dek_ko gets the first ~280 chars of
+            # the first translated paragraph. Their presence is what
+            # tells the UI to render the neon border + ✦한 badge.
+            "ALTER TABLE articles ADD COLUMN title_ko TEXT",
+            "ALTER TABLE articles ADD COLUMN dek_ko TEXT",
+            "ALTER TABLE articles ADD COLUMN translated_at INTEGER",
         ):
             try:
                 c.execute(stmt)
@@ -183,6 +191,7 @@ def _list_articles_sync(
         rows = c.execute(
             f"SELECT url, title, image, outlet, category, lang, summary, score, "
             f"why, image_source, tier, premium, weight, premium_body, quality, "
+            f"title_ko, dek_ko, translated_at, "
             f"published_at, fetched_at FROM articles {where} "
             f"ORDER BY premium DESC, score DESC, fetched_at DESC LIMIT ? OFFSET ?",
             args,
@@ -275,6 +284,93 @@ async def upsert_articles(rows: list[dict]) -> int:
     if not rows:
         return 0
     return await asyncio.to_thread(_upsert_articles_batch_sync, rows)
+
+
+# ── Card-level translation persistence ─────────────────────────────
+def _save_card_translation_sync(
+    url: str, title_ko: str, dek_ko: str,
+) -> bool:
+    """Stamp the card-level translation onto the articles row. Returns
+    True if a row was updated, False if no row existed (article was
+    only in reader_results / not in the main articles table)."""
+    now = int(time.time())
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles SET title_ko = ?, dek_ko = ?, translated_at = ? "
+            "WHERE url = ?",
+            (title_ko, dek_ko, now, url),
+        )
+        return cur.rowcount > 0
+
+
+async def save_card_translation(
+    url: str, title_ko: str, dek_ko: str,
+) -> bool:
+    return await asyncio.to_thread(
+        _save_card_translation_sync, url, title_ko, dek_ko,
+    )
+
+
+def _get_card_translation_sync(url: str) -> dict | None:
+    with closing(_conn()) as c:
+        row = c.execute(
+            "SELECT title_ko, dek_ko, translated_at FROM articles "
+            "WHERE url = ? AND title_ko IS NOT NULL",
+            (url,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+async def get_card_translation(url: str) -> dict | None:
+    return await asyncio.to_thread(_get_card_translation_sync, url)
+
+
+def _get_card_translations_batch_sync(urls: list[str]) -> dict[str, dict]:
+    if not urls:
+        return {}
+    out: dict[str, dict] = {}
+    with closing(_conn()) as c:
+        # IN-clause batched 200 at a time so a giant url list doesn't
+        # blow past SQLite's 999-parameter limit.
+        for i in range(0, len(urls), 200):
+            chunk = urls[i:i + 200]
+            placeholders = ",".join("?" * len(chunk))
+            rows = c.execute(
+                f"SELECT url, title_ko, dek_ko, translated_at "
+                f"FROM articles WHERE title_ko IS NOT NULL "
+                f"AND url IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for r in rows:
+                out[r["url"]] = dict(r)
+    return out
+
+
+async def get_card_translations(urls: list[str]) -> dict[str, dict]:
+    """Batch lookup. Returns {url: {title_ko, dek_ko, translated_at}}
+    for any URLs in the input that actually have a saved translation."""
+    return await asyncio.to_thread(_get_card_translations_batch_sync, urls)
+
+
+def _update_article_summary_sync(url: str, summary: str) -> bool:
+    """Refresh articles.summary with a richer body excerpt (typically
+    the first paragraph of a successful reader extract). Only updates
+    when the new text is meaningfully longer than the existing one —
+    avoids overwriting curator-supplied summaries with shorter junk."""
+    if not summary:
+        return False
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles "
+            "SET summary = ? "
+            "WHERE url = ? AND (summary IS NULL OR length(summary) < length(?))",
+            (summary, url, summary),
+        )
+        return cur.rowcount > 0
+
+
+async def update_article_summary(url: str, summary: str) -> bool:
+    return await asyncio.to_thread(_update_article_summary_sync, url, summary)
 
 
 # ── reader cache ────────────────────────────────────────────────────

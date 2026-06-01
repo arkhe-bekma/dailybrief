@@ -375,6 +375,19 @@ async def translate(
     except Exception as exc:
         print(f"[translator] disk cache save failed: {exc!r}", flush=True)
 
+    # Card-level fields: stamp the translated headline + first paragraph
+    # onto the articles row so the main feed can render the neon-border
+    # badge + offer an instant card-level KO toggle. Only do this for
+    # the Korean target — that's the only flavour the UI exposes today.
+    if tgt_lang == "ko" and url:
+        first_para = next((p.strip() for p in out_paragraphs if p.strip()), "")
+        dek_ko = first_para[:280]
+        title_ko = (parsed.get("title") or title or "").strip()[:300]
+        try:
+            await db.save_card_translation(url, title_ko, dek_ko)
+        except Exception as exc:
+            print(f"[translator] card-translation save failed: {exc!r}", flush=True)
+
     return result
 
 

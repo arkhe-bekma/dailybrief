@@ -77,6 +77,12 @@ def from_news(items: list[dict]) -> list[dict]:
             "premium": bool(a.get("premium")),
             "weight": float(a.get("weight") or 1.0),
             "quality": float(a.get("quality") or 0),
+            # Saved card-level translation, if any. Presence of title_ko
+            # is what tells the front end to render the neon border +
+            # ✦한 badge on the card.
+            "title_ko": a.get("title_ko"),
+            "dek_ko": a.get("dek_ko"),
+            "translated_at": a.get("translated_at"),
         })
     return out
 

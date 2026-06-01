@@ -909,6 +909,93 @@ a { color: inherit; text-decoration: none; }
 /* User wants ONLY the photo zoom on hover/tap — no card lift, no
    highlight overlay, no accent-bar growth. */
 
+/* ── Translated-article affordance ───────────────────────────
+   Cards whose body has been AI-translated and saved to the DB get a
+   subtle neon-mag border + soft glow so the user can spot them at a
+   glance. Click the ✦한 badge on the image to flip title + dek into
+   Korean inline; click the card while flipped to open the reader
+   already in translated view. */
+.art.has-ko {
+  border-color: rgba(255,43,214,0.42);
+  box-shadow:
+    0 0 0 1px rgba(255,43,214,0.18),
+    0 0 22px rgba(255,43,214,0.18);
+}
+.art.has-ko.ko-on {
+  border-color: rgba(255,43,214,0.65);
+  box-shadow:
+    0 0 0 1px rgba(255,43,214,0.30),
+    0 0 28px rgba(255,43,214,0.35);
+}
+/* Image wrapper — gives us a positioning context for the floating
+   badge. Inherits sizing from the inner .img so existing tier rules
+   (.tier-hero .img { aspect-ratio: 21/9 ... }) still drive the layout. */
+.art .img-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* ✦한 toggle that sits on the image's top-right corner. */
+.ko-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  height: 22px;
+  background: rgba(11,13,24,0.78);
+  border: 1px solid rgba(255,43,214,0.55);
+  border-radius: 11px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 9.5px;
+  letter-spacing: 0.6px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  text-transform: uppercase;
+  transition: border-color 120ms, box-shadow 120ms, transform 60ms;
+}
+.ko-badge .ko-spark {
+  color: var(--neon-mag);
+  font-size: 10px;
+  text-shadow: 0 0 8px rgba(255,43,214,0.55);
+}
+.ko-badge .ko-text[lang="ko"] {
+  font-family: var(--kr);
+  letter-spacing: 0.2px;
+}
+.ko-badge:hover {
+  border-color: var(--neon-mag);
+  box-shadow: 0 0 14px rgba(255,43,214,0.40);
+}
+.ko-badge:active { transform: scale(0.94); }
+.art.ko-on .ko-badge {
+  background: var(--neon-mag);
+  border-color: var(--neon-mag);
+  color: #1a0014;
+}
+.art.ko-on .ko-badge .ko-spark {
+  color: #1a0014;
+  text-shadow: none;
+}
+/* When the card has no image (text-only tier), the badge falls back
+   into the meta line via .ko-badge-inline. */
+.ko-badge.ko-badge-inline {
+  position: static;
+  margin-left: 4px;
+  height: 18px;
+  padding: 2px 7px;
+  font-size: 8.5px;
+}
+
 /* category accent bar (static — no grow on hover) */
 .art::before {
   content: "";

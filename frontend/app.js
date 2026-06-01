@@ -252,11 +252,14 @@ function renderVideosStrip(items) {
 }
 
 // ── News card body ─────────────────────────────────────────────
-function newsBody(item) {
-  const lang = item.lang || "en";
-  // Date/time intentionally NOT shown on cards — it lives on the
-  // reader modal next to the word count, in a formal "14 MAY 2026
-  // 7:13 PM" format.
+function newsBody(item, opts = {}) {
+  // When the card is in its "translated view" we swap title + dek for
+  // the saved Korean versions and re-tag the meta line as KO so
+  // Pretendard kicks in for the headline.
+  const koView = !!opts.koView && !!item.title_ko;
+  const lang = koView ? "ko" : (item.lang || "en");
+  const titleText = koView && item.title_ko ? item.title_ko : (item.title || "");
+  const dekText   = koView && item.dek_ko   ? item.dek_ko   : (item.dek || "");
   const meta = el("div", { class: "meta" }, [
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
@@ -264,8 +267,8 @@ function newsBody(item) {
     el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
     item.score != null ? el("span", { class: "score-pill" }, `★${item.score}`) : null,
   ]);
-  const head = el("h2", { class: "h", lang }, decodeEntities(item.title) || "");
-  const dek = item.dek ? el("p", { class: "dek", lang }, decodeEntities(item.dek)) : null;
+  const head = el("h2", { class: "h", lang }, decodeEntities(titleText) || "");
+  const dek = dekText ? el("p", { class: "dek", lang }, decodeEntities(dekText)) : null;
   const why = item.why ? el("div", { class: "why", lang }, item.why) : null;
   const sparks = item.sparks || {};
   const tickers = (item.tickers || []).filter((t) => sparks[t]);
@@ -286,29 +289,71 @@ function newsBody(item) {
   return { meta, head, dek, why, sparkRow };
 }
 
+// Set of article URLs currently rendered in their Korean-translated
+// view. Survives only the browser tab; persisted to localStorage so
+// pagination + chip clicks keep the toggle state.
+const CARD_KO_KEY = "dailybrief.cardKo.v1";
+let CARD_KO_URLS = new Set();
+try {
+  const raw = localStorage.getItem(CARD_KO_KEY);
+  if (raw) CARD_KO_URLS = new Set(JSON.parse(raw));
+} catch {}
+function _persistCardKo() {
+  try { localStorage.setItem(CARD_KO_KEY, JSON.stringify([...CARD_KO_URLS])); } catch {}
+}
+
 function renderNewsCard(item, tier) {
-  const parts = newsBody(item);
+  const inKo = !!item.title_ko && CARD_KO_URLS.has(item.url);
+  const parts = newsBody(item, { koView: inKo });
   const cat = item.category || "world";
+  const klass = [`art`, `tier-${tier}`, `cat-${cat}`];
+  if (item.title_ko) klass.push("has-ko");
+  if (inKo) klass.push("ko-on");
   const node = el("a", {
-    class: `art tier-${tier} cat-${cat}`,
+    class: klass.join(" "),
     href: item.url || "#",
     target: "_blank",
     rel: "noopener",
+    "data-url": item.url || "",
   });
 
   const wantsImage = ["hero", "feature", "large", "medium", "small"].includes(tier);
   const imgUrl = wantsImage ? pickImage(item) : null;
+  // ✦한 / ✦EN badge floats over the image. Only rendered if a
+  // translation exists for this URL.
+  let koBadge = null;
+  if (item.title_ko) {
+    koBadge = el("button", {
+      class: "ko-badge",
+      type: "button",
+      "data-ko-toggle": "1",
+      title: "AI 번역 보기 / 원문 보기",
+      "aria-label": "translate toggle",
+    }, [
+      el("span", { class: "ko-spark", "aria-hidden": "true" }, "✦"),
+      el("span", { class: "ko-text", lang: "ko" }, inKo ? "원문" : "한"),
+    ]);
+  }
+
   if (imgUrl) {
+    const imgWrap = el("div", { class: "img-wrap" });
     const imgEl = el("div", { class: "img", style: `background-image:url('${imgUrl}')` });
+    imgWrap.appendChild(imgEl);
+    if (koBadge) imgWrap.appendChild(koBadge);
     if (tier === "hero") {
-      node.appendChild(imgEl);
+      node.appendChild(imgWrap);
       node.appendChild(el("div", { class: "body" }, [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow]));
     } else {
-      node.appendChild(imgEl);
+      node.appendChild(imgWrap);
       [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
     }
   } else {
     [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
+    // No image? Put the badge inline with the meta line.
+    if (koBadge) {
+      koBadge.classList.add("ko-badge-inline");
+      parts.meta.appendChild(koBadge);
+    }
   }
   return node;
 }
@@ -608,7 +653,7 @@ let READER_STATE = {
   view: "original",   // "original" | "translated"
 };
 
-async function openReader(url, item) {
+async function openReader(url, item, opts = {}) {
   const modal = document.getElementById("reader");
   if (!modal) return;
   modal.classList.remove("hidden");
@@ -619,7 +664,8 @@ async function openReader(url, item) {
   const content = modal.querySelector(".reader-content");
   content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
   READER_STATE = {
-    url, item: item || {}, original: null, translated: null, view: "original",
+    url, item: item || {}, original: null, translated: null,
+    view: opts.initialKo ? "translated" : "original",
   };
   updateTranslateButton();
 
@@ -633,6 +679,26 @@ async function openReader(url, item) {
       return;
     }
     READER_STATE.original = data;
+    // If the card was in KO state when clicked, jump straight to the
+    // translated view. The translation is usually already cached in
+    // SQLite (since the card badge only appears when a translation
+    // exists), so this is a near-instant DB lookup.
+    if (opts.initialKo) {
+      try {
+        const tr = await fetch(
+          `/api/translate?url=${encodeURIComponent(url)}&lang=ko`,
+        );
+        const td = await tr.json();
+        if (!td.error && td.paragraphs) {
+          READER_STATE.translated = td;
+          READER_STATE.view = "translated";
+          updateTranslateButton();
+          renderReader(content, td, item || {});
+          return;
+        }
+      } catch {}
+      // Translation fetch failed — fall through to showing the original.
+    }
     updateTranslateButton();
     renderReader(content, data, item || {});
   } catch (e) {
@@ -1092,13 +1158,31 @@ document.addEventListener("DOMContentLoaded", () => {
   // Intercept article-card clicks → open the reader modal.
   // ⌘/Ctrl/Shift/middle-click keeps the default behaviour (new tab).
   document.addEventListener("click", (e) => {
+    // Card-level KO toggle has priority — clicking the badge must not
+    // also open the reader.
+    const koBtn = e.target.closest("[data-ko-toggle]");
+    if (koBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const art = koBtn.closest(".art");
+      const url = art?.getAttribute("data-url") || art?.getAttribute("href");
+      if (!url) return;
+      if (CARD_KO_URLS.has(url)) CARD_KO_URLS.delete(url);
+      else CARD_KO_URLS.add(url);
+      _persistCardKo();
+      paint(false);
+      return;
+    }
     const art = e.target.closest("#paper .art, #paper-noimg .art");
     if (!art) return;
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
     const url = art.getAttribute("href");
     const item = STATE.mixed.find((m) => m.url === url) || {};
-    openReader(url, item);
+    // If the card is currently in its translated view, open the reader
+    // with the translated body already showing.
+    const openInKo = CARD_KO_URLS.has(url) && !!item.title_ko;
+    openReader(url, item, { initialKo: openInKo });
   });
 
   // Close-on-button + backdrop + Escape for both modals. The static

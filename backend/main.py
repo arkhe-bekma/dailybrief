@@ -173,6 +173,22 @@ async def brief():
     top = sorter.balance(top, target_total=config.TOP_K)
     await tickers.enrich_with_sparks(top)
 
+    # Annotate each top item with its saved card-level translation
+    # (if any). This is what powers the neon-border + ✦한 badge on
+    # the front end — cards with a stored Korean headline show the
+    # translation toggle even before the user opens them.
+    try:
+        urls = [t.get("url") for t in top if t.get("url")]
+        trans_map = await db.get_card_translations(urls)
+        for t in top:
+            tr = trans_map.get(t.get("url"))
+            if tr:
+                t["title_ko"] = tr["title_ko"]
+                t["dek_ko"] = tr["dek_ko"]
+                t["translated_at"] = tr["translated_at"]
+    except Exception as exc:
+        print(f"[db] translation lookup failed: {exc!r}", flush=True)
+
     whale_moves = [w.to_dict() for w in whale_moves_raw]
     insider_trades = [t.to_dict() for t in insider_trades_raw]
     yt = [y.to_dict() for y in yt_raw]
@@ -505,6 +521,17 @@ async def article(url: str):
     cache.set(full_key, result, 86400)
     # Persist so a restart doesn't drop the scraped body.
     await db.save_reader(url, result)
+    # Supervisor pass: enrich the card dek with the first real paragraph
+    # of the extracted body. Solves the "title only, no dek" pain point
+    # the user flagged — every article a reader opens now also enriches
+    # the deck for the next viewer browsing the feed.
+    try:
+        if result["paragraphs"]:
+            first = result["paragraphs"][0]
+            if first and len(first) >= 60:
+                await db.update_article_summary(url, first[:400])
+    except Exception as exc:
+        print(f"[supervisor] dek backfill failed: {exc!r}", flush=True)
     await db.bump_counter("reader_extracts_ok")
     return result
 
@@ -627,6 +654,11 @@ async def api_page(
             "weight": float(r.get("weight") or 1.0),
             "quality": float(r.get("quality") or 0),
             "premium_body": r.get("premium_body"),
+            # Card-level translation — populated on /api/translate
+            # success. Presence drives the neon border + ✦한 badge.
+            "title_ko": r.get("title_ko"),
+            "dek_ko": r.get("dek_ko"),
+            "translated_at": r.get("translated_at"),
             "ts": r.get("published_at"),
             "score": r.get("score") or 0,
             "tickers": [], "sparks": {},
