@@ -136,7 +136,9 @@ def _body_hash(title: str, paragraphs: list[str]) -> str:
 def _gemini_translate_sync(prompt: str) -> dict | None:
     """Blocking Gemini call — wrapped in to_thread by the caller so the
     event loop stays responsive. Returns the parsed dict or None on
-    any failure."""
+    any failure. Retries transient 429/503 a few times before giving
+    up, since the free Flash tier sometimes returns "high demand"."""
+    import time as _time
     api_key = _gemini_api_key()
     if not api_key:
         return None
@@ -147,20 +149,36 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
         print(f"[translator] google-genai import failed: {exc!r}", flush=True)
         return None
 
-    try:
-        client = genai.Client(api_key=api_key)
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=_TRANSLATE_SCHEMA,
-                temperature=0.4,
-                max_output_tokens=4096,
-            ),
-        )
-    except Exception as exc:
-        print(f"[translator] gemini call failed: {exc!r}", flush=True)
+    cfg = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=_TRANSLATE_SCHEMA,
+        temperature=0.4,
+        max_output_tokens=4096,
+    )
+    client = genai.Client(api_key=api_key)
+    resp = None
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate((0.0, 1.2, 3.0), start=1):
+        if delay:
+            _time.sleep(delay)
+        try:
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=cfg,
+            )
+            break
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc)
+            # Retry only on transient capacity errors. Auth / 400 stay fatal.
+            if not any(code in msg for code in ("429", "503", "UNAVAILABLE",
+                                                "RESOURCE_EXHAUSTED")):
+                break
+            print(f"[translator] transient ({attempt}/3): {msg[:120]}", flush=True)
+    if resp is None:
+        if last_exc:
+            print(f"[translator] gemini call failed: {last_exc!r}", flush=True)
         return None
 
     text = (getattr(resp, "text", None) or "").strip()
