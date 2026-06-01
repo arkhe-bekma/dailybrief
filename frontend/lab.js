@@ -127,18 +127,36 @@ function paintOverview(d) {
   const inp = $("#interval-input");
   if (document.activeElement !== inp) inp.value = cfg.agent_interval_seconds || 3600;
 
-  // Outlet roster
+  // Outlet roster — every configured outlet, sorted by article count.
+  // Outlets with 0 articles are shown too so the user can spot the
+  // ones whose feed isn't returning anything.
   const tbody = $("#outlet-table tbody");
-  const outlets = (db.outlets || []).slice(0, 30);
+  const outlets = db.outlets || [];
   const total = outlets.reduce((s, o) => s + (o.articles || 0), 0) || 1;
-  tbody.innerHTML = outlets.map((o) => `
-    <tr>
-      <td>${o.outlet || "—"}</td>
-      <td class="num">${o.articles || 0}</td>
+  const active = outlets.filter((o) => (o.articles || 0) > 0).length;
+  const dead = outlets.filter((o) => o.configured && (o.articles || 0) === 0).length;
+  const sumEl = $("#outlet-summary");
+  if (sumEl) sumEl.textContent = `${outlets.length} configured · ${active} active · ${dead} dead`;
+
+  tbody.innerHTML = outlets.map((o) => {
+    const n = o.articles || 0;
+    const share = ((n * 100) / total).toFixed(1);
+    let status = "";
+    if (!o.configured)            status = `<span class="badge-dead">RETIRED</span>`;
+    else if (n === 0)             status = `<span class="badge-dead">NO ARTICLES</span>`;
+    else if (o.premium)           status = `<span class="badge-prem">★ PREMIUM</span>`;
+    else                          status = `<span class="badge-ok">OK</span>`;
+    const lang = (o.lang || "?").toUpperCase();
+    return `<tr class="${n === 0 ? "row-dead" : ""}">
+      <td class="outlet-name" lang="${o.lang || "en"}">${o.outlet || "—"}</td>
+      <td class="cat-tag">${(o.category || "—").toUpperCase()}</td>
+      <td class="lang-tag lang-${o.lang || "en"}">${lang}</td>
+      <td class="num">${n}</td>
       <td class="ago">${fmtAgo(o.last_fetched)}</td>
-      <td class="num">${((o.articles || 0) * 100 / total).toFixed(1)}%</td>
-    </tr>
-  `).join("") || `<tr><td colspan="4" class="ago">no articles yet — waiting on first /api/brief</td></tr>`;
+      <td class="num">${share}%</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="7" class="ago">no outlets configured</td></tr>`;
 
   // Cache prefix bars
   const bars = $("#cache-bars");

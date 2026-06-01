@@ -225,6 +225,94 @@ _OG_HEADERS = {
 }
 
 
+# ── Google News URL unwrapper ──────────────────────────────────────
+# K-Ent (and lots of Korean outlets) feed through Google News' search
+# RSS, which returns encoded `/articles/CBMi…` URLs that hide the real
+# publisher URL behind a JS interstitial. Without unwrapping these we
+# can never reach the publisher's og:image — every kent card ends up
+# image-less.
+_GNEWS_ARTICLE_RE = re.compile(r"news\.google\.com/(?:rss/)?articles/([^/?&]+)")
+_NAU_RE = re.compile(r'data-n-au=["\']([^"\']+)["\']', re.IGNORECASE)
+_META_REFRESH_URL_RE = re.compile(
+    r"""<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^;]*;\s*url=([^"'>\s]+)""",
+    re.IGNORECASE,
+)
+_CANONICAL_RE = re.compile(
+    r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_JS_REDIRECT_RE = re.compile(
+    r'(?:location\.replace|location\.href|window\.location)\s*=\s*["\']([^"\']+)["\']',
+)
+
+
+def _decode_gnews_article_url(url: str) -> str | None:
+    """Pull the publisher URL out of a Google News article URL by
+    base64-decoding the article ID and grepping the bytes for an
+    http(s) URL. Works on a meaningful subset of the encoded payloads
+    (the protobuf isn't standardised so this isn't 100%)."""
+    import base64
+    m = _GNEWS_ARTICLE_RE.search(url)
+    if not m:
+        return None
+    encoded = m.group(1)
+    padding = "=" * (-len(encoded) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(encoded + padding)
+    except Exception:
+        return None
+    text = decoded.decode("latin-1", errors="ignore")
+    candidates = re.findall(r"https?://[^\s\x00-\x1f\"'<>]+", text)
+    for u in candidates:
+        if "google." in u or "gstatic." in u:
+            continue
+        return u.split("\x00", 1)[0].strip()
+    return None
+
+
+async def _resolve_gnews_url(
+    client: httpx.AsyncClient, gnews_url: str,
+) -> str:
+    """Resolve a Google News article URL to its real publisher URL.
+    Returns the resolved URL, or the original URL if resolution fails.
+    Cached per URL for 1 day on success, 1 hour on failure."""
+    if not gnews_url or "news.google.com" not in gnews_url:
+        return gnews_url
+    ckey = f"gnews_resolve:{gnews_url}"
+    cached = cache.get(ckey)
+    if cached is not None:
+        return cached or gnews_url
+
+    # Strategy 1: HTTP fetch with browser UA, follow redirects.
+    try:
+        r = await client.get(
+            gnews_url, timeout=8.0, follow_redirects=True, headers=_OG_HEADERS,
+        )
+        final = str(r.url)
+        if "news.google.com" not in final and final.startswith("http"):
+            cache.set(ckey, final, 86_400)
+            return final
+        body = r.text[:120_000]
+        for pat in (_NAU_RE, _META_REFRESH_URL_RE, _CANONICAL_RE, _JS_REDIRECT_RE):
+            m = pat.search(body)
+            if m:
+                u = m.group(1).strip()
+                if u and "news.google.com" not in u and u.startswith("http"):
+                    cache.set(ckey, u, 86_400)
+                    return u
+    except Exception:
+        pass
+
+    # Strategy 2: base64-decode the article ID.
+    decoded = _decode_gnews_article_url(gnews_url)
+    if decoded:
+        cache.set(ckey, decoded, 86_400)
+        return decoded
+
+    cache.set(ckey, "", 3600)   # known failure — retry in an hour
+    return gnews_url
+
+
 def _passes_reader_check(body: str, ctype: str, page_url: str) -> bool:
     """True only if trafilatura can actually pull a real-looking article
     out of `body`. Catches paywalls (NYT, WSJ), Google News interstitials,
@@ -256,8 +344,17 @@ async def _fetch_og_image(client: httpx.AsyncClient, page_url: str) -> str | Non
     if cached is not None:
         return cached or None  # empty-string cache = known miss
 
+    # If this is a Google News redirect URL (every kent feed, plus most
+    # of the naver category), resolve to the real publisher URL first.
+    # We still cache under the gnews URL so the lookup path is stable.
+    fetch_url = page_url
+    if "news.google.com" in page_url:
+        resolved = await _resolve_gnews_url(client, page_url)
+        if resolved and resolved != page_url:
+            fetch_url = resolved
+
     try:
-        r = await client.get(page_url, timeout=8.0, follow_redirects=True, headers=_OG_HEADERS)
+        r = await client.get(fetch_url, timeout=8.0, follow_redirects=True, headers=_OG_HEADERS)
         if r.status_code >= 400:
             cache.set(key, "", 3600)
             cache.set(ok_key, False, 3600)
@@ -495,10 +592,15 @@ async def _rescue_logo_images(items: list[dict]) -> int:
             nonlocal rescued
             async with sem:
                 try:
-                    r = await client.get(item["url"], timeout=8.0, follow_redirects=True)
+                    fetch_url = item["url"]
+                    if "news.google.com" in fetch_url:
+                        resolved = await _resolve_gnews_url(client, fetch_url)
+                        if resolved and resolved != fetch_url:
+                            fetch_url = resolved
+                    r = await client.get(fetch_url, timeout=8.0, follow_redirects=True)
                     if r.status_code >= 400:
                         return False
-                    body_img = _find_body_hero_image(r.text, base_url=item["url"])
+                    body_img = _find_body_hero_image(r.text, base_url=fetch_url)
                     if body_img and body_img != item.get("image"):
                         item["image"] = body_img
                         rescued += 1

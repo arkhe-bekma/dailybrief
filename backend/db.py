@@ -349,14 +349,51 @@ def _stats_sync() -> dict:
         reader_cache_hits = c.execute(
             "SELECT COALESCE(SUM(use_count - 1), 0) AS n FROM reader_results"
         ).fetchone()["n"]
-        outlets = [
-            dict(r) for r in c.execute("""
+        # Pull per-outlet counts + last-fetched from the articles table.
+        db_outlets = {
+            r["outlet"]: dict(r) for r in c.execute("""
                 SELECT outlet, COUNT(*) AS articles,
                        MAX(fetched_at) AS last_fetched
                 FROM articles GROUP BY outlet
-                ORDER BY articles DESC
-            """).fetchall()
-        ]
+            """).fetchall() if r["outlet"]
+        }
+        # Roster = every CONFIGURED outlet, with 0 / NULL for the ones
+        # that have never produced an article. This way the user can
+        # spot dead feeds in the lab dashboard.
+        from backend import config as _cfg
+        outlets = []
+        seen: set[str] = set()
+        for o in _cfg.OUTLETS:
+            name = o["name"]
+            row = db_outlets.get(name, {})
+            meta = _cfg.outlet_meta(name)
+            outlets.append({
+                "outlet": name,
+                "category": o.get("category"),
+                "lang": o.get("lang", "en"),
+                "premium": meta["premium"],
+                "weight": meta["weight"],
+                "articles": row.get("articles", 0),
+                "last_fetched": row.get("last_fetched"),
+                "configured": True,
+            })
+            seen.add(name)
+        # Also append any DB-only outlets (renamed in config, but still
+        # in the DB from past runs) so nothing silently disappears.
+        for name, row in db_outlets.items():
+            if name in seen:
+                continue
+            outlets.append({
+                "outlet": name,
+                "category": None,
+                "lang": "?",
+                "premium": False,
+                "weight": 1.0,
+                "articles": row.get("articles", 0),
+                "last_fetched": row.get("last_fetched"),
+                "configured": False,
+            })
+        outlets.sort(key=lambda r: (-(r["articles"] or 0), r["outlet"]))
         counters = [dict(r) for r in c.execute("SELECT key, n FROM counters").fetchall()]
         size_bytes = DB_PATH.stat().st_size if DB_PATH.exists() else 0
         return {

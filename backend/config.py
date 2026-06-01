@@ -213,7 +213,7 @@ OUTLETS: list[dict] = [
     {"name": "마이데일리",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:mydaily.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "스타뉴스",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:star.mt.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "텐아시아",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:tenasia.hankyung.com&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "일간스포츠",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:isplus.com&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "일간스포츠",      "category": "kent", "lang": "ko", "url": "https://isplus.com/rss"},
     {"name": "TV리포트",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:tvreport.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "스포츠조선 연예",  "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:sports.chosun.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "스포츠경향 연예",  "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:sports.khan.co.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
@@ -230,10 +230,13 @@ OUTLETS: list[dict] = [
     {"name": "K-Pop 종합",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=K-Pop+OR+%EC%BC%80%EC%9D%B4%ED%8C%9D&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "K-드라마 종합",    "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=%ED%95%9C%EA%B5%AD%EB%93%9C%EB%9D%BC%EB%A7%88+OR+K-Drama&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "K-영화 종합",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=%ED%95%9C%EA%B5%AD%EC%98%81%ED%99%94+OR+%EC%98%81%ED%99%94%EA%B3%84&hl=ko&gl=KR&ceid=KR:ko"},
-    # International K-Ent (en)
-    {"name": "Soompi",         "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:soompi.com&hl=en-US&gl=US&ceid=US:en"},
+    # International K-Ent (en) — Soompi + Koreaboo publish proper RSS
+    # at their canonical /feed path; their cards get real photos via
+    # the publisher's og:image. allkpop + Hellokpop retired their RSS
+    # so we still proxy via Google News (image-less, just headline).
+    {"name": "Soompi",         "category": "kent", "lang": "en", "url": "https://www.soompi.com/feed"},
+    {"name": "Koreaboo",       "category": "kent", "lang": "en", "url": "https://www.koreaboo.com/feed"},
     {"name": "allkpop",        "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:allkpop.com&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "Koreaboo",       "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:koreaboo.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Hellokpop",      "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:hellokpop.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "K-Pop Herald",   "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:kpopherald.koreaherald.com&hl=en-US&gl=US&ceid=US:en"},
 ]

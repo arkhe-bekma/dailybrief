@@ -51,7 +51,17 @@ async def extract(url: str) -> Reading | None:
 
     try:
         async with httpx.AsyncClient(headers={"User-Agent": UA}) as client:
-            r = await client.get(url, follow_redirects=True, timeout=15.0)
+            fetch_url = url
+            # Google News URLs hide the publisher behind a JS interstitial.
+            # Resolve to the real publisher URL so trafilatura has a real
+            # page to extract from (otherwise every kent article returns
+            # empty body). Import is lazy to avoid the rss<-reader cycle.
+            if "news.google.com" in url:
+                from backend.sources.rss import _resolve_gnews_url
+                resolved = await _resolve_gnews_url(client, url)
+                if resolved and resolved != url:
+                    fetch_url = resolved
+            r = await client.get(fetch_url, follow_redirects=True, timeout=15.0)
             r.raise_for_status()
             html = r.text
     except Exception as exc:

@@ -221,6 +221,64 @@ body.lab {
 .lab-table .err { color: var(--down); }
 .lab-table .ago { color: var(--dim); font-family: var(--mono); font-size: 10.5px; }
 
+/* Outlet roster: scrollable + summary chip + status badges */
+.outlet-scroll {
+  max-height: 460px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.outlet-scroll::-webkit-scrollbar { width: 6px; }
+.outlet-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+.outlet-scroll table thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(11,13,24,0.95);
+  z-index: 1;
+}
+.outlet-summary {
+  margin-left: 10px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.8px;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 10px rgba(0,225,255,0.35);
+  font-weight: 700;
+  text-transform: none;
+}
+.lab-table .outlet-name { color: var(--text); font-weight: 700; }
+.lab-table .outlet-name[lang="ko"] { font-family: var(--kr); letter-spacing: -0.3px; }
+.lab-table .cat-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--neon-cyan);
+  letter-spacing: 1.2px;
+}
+.lab-table .lang-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+.lab-table .lang-ko { color: var(--neon-pink); }
+.lab-table .lang-en { color: var(--neon-cyan); }
+.lab-table .row-dead .outlet-name,
+.lab-table .row-dead .num { opacity: 0.55; }
+.badge-ok, .badge-dead, .badge-prem {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+}
+.badge-ok   { color: var(--neon-lime);   border-color: rgba(182,255,60,0.45);  background: rgba(182,255,60,0.08); }
+.badge-prem { color: var(--neon-yellow); border-color: rgba(255,230,0,0.45);   background: rgba(255,230,0,0.10);  text-shadow: 0 0 8px rgba(255,230,0,0.4); }
+.badge-dead { color: var(--down);        border-color: rgba(255,77,109,0.45);  background: rgba(255,77,109,0.08); }
+
 /* ── Cache prefix bars ───────────────────────────────────────── */
 .bars { display: flex; flex-direction: column; gap: 8px; }
 .bar-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 8px; align-items: center; }
