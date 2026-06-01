@@ -302,6 +302,30 @@ function _persistCardKo() {
   try { localStorage.setItem(CARD_KO_KEY, JSON.stringify([...CARD_KO_URLS])); } catch {}
 }
 
+// Surgical re-render: swap a single .art element in place, preserving
+// its scroll position + leaving every other card untouched. Replaces
+// the old "paint(false) → rebuild everything" path that flashed the
+// whole page when toggling one card's translation.
+function rerenderCard(url) {
+  if (!url) return false;
+  const oldNode = [...document.querySelectorAll(".art")]
+    .find((n) => n.getAttribute("data-url") === url);
+  if (!oldNode) return false;
+  const item =
+    (STATE.mixed || []).find((m) => m.url === url) ||
+    (PAGE_OVERRIDE || []).find((m) => m.url === url);
+  if (!item) return false;
+  // Preserve whatever tier the card is currently in.
+  const tierMatch = oldNode.className.match(/\btier-(\w+)\b/);
+  const tier = tierMatch ? tierMatch[1] : "small";
+  const fresh = renderNewsCard(item, tier);
+  // Suppress the fade-in animation on a re-render — fade is meant
+  // for first paint, not for in-place edits.
+  fresh.classList.add("no-fade");
+  oldNode.replaceWith(fresh);
+  return true;
+}
+
 function renderNewsCard(item, tier) {
   const inKo = !!item.title_ko && CARD_KO_URLS.has(item.url);
   const parts = newsBody(item, { koView: inKo });
@@ -1204,7 +1228,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (CARD_KO_URLS.has(url)) CARD_KO_URLS.delete(url);
       else CARD_KO_URLS.add(url);
       _persistCardKo();
-      paint(false);
+      // Surgical swap — only this one card re-renders, no page-wide flash.
+      if (!rerenderCard(url)) {
+        // Fallback if the card couldn't be located (rare).
+        paint(false);
+      }
       return;
     }
     const art = e.target.closest("#paper .art, #paper-noimg .art");

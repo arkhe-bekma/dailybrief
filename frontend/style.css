@@ -946,6 +946,9 @@ a { color: inherit; text-decoration: none; }
   backdrop-filter: blur(6px);
   animation: fadein 0.4s ease-out both;
 }
+/* Surgical re-renders (e.g. card-level translate toggle) opt out of
+   the first-paint fade so the swap feels instant, not flashy. */
+.art.no-fade { animation: none; }
 
 /* Don't let the headline balloon to fill empty card space — that
    was the root cause of the giant title-to-body gap when an article
