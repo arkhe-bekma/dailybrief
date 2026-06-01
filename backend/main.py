@@ -78,6 +78,14 @@ async def _start():
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
+@app.get("/api/health")
+async def health():
+    """Tiny liveness probe — no DB hit, no fetches. Caddy / cron /
+    uptime checks can poke this without triggering the expensive
+    /api/brief path."""
+    return {"ok": True}
+
+
 @app.get("/api/brief")
 async def brief():
     """The main payload: ticker tape + mixed feed + sidebars + summary."""

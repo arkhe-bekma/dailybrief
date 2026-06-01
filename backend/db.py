@@ -212,14 +212,69 @@ async def count_articles(cat: str | None = None) -> int:
     return await asyncio.to_thread(_count_articles_sync, cat)
 
 
-async def upsert_articles(rows: list[dict]) -> int:
+def _upsert_articles_batch_sync(rows: list[dict]) -> int:
+    """One connection, one transaction, N inserts. The single-row
+    helper above opens a new connection per row — fine for a handful
+    of writes but ruinous on the baseline-upsert path that touches
+    1000+ articles per /api/brief. Slow disk on Lightsail was queuing
+    write locks until uvicorn timed out and Caddy returned 502."""
     if not rows:
         return 0
-    def _go():
-        for r in rows:
-            _upsert_article_sync(r)
-        return len(rows)
-    return await asyncio.to_thread(_go)
+    now = int(time.time())
+    with closing(_conn()) as c:
+        # Explicit BEGIN/COMMIT around the batch. isolation_level=None
+        # on the connection means autocommit; wrap manually to batch.
+        c.execute("BEGIN")
+        try:
+            for row in rows:
+                c.execute("""
+                    INSERT INTO articles
+                      (url, title, image, outlet, category, lang, summary, score,
+                       why, image_source, tier,
+                       premium, weight, premium_body, quality,
+                       published_at, fetched_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(url) DO UPDATE SET
+                      title=excluded.title,
+                      image=COALESCE(excluded.image, articles.image),
+                      outlet=excluded.outlet,
+                      category=excluded.category,
+                      lang=excluded.lang,
+                      summary=COALESCE(NULLIF(excluded.summary, ''), articles.summary),
+                      score=MAX(IFNULL(excluded.score, 0), IFNULL(articles.score, 0)),
+                      why=COALESCE(excluded.why, articles.why),
+                      image_source=COALESCE(excluded.image_source, articles.image_source),
+                      tier=COALESCE(excluded.tier, articles.tier),
+                      premium=MAX(IFNULL(excluded.premium, 0), IFNULL(articles.premium, 0)),
+                      weight=COALESCE(excluded.weight, articles.weight),
+                      premium_body=COALESCE(excluded.premium_body, articles.premium_body),
+                      quality=MAX(IFNULL(excluded.quality, 0), IFNULL(articles.quality, 0)),
+                      last_seen_at=excluded.last_seen_at
+                """, (
+                    row.get("url"), row.get("title"), row.get("image"),
+                    row.get("outlet"), row.get("category"), row.get("lang"),
+                    row.get("summary"), int(row.get("score") or 0),
+                    row.get("why"), row.get("image_source"), row.get("tier"),
+                    int(bool(row.get("premium"))),
+                    float(row.get("weight") or 1.0),
+                    row.get("premium_body"),
+                    float(row.get("quality") or 0),
+                    row.get("published_at"),
+                    row.get("fetched_at") or now, now,
+                ))
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    return len(rows)
+
+
+async def upsert_articles(rows: list[dict]) -> int:
+    """Batched upsert — one connection, one transaction. Much cheaper
+    than the per-row helper on slow disks."""
+    if not rows:
+        return 0
+    return await asyncio.to_thread(_upsert_articles_batch_sync, rows)
 
 
 # ── reader cache ────────────────────────────────────────────────────
