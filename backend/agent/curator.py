@@ -105,8 +105,20 @@ async def rank(articles: list[Any], top_k: int = 12) -> list[dict]:
     if not articles:
         return []
     if os.getenv("ANTHROPIC_API_KEY"):
+        # Cache LLM ranking by hash of (urls, top_k) — same article set
+        # within the next 6 h pulls from cache instead of round-tripping
+        # to Claude. Cuts ranking spend ~100x on a 2-min auto-refresh.
+        import hashlib
+        from backend import cache as _cache
+        ids = "|".join(sorted(getattr(a, "url", "") for a in articles))
+        key = f"curator:llm:{hashlib.md5(ids.encode()).hexdigest()}:{top_k}"
+        hit = _cache.get(key)
+        if hit is not None:
+            return hit
         try:
-            return await _llm_rank(articles, top_k)
+            result = await _llm_rank(articles, top_k)
+            _cache.set(key, result, 6 * 3600)
+            return result
         except Exception as exc:
             print(f"[curator] LLM rank failed, falling back: {exc}")
     return _heuristic_rank(articles, top_k)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 from pathlib import Path
 
@@ -107,7 +108,9 @@ async def brief():
         "trades": insider_trades,
         "youtube": yt,
     }
-    cache.set("brief:response", payload, 30)
+    # Longer cache → far fewer curator + summary LLM round-trips. The
+    # user spent ~$20/day on Anthropic before this knob existed.
+    cache.set("brief:response", payload, 120)
     return payload
 
 
@@ -139,6 +142,16 @@ def _detect_lang(text: str) -> str:
 # Inner alt: non-bracket chars OR one level of nested [...]
 _IMG_MD_RE = re.compile(
     r"!\[(?:[^\]\[]|\[[^\]]*\])*\]\([^)]+\)"
+)
+# Raw HTML tags leftover from poor trafilatura parsing (img, figure, span
+# with inline style, leftover "border" / "alt" attribute fragments etc.)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# Attribute fragments that sometimes leak as plain text when an outlet
+# pre-renders its HTML weirdly: e.g. `img border=0 src=…`, `width="600"`,
+# `alt="...."` standalone. Drop these.
+_ATTR_FRAG_RE = re.compile(
+    r"\b(?:img|src|alt|width|height|border|style|class|figure|figcaption)\s*=",
+    re.IGNORECASE,
 )
 _CREDIT_PREFIX_RE = re.compile(
     r"^(?:사진|영상|이미지|일러스트|그래픽|자료(?:사진)?|Photo|Image|Credit|©|기자)\b",
@@ -201,11 +214,14 @@ def _split_paragraphs(text: str) -> list[str]:
     out: list[str] = []
     total_chars = 0
     for raw in text.split("\n"):
-        # Strip embedded image markdown BEFORE the length check, so a
-        # paragraph that's mostly "![alt](url) plus a sentence" gets
-        # rescued (the sentence stays) instead of being dropped because
-        # the markdown puffed it past the threshold.
+        # Pre-clean pipeline:
+        #   1. strip embedded image markdown (rescues the rest of the line)
+        #   2. strip raw HTML tags
+        #   3. decode HTML entities (`&amp;` → `&`, etc.)
+        #   4. strip emojis
         p = _IMG_MD_RE.sub("", raw)
+        p = _HTML_TAG_RE.sub("", p)
+        p = html.unescape(p)
         p = _EMOJI_RE.sub("", p).strip()
         if not p or len(p) < 30:
             continue
@@ -218,6 +234,9 @@ def _split_paragraphs(text: str) -> list[str]:
         if _SECTION_HEADER_RE.match(p) or _BRACKETED_HEADER_RE.match(p):
             continue
         if _DECORATIVE_DIVIDER_RE.search(p):
+            continue
+        # Lines that are mostly raw HTML attribute fragments
+        if _ATTR_FRAG_RE.search(p) and len(_ATTR_FRAG_RE.findall(p)) >= 2:
             continue
         out.append(p)
         total_chars += len(p)
@@ -253,16 +272,43 @@ async def article(url: str):
     # ("괜히 에이아이로 돌리지말고 그냥 바로 기사 보여줘").
     result = {
         "url": url,
-        "title": reading.title,
+        "title": html.unescape(reading.title or ""),
         "image": reading.image,
         "byline": reading.byline,
-        "excerpt": reading.excerpt,
+        "excerpt": html.unescape(reading.excerpt or ""),
         "lang": _detect_lang(reading.title or ""),
         "word_count": len(reading.text.split()),
         "paragraphs": _split_paragraphs(reading.text),
     }
     cache.set(full_key, result, 86400)
     return result
+
+
+@app.get("/api/lab")
+async def lab():
+    """Lightweight visibility into what the app is doing — counters
+    for cached items, agent state, current cache memory footprint.
+    Real-time enough for a /lab dashboard refresh every ~5s."""
+    store = cache._store
+    by_prefix: dict[str, int] = {}
+    for k in store.keys():
+        p = k.split(":", 1)[0]
+        by_prefix[p] = by_prefix.get(p, 0) + 1
+    return {
+        "cache": {
+            "total_keys": len(store),
+            "by_prefix": dict(sorted(by_prefix.items(), key=lambda kv: -kv[1])),
+        },
+        "config": {
+            "top_k": getattr(config, "TOP_K", None),
+            "per_outlet_limit": getattr(config, "PER_OUTLET_LIMIT", None),
+            "feed_cache_ttl": getattr(config, "FEED_CACHE_TTL", None),
+            "anthropic_key_set": bool(__import__("os").getenv("ANTHROPIC_API_KEY")),
+        },
+        "outlets": {
+            "configured": len(getattr(config, "OUTLETS", [])),
+        },
+    }
 
 
 @app.get("/api/outlets")

@@ -26,6 +26,33 @@ const fmtPrice = (p) => {
 const fmtPct = (p) => `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 const stripHtml = (s) => (s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
+// Decode HTML entities like &amp; → & and &#39; → ' so they never reach
+// the title on screen. Defensive — backend already runs html.unescape
+// but some publisher RSS feeds double-escape and we don't want any of
+// that to leak.
+const _ent = document.createElement("textarea");
+function decodeEntities(s) {
+  if (!s) return "";
+  _ent.innerHTML = s;
+  return _ent.value;
+}
+
+// More natural "when" display: "오늘 14:32" / "어제 09:11" / "May 28"
+function fmtPub(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  const isYest = d.toDateString() === yest.toDateString();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay)  return `${hh}:${mm}`;
+  if (isYest)   return `Y · ${hh}:${mm}`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 // Backend already merges real + AI URLs into item.image.
 const pickImage = (item) => item.image || null;
 
@@ -194,11 +221,11 @@ function newsBody(item) {
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
     el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
-    el("span", { class: "when" }, fmtWhen(item.ts)),
+    el("span", { class: "when" }, fmtPub(item.ts)),
     item.score != null ? el("span", { class: "score-pill" }, `★${item.score}`) : null,
   ]);
-  const head = el("h2", { class: "h", lang }, item.title || "");
-  const dek = item.dek ? el("p", { class: "dek", lang }, item.dek) : null;
+  const head = el("h2", { class: "h", lang }, decodeEntities(item.title) || "");
+  const dek = item.dek ? el("p", { class: "dek", lang }, decodeEntities(item.dek)) : null;
   const why = item.why ? el("div", { class: "why", lang }, item.why) : null;
   const sparks = item.sparks || {};
   const tickers = (item.tickers || []).filter((t) => sparks[t]);
@@ -430,7 +457,13 @@ async function openReader(url, item) {
   const modal = document.getElementById("reader");
   if (!modal) return;
   modal.classList.remove("hidden");
+  // Hard-lock the page behind so touch-drag / scroll never leaks through.
   document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.dataset.scrollY = String(window.scrollY);
+  document.body.style.top = `-${window.scrollY}px`;
   const content = modal.querySelector(".reader-content");
   content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
 
@@ -496,9 +529,27 @@ function closeReader() {
 }
 
 // ── Flow detail modal (whales / trades / videos) ───────────────
+function lockBodyScroll() {
+  document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.dataset.scrollY = String(window.scrollY);
+  document.body.style.top = `-${window.scrollY}px`;
+}
+function unlockBodyScroll() {
+  const y = parseInt(document.body.dataset.scrollY || "0", 10);
+  document.body.style.overflow = "";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  window.scrollTo(0, y);
+}
 function openFlow(kind, index) {
   const modal = document.getElementById("flow");
   if (!modal) return;
+  lockBodyScroll();
   const list =
     kind === "whale" ? (STATE.whales || []) :
     kind === "trade" ? (STATE.trades || []) :
@@ -577,7 +628,7 @@ function closeFlow() {
   if (!modal) return;
   modal.classList.add("hidden");
   modal.setAttribute("aria-hidden", "true");
-  document.body.style.overflow = "";
+  unlockBodyScroll();
 }
 
 // ── Swipe-to-close (iOS-style sheet) ──────────────────────────

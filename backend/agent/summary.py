@@ -60,6 +60,16 @@ async def generate(mixed: list[dict]) -> str | None:
         for m in mixed[:25]
     ]
 
+    # Cache the headline by hash of the top-25 titles. Two-min auto-
+    # refresh + same top stories → same headline → don't re-bill.
+    import hashlib
+    from backend import cache as _cache
+    title_blob = "|".join(str(i.get("title") or "") for i in items_payload)
+    cache_key = f"summary:headline:{hashlib.md5(title_blob.encode()).hexdigest()}"
+    hit = _cache.get(cache_key)
+    if hit is not None:
+        return hit
+
     lang = getattr(config.PROFILE, "primary_lang", "en")
     lang_name = _LANG_NAMES.get(lang, "English")
 
@@ -77,7 +87,9 @@ async def generate(mixed: list[dict]) -> str | None:
                 ),
             }],
         )
-        return resp.content[0].text.strip()
+        headline = resp.content[0].text.strip()
+        _cache.set(cache_key, headline, 3600)  # 1h
+        return headline
     except Exception as exc:
         print(f"[summary] failed: {exc}")
         return None

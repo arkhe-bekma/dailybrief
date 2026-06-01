@@ -797,19 +797,25 @@ a { color: inherit; text-decoration: none; }
   font-variation-settings: "opsz" 48, "wdth" 96;
   letter-spacing: -0.6px;
   color: var(--text);
-  line-height: 1.05;
+  line-height: 1.1;
   margin: 0;
   text-wrap: balance;
   font-optical-sizing: auto;
+  /* Centre titles inside the card so the layout reads as a series of
+     centred posters rather than left-aligned columns. */
+  text-align: center;
 }
 .art .h[lang="ko"] {
   font-family: var(--kr);
   font-weight: 800;
   font-variation-settings: normal;
-  letter-spacing: -0.55px;
-  line-height: 1.22;
+  letter-spacing: -0.3px;   /* slightly looser so Pretendard doesn't crush left */
+  line-height: 1.32;        /* a touch more breathing room for Hangul */
   font-feature-settings: "palt" 1, "vpal" 1, "kern" 1;
 }
+/* Body snippet — keep it centered to match the title rhythm. */
+.art .dek { text-align: center; }
+.art .meta { justify-content: center; }
 /* dek = body snippet — make it always-visible and pretty */
 .art .dek {
   color: var(--text-2);
@@ -939,7 +945,7 @@ a { color: inherit; text-decoration: none; }
   font-weight: 800;
   letter-spacing: -0.8px;
 }
-.tier-feature .dek { -webkit-line-clamp: 4; font-size: 13px; }
+.tier-feature .dek { -webkit-line-clamp: 6; font-size: 13px; }
 
 /* ── LARGE — image ON TOP, full card width ──────────────── */
 .tier-large {
@@ -963,7 +969,7 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 .tier-large .h[lang="ko"] { font-size: calc(clamp(17.5px, 1.55vw, 20px) * var(--text-scale, 1)); }
-.tier-large .dek { -webkit-line-clamp: 3; font-size: 12.5px; }
+.tier-large .dek { -webkit-line-clamp: 5; font-size: 12.5px; }
 
 /* ── MEDIUM — image ON TOP, full card width ─────────────── */
 .tier-medium {
@@ -991,7 +997,7 @@ a { color: inherit; text-decoration: none; }
   font-size: calc(clamp(16px, 1.25vw, 19px) * var(--text-scale, 1));
   letter-spacing: -0.8px;
 }
-.tier-medium .dek { -webkit-line-clamp: 3; font-size: 12px; }
+.tier-medium .dek { -webkit-line-clamp: 5; font-size: 12px; }
 
 /* ── SMALL — image ON TOP, dominates card height ──────── */
 .tier-small {
@@ -1019,7 +1025,7 @@ a { color: inherit; text-decoration: none; }
   font-size: calc(clamp(14.5px, 1.1vw, 17px) * var(--text-scale, 1));
   letter-spacing: -0.7px;
 }
-.tier-small .dek { -webkit-line-clamp: 2; font-size: 11.5px; }
+.tier-small .dek { -webkit-line-clamp: 4; font-size: 11.5px; }
 
 /* ── HEADLINE — NO image, big bold display title + dek snippet
        Box shrinks to content (no min-height). */
