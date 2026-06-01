@@ -6,6 +6,7 @@ import asyncio
 import html
 import re
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -420,7 +421,7 @@ async def lab_page():
 
 
 @app.get("/api/page")
-async def api_page(n: int = 1, size: int = 31, cat: str | None = None):
+async def api_page(n: int = 1, size: int = 31, cat: Optional[str] = None):
     """Lazy pagination — page 2+ pulls from the SQLite archive instead
     of the in-memory curator output. Total page count grows as the DB
     grows, with no upper limit baked in."""
