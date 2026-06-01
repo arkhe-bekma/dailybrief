@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+# Local SQLite DB — created at runtime, never commit
+backend/data/
+*.db
+*.db-shm
+*.db-wal
