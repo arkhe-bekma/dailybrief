@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dailybrief · lab</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=21">
+  <link rel="stylesheet" href="/static/lab.css?v=21">
+</head>
+<body class="lab">
+  <header class="lab-mast">
+    <div class="lab-brand">
+      <span class="logo">▮</span>
+      <span class="name">dailybrief</span>
+      <span class="lab-tag">LAB</span>
+    </div>
+    <div class="lab-actions">
+      <span id="lab-live" class="live">● live</span>
+      <a class="lab-back" href="/">← back to feed</a>
+    </div>
+  </header>
+
+  <main class="lab-grid">
+
+    <!-- OVERVIEW -->
+    <section class="card span-3">
+      <div class="card-head">EDITOR IN CHIEF</div>
+      <div class="kpi-grid">
+        <div class="kpi"><span class="kpi-label">TOTAL ARTICLES</span>     <span class="kpi-v" id="kpi-articles-total">—</span></div>
+        <div class="kpi"><span class="kpi-label">INGESTED 24H</span>       <span class="kpi-v" id="kpi-articles-24h">—</span></div>
+        <div class="kpi"><span class="kpi-label">OUTLETS WIRED</span>      <span class="kpi-v" id="kpi-outlets">—</span></div>
+        <div class="kpi"><span class="kpi-label">DB SIZE</span>            <span class="kpi-v" id="kpi-db-size">—</span></div>
+      </div>
+    </section>
+
+    <!-- COST AUDITOR -->
+    <section class="card">
+      <div class="card-head">COST AUDITOR</div>
+      <div class="kpi-stack">
+        <div class="kpi"><span class="kpi-label">LLM KEY ACTIVE</span>    <span class="kpi-v" id="kpi-llm-on">—</span></div>
+        <div class="kpi"><span class="kpi-label">READER CACHE HITS (MEM)</span> <span class="kpi-v" id="kpi-hits-mem">—</span></div>
+        <div class="kpi"><span class="kpi-label">READER CACHE HITS (DISK)</span> <span class="kpi-v" id="kpi-hits-disk">—</span></div>
+        <div class="kpi"><span class="kpi-label">READER EXTRACTS OK</span> <span class="kpi-v" id="kpi-extracts-ok">—</span></div>
+      </div>
+    </section>
+
+    <!-- SCHEDULE MASTER -->
+    <section class="card">
+      <div class="card-head">SCHEDULE MASTER</div>
+      <div class="kpi-stack">
+        <div class="kpi"><span class="kpi-label">CURRENT INTERVAL</span>   <span class="kpi-v" id="kpi-interval">—</span></div>
+        <div class="kpi"><span class="kpi-label">CACHE KEYS LIVE</span>    <span class="kpi-v" id="kpi-cache-total">—</span></div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-label">REFRESH CYCLE (SECONDS)</div>
+        <input id="interval-input" type="number" min="60" max="21600" step="60" value="3600" />
+        <button id="interval-save" class="btn">SAVE</button>
+        <span class="hint">60 = 1 min · 3600 = 1 h · 21600 = 6 h</span>
+      </div>
+    </section>
+
+    <!-- QUALITY INSPECTOR -->
+    <section class="card span-3">
+      <div class="card-head">QUALITY INSPECTOR · OUTLET ROSTER</div>
+      <table class="lab-table" id="outlet-table">
+        <thead>
+          <tr>
+            <th>OUTLET</th>
+            <th class="num">ARTICLES</th>
+            <th>LAST FETCHED</th>
+            <th class="num">SHARE</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- CACHE INSPECTOR -->
+    <section class="card span-2">
+      <div class="card-head">CACHE INSPECTOR · KEYS BY PREFIX</div>
+      <div id="cache-bars" class="bars"></div>
+    </section>
+
+    <!-- COUNTERS -->
+    <section class="card">
+      <div class="card-head">RAW COUNTERS</div>
+      <div class="kpi-stack" id="counter-list"></div>
+    </section>
+
+    <!-- AGENT ACTIVITY -->
+    <section class="card span-3">
+      <div class="card-head">AGENT ACTIVITY · LAST 50 RUNS</div>
+      <table class="lab-table compact" id="runs-table">
+        <thead>
+          <tr>
+            <th>WHEN</th>
+            <th>KIND</th>
+            <th>STATUS</th>
+            <th class="num">DURATION</th>
+            <th>NOTE</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <footer class="lab-foot">
+    <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
+  </footer>
+
+  <script src="/static/lab.js?v=21"></script>
+</body>
+</html>

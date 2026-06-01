@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import cache, config, mixer, tickers
+from backend import cache, config, db, mixer, tickers
 from backend.agent import curator, illustrator, reader, summary
 from backend.sources import politicians, prices, rss, whales, youtube
 
@@ -30,21 +30,40 @@ AGENT_INTERVAL_SECONDS = 3600
 
 async def _refresh_agent():
     await asyncio.sleep(20)  # let the app start serving first
+    import time as _t
     while True:
+        started = _t.time()
+        ok = True
+        note = ""
         try:
             # Drop the feed-level cache. Per-URL probe caches stay
             # (24h success, 1h fail) so we don't re-fetch known-good URLs.
+            dropped = 0
             for k in list(cache._store.keys()):
-                if k.startswith("rss:") or k.startswith("article_reader:"):
+                if k.startswith("rss:") or k.startswith("article_reader:") or k == "brief:response":
                     cache._store.pop(k, None)
-            print(f"[agent] refresh cycle: cleared feed cache", flush=True)
+                    dropped += 1
+            note = f"dropped {dropped} cache keys"
+            print(f"[agent] refresh cycle: {note}", flush=True)
         except Exception as exc:
+            ok = False
+            note = str(exc)[:200]
             print(f"[agent] tick failed: {exc}", flush=True)
-        await asyncio.sleep(AGENT_INTERVAL_SECONDS)
+        try:
+            await db.log_agent_run("refresh", started, _t.time(), ok, note)
+        except Exception:
+            pass
+
+        # User-tunable interval (persisted in DB via /api/lab/settings).
+        interval = await db.get_setting(
+            "agent_interval_seconds", AGENT_INTERVAL_SECONDS
+        )
+        await asyncio.sleep(max(60, int(interval)))
 
 
 @app.on_event("startup")
-async def _start_agent():
+async def _start():
+    await db.init()
     asyncio.create_task(_refresh_agent())
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -111,6 +130,28 @@ async def brief():
     # Longer cache → far fewer curator + summary LLM round-trips. The
     # user spent ~$20/day on Anthropic before this knob existed.
     cache.set("brief:response", payload, 120)
+
+    # Persist what we just decided to show. Survives restart and
+    # powers the /lab dashboard counts.
+    try:
+        rows = [
+            {
+                "url": m.get("url"),
+                "title": m.get("title"),
+                "image": m.get("image"),
+                "outlet": m.get("outlet"),
+                "category": m.get("category"),
+                "lang": m.get("lang"),
+                "summary": m.get("dek") or "",
+                "published_at": m.get("ts"),
+            }
+            for m in mixed if m.get("kind") == "news" and m.get("url")
+        ]
+        await db.upsert_articles(rows)
+        await db.bump_counter("articles_ingested", by=len(rows))
+    except Exception as exc:
+        print(f"[db] upsert articles failed: {exc}")
+
     return payload
 
 
@@ -198,6 +239,25 @@ _PARA_CHAR_BUDGET = 3500   # ≈ 700-800 words of body
 _PARA_HARD_MAX = 14        # never more than this many paragraphs
 
 
+def _scrub_html_artifacts(line: str) -> str:
+    """Two-pass strip so partial / encoded HTML can't slip through:
+      1. strip raw <…>
+      2. unescape  (turns &lt;img&gt; into <img>)
+      3. strip <…> AGAIN
+      4. unescape once more
+    Then also kill any obvious bare-tag fragments like `<img border` that
+    were left dangling because the closing `>` was on another line.
+    """
+    s = _HTML_TAG_RE.sub("", line)
+    s = html.unescape(s)
+    s = _HTML_TAG_RE.sub("", s)
+    s = html.unescape(s)
+    # Kill orphan opening tags: `<img …` `<figure …` etc that lost their `>`
+    s = re.sub(r"<\s*(img|figure|figcaption|span|div|p|br|table|tr|td|a|iframe|script|style)\b[^<]*",
+               "", s, flags=re.IGNORECASE)
+    return s
+
+
 def _split_paragraphs(text: str) -> list[str]:
     """Clean trafilatura's body into reader-friendly paragraphs.
     One consistent rule for every article:
@@ -206,6 +266,7 @@ def _split_paragraphs(text: str) -> list[str]:
       - drop image markdown + photo credits
       - drop lines with mojibake (U+FFFD)
       - drop very short lines
+      - drop HTML artifacts (<img border …> partial tags etc.)
       - stop after ~3500 characters of body OR 14 paragraphs, whichever
         comes first (short articles still render fully)
     """
@@ -214,14 +275,8 @@ def _split_paragraphs(text: str) -> list[str]:
     out: list[str] = []
     total_chars = 0
     for raw in text.split("\n"):
-        # Pre-clean pipeline:
-        #   1. strip embedded image markdown (rescues the rest of the line)
-        #   2. strip raw HTML tags
-        #   3. decode HTML entities (`&amp;` → `&`, etc.)
-        #   4. strip emojis
         p = _IMG_MD_RE.sub("", raw)
-        p = _HTML_TAG_RE.sub("", p)
-        p = html.unescape(p)
+        p = _scrub_html_artifacts(p)
         p = _EMOJI_RE.sub("", p).strip()
         if not p or len(p) < 30:
             continue
@@ -260,7 +315,16 @@ async def article(url: str):
     full_key = f"article_reader:{url}"
     cached = cache.get(full_key)
     if cached is not None:
+        await db.bump_counter("reader_cache_hits_mem")
         return cached
+
+    # SQLite second-level cache — survives restart. Keeps trafilatura
+    # work that's already been paid for.
+    saved = await db.get_reader(url)
+    if saved is not None:
+        cache.set(full_key, saved, 86400)
+        await db.bump_counter("reader_cache_hits_disk")
+        return saved
 
     reading = await reader.extract(url)
     if not reading:
@@ -281,19 +345,26 @@ async def article(url: str):
         "paragraphs": _split_paragraphs(reading.text),
     }
     cache.set(full_key, result, 86400)
+    # Persist so a restart doesn't drop the scraped body.
+    await db.save_reader(url, result)
+    await db.bump_counter("reader_extracts_ok")
     return result
 
 
+# ── /api/lab — dashboard data ────────────────────────────────────────
 @app.get("/api/lab")
-async def lab():
-    """Lightweight visibility into what the app is doing — counters
-    for cached items, agent state, current cache memory footprint.
-    Real-time enough for a /lab dashboard refresh every ~5s."""
+async def lab_overview():
+    """Snapshot for the /lab dashboard: cache footprint, config, DB
+    counters, outlet roster. Polled every few seconds."""
     store = cache._store
     by_prefix: dict[str, int] = {}
     for k in store.keys():
         p = k.split(":", 1)[0]
         by_prefix[p] = by_prefix.get(p, 0) + 1
+    db_stats = await db.stats()
+    agent_interval = await db.get_setting(
+        "agent_interval_seconds", AGENT_INTERVAL_SECONDS
+    )
     return {
         "cache": {
             "total_keys": len(store),
@@ -304,11 +375,43 @@ async def lab():
             "per_outlet_limit": getattr(config, "PER_OUTLET_LIMIT", None),
             "feed_cache_ttl": getattr(config, "FEED_CACHE_TTL", None),
             "anthropic_key_set": bool(__import__("os").getenv("ANTHROPIC_API_KEY")),
+            "agent_interval_seconds": agent_interval,
         },
-        "outlets": {
-            "configured": len(getattr(config, "OUTLETS", [])),
-        },
+        "outlets_configured": len(getattr(config, "OUTLETS", [])),
+        "db": db_stats,
     }
+
+
+@app.get("/api/lab/agent-runs")
+async def lab_agent_runs(limit: int = 50):
+    return {"runs": await db.recent_agent_runs(limit=min(max(limit, 1), 200))}
+
+
+@app.get("/api/lab/settings")
+async def lab_settings_get():
+    return {
+        "agent_interval_seconds": await db.get_setting(
+            "agent_interval_seconds", AGENT_INTERVAL_SECONDS
+        ),
+    }
+
+
+@app.post("/api/lab/settings")
+async def lab_settings_set(body: dict):
+    """Persist user-tunable knobs. The refresh agent reads these on
+    each tick so changes apply within one cycle."""
+    out: dict = {}
+    if "agent_interval_seconds" in body:
+        v = int(body["agent_interval_seconds"])
+        v = max(60, min(v, 6 * 3600))   # clamp 1 min … 6 h
+        await db.set_setting("agent_interval_seconds", v)
+        out["agent_interval_seconds"] = v
+    return out
+
+
+@app.get("/lab")
+async def lab_page():
+    return FileResponse(FRONTEND_DIR / "lab.html")
 
 
 @app.get("/api/outlets")

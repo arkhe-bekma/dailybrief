@@ -16,6 +16,11 @@ REMOTE=$(git rev-parse origin/main)
 
 if [ "$LOCAL" != "$REMOTE" ]; then
   git pull -q --rebase
+  # Pick up any new Python deps (e.g. aiosqlite, trafilatura updates).
+  if [ -f /home/ubuntu/dailybrief/.venv/bin/pip ]; then
+    /home/ubuntu/dailybrief/.venv/bin/pip install -q -r /home/ubuntu/dailybrief/requirements.txt \
+      >> /var/log/dailybrief-deploy.log 2>&1 || true
+  fi
   systemctl restart dailybrief
   echo "[auto-update] $(date -u +%FT%TZ) pulled $LOCAL → $REMOTE, restarted"
 fi

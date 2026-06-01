@@ -67,21 +67,90 @@ async def extract(url: str) -> Reading | None:
         favor_recall=True,
         url=url,
     )
-    if not data_json:
-        return None
 
-    try:
-        data = json.loads(data_json)
-    except json.JSONDecodeError:
+    title = ""
+    image = None
+    byline = None
+    text = ""
+    excerpt = ""
+
+    if data_json:
+        try:
+            data = json.loads(data_json)
+            title   = (data.get("title") or "").strip()
+            image   = data.get("image")
+            byline  = data.get("author")
+            text    = (data.get("text") or data.get("raw_text") or "").strip()
+            excerpt = (data.get("description") or "").strip()[:300]
+        except json.JSONDecodeError:
+            pass
+
+    # Body looked thin → fallback agent: re-run trafilatura with a
+    # different config, then if it still comes up short pull every
+    # <p> tag straight out of the HTML body. Many Korean outlets
+    # (mk.co.kr, donga.com) gate behind weird wrappers that trafilatura
+    # gives up on at its first pass.
+    if len(text.split()) < 60:
+        alt = trafilatura.extract(
+            html,
+            output_format="txt",
+            include_links=False,
+            favor_recall=True,
+            no_fallback=False,
+            include_comments=False,
+            include_tables=False,
+            url=url,
+        )
+        if alt and len(alt.split()) > len(text.split()):
+            text = alt.strip()
+
+    if len(text.split()) < 60:
+        text = _extract_paragraphs_fallback(html) or text
+
+    if not text and not title:
         return None
 
     reading = Reading(
         url=url,
-        title=(data.get("title") or "").strip(),
-        image=data.get("image"),
-        byline=data.get("author"),
-        text=(data.get("text") or data.get("raw_text") or "").strip(),
-        excerpt=(data.get("description") or "").strip()[:300],
+        title=title,
+        image=image,
+        byline=byline,
+        text=text,
+        excerpt=excerpt,
     )
     cache.set(cache_key, reading, 86400)
     return reading
+
+
+# ── Fallback paragraph extractor ─────────────────────────────────
+# Last-ditch: pull text from every <p> / <div class="article-body">
+# tag in the HTML, scrubbing tags + entities. Slower than trafilatura
+# but catches sites trafilatura misclassifies as boilerplate.
+import re as _re
+
+_P_TAG_RE = _re.compile(r"<p[^>]*>(.*?)</p>", _re.DOTALL | _re.IGNORECASE)
+_BODY_DIV_RE = _re.compile(
+    r'<(?:article|div)[^>]*(?:class|id)=["\'][^"\']*'
+    r'(?:article(?:[-_]body)?|story[-_]body|news[-_]body|content[-_]body|read[-_]body)'
+    r'[^"\']*["\'][^>]*>(.*?)</(?:article|div)>',
+    _re.DOTALL | _re.IGNORECASE,
+)
+_TAG_RE = _re.compile(r"<[^>]+>")
+from html import unescape as _unescape
+
+
+def _extract_paragraphs_fallback(html_text: str) -> str:
+    if not html_text:
+        return ""
+    # First try the article-body container.
+    chunks: list[str] = []
+    m = _BODY_DIV_RE.search(html_text)
+    pool = m.group(1) if m else html_text
+    for pm in _P_TAG_RE.finditer(pool):
+        raw = pm.group(1)
+        raw = _TAG_RE.sub("", raw)
+        raw = _unescape(raw)
+        raw = raw.strip()
+        if len(raw) >= 30:
+            chunks.append(raw)
+    return "\n".join(chunks)
