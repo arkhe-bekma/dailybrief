@@ -35,7 +35,14 @@ def _conn() -> sqlite3.Connection:
 
 
 def _init_sync() -> None:
+    """Three-phase init so a pre-existing DB without the new `score`
+    column doesn't crash the index-creation step.
+      1. CREATE TABLE IF NOT EXISTS (fresh installs get the full schema)
+      2. ALTER TABLE migrations (existing installs gain new columns)
+      3. CREATE INDEX IF NOT EXISTS (now every column the indexes
+         reference is guaranteed to exist)"""
     with closing(_conn()) as c:
+        # Phase 1: tables. Indexes split out below.
         c.executescript("""
             CREATE TABLE IF NOT EXISTS articles (
                 url            TEXT PRIMARY KEY,
@@ -50,10 +57,6 @@ def _init_sync() -> None:
                 fetched_at     INTEGER NOT NULL,
                 last_seen_at   INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_articles_fetched   ON articles(fetched_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_articles_outlet    ON articles(outlet);
-            CREATE INDEX IF NOT EXISTS idx_articles_category  ON articles(category);
-            CREATE INDEX IF NOT EXISTS idx_articles_score     ON articles(score DESC);
 
             CREATE TABLE IF NOT EXISTS reader_results (
                 url           TEXT PRIMARY KEY,
@@ -62,7 +65,6 @@ def _init_sync() -> None:
                 last_used_at  INTEGER NOT NULL,
                 use_count     INTEGER NOT NULL DEFAULT 1
             );
-            CREATE INDEX IF NOT EXISTS idx_reader_used ON reader_results(last_used_at DESC);
 
             CREATE TABLE IF NOT EXISTS agent_runs (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,7 +74,6 @@ def _init_sync() -> None:
                 ok          INTEGER,
                 note        TEXT
             );
-            CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
 
             CREATE TABLE IF NOT EXISTS settings (
                 key    TEXT PRIMARY KEY,
@@ -85,17 +86,29 @@ def _init_sync() -> None:
             );
         """)
 
+        # Phase 2: migrations. Each ALTER is idempotent — ignore the
+        # "duplicate column name" OperationalError on already-migrated DBs.
+        for stmt in (
+            "ALTER TABLE articles ADD COLUMN score INTEGER DEFAULT 0",
+        ):
+            try:
+                c.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+
+        # Phase 3: indexes (now that every column they reference exists).
+        c.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_articles_fetched   ON articles(fetched_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_articles_outlet    ON articles(outlet);
+            CREATE INDEX IF NOT EXISTS idx_articles_category  ON articles(category);
+            CREATE INDEX IF NOT EXISTS idx_articles_score     ON articles(score DESC);
+            CREATE INDEX IF NOT EXISTS idx_reader_used        ON reader_results(last_used_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
+        """)
+
 
 async def init() -> None:
     await asyncio.to_thread(_init_sync)
-    # Online schema migrations — safe to re-run, ignore if column already exists.
-    def _migrate():
-        with closing(_conn()) as c:
-            try:
-                c.execute("ALTER TABLE articles ADD COLUMN score INTEGER DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
-    await asyncio.to_thread(_migrate)
 
 
 # ── articles ────────────────────────────────────────────────────────
