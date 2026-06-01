@@ -14,7 +14,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import cache, config, db, mixer, tickers
-from backend.agent import curator, illustrator, reader, registry, sorter, summary, translator
+from backend.agent import (
+    curator, dedup, illustrator, reader, registry, sorter, summary,
+    translator, validator,
+)
 from backend.sources import politicians, prices, rss, whales, youtube
 
 load_dotenv()
@@ -74,6 +77,116 @@ async def _start():
         asyncio.create_task(_refresh_agent())
     except Exception as exc:
         print(f"[startup] refresh agent failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_validation_worker())
+    except Exception as exc:
+        print(f"[startup] validation worker failed to schedule: {exc!r}", flush=True)
+
+
+# ── Validation worker ────────────────────────────────────────────────
+# Picks unvalidated articles from the DB in small batches, runs each
+# through reader.extract → validator.validate, and updates the DB.
+# Articles that pass have their body persisted to reader_results so
+# the publisher URL going dead later can't destroy our copy.
+#
+# Runs as a background task — never blocks /api/brief. Lab page polls
+# /api/ingest/status for the live progress dashboard.
+_INGEST_BATCH = 6           # how many articles per cycle
+_INGEST_PAUSE_BUSY = 2.0    # seconds between batches while there's work
+_INGEST_PAUSE_IDLE = 30.0   # seconds between polls when queue is empty
+
+
+async def _validate_one(article: dict) -> tuple[int, str]:
+    """Process a single article. Returns (validated_status, reason)."""
+    url = article.get("url")
+    if not url:
+        return -1, "no-url"
+
+    # 1. Try the cached reader body first — every article a user has
+    # opened in the modal already lives in reader_results.
+    body_payload = await db.get_reader(url)
+    if not body_payload:
+        # 2. Pull the body fresh.
+        try:
+            reading = await reader.extract(url)
+        except Exception as exc:
+            return -1, f"extract-error:{type(exc).__name__}"
+        if not reading or not (reading.text or reading.excerpt):
+            return -1, "extract-failed"
+        body_payload = {
+            "url": url,
+            "title": reading.title or article.get("title") or "",
+            "image": reading.image,
+            "byline": reading.byline,
+            "excerpt": reading.excerpt or "",
+            "lang": article.get("lang") or _detect_lang(reading.title or ""),
+            "word_count": len((reading.text or "").split()),
+            "paragraphs": _split_paragraphs(reading.text or ""),
+        }
+        try:
+            await db.save_reader(url, body_payload)
+        except Exception as exc:
+            print(f"[ingest] save_reader failed for {url[:60]}: {exc!r}", flush=True)
+
+    # 3. Run the validator.
+    passed, reason = validator.validate(article, body_payload)
+    if passed:
+        # First paragraph becomes the card dek — saves the supervisor
+        # path from re-extracting on the next view.
+        paras = body_payload.get("paragraphs") or []
+        if paras:
+            try:
+                await db.update_article_summary(url, paras[0][:400])
+            except Exception as exc:
+                print(f"[ingest] summary update failed: {exc!r}", flush=True)
+        # If the article didn't have an image but extraction found one,
+        # stamp it onto the articles row.
+        body_image = body_payload.get("image")
+        if body_image and not article.get("image"):
+            try:
+                await db.update_article_image(url, body_image)
+            except Exception as exc:
+                print(f"[ingest] image update failed: {exc!r}", flush=True)
+        return 1, "ok"
+    return -1, reason
+
+
+async def _validation_worker():
+    """Long-running loop. Sleeps cheaply when there's nothing to do."""
+    await asyncio.sleep(8)  # let the rest of startup settle
+    print("[ingest] validation worker armed", flush=True)
+    while True:
+        try:
+            batch = await db.list_unvalidated(limit=_INGEST_BATCH)
+        except Exception as exc:
+            print(f"[ingest] queue read failed: {exc!r}", flush=True)
+            await asyncio.sleep(_INGEST_PAUSE_IDLE)
+            continue
+        if not batch:
+            await asyncio.sleep(_INGEST_PAUSE_IDLE)
+            continue
+        # Process the batch in parallel — bounded by _INGEST_BATCH so we
+        # don't overrun trafilatura's HTTP fetches.
+        results = await asyncio.gather(
+            *[_validate_one(a) for a in batch],
+            return_exceptions=True,
+        )
+        for art, res in zip(batch, results):
+            url = art.get("url")
+            if not url:
+                continue
+            if isinstance(res, Exception):
+                status, reason = -1, f"crash:{type(res).__name__}"
+            else:
+                status, reason = res
+            try:
+                await db.set_article_validated(url, status, reason)
+                await db.bump_counter(
+                    "ingest_pass" if status == 1 else "ingest_fail",
+                )
+            except Exception as exc:
+                print(f"[ingest] mark failed for {url[:60]}: {exc!r}", flush=True)
+        await asyncio.sleep(_INGEST_PAUSE_BUSY)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -109,6 +222,62 @@ async def api_translate(url: str, lang: str = "ko"):
     if out is None:
         return {"error": "translation unavailable — check GEMINI_API_KEY or model error"}
     return out
+
+
+@app.get("/api/ingest/status")
+async def ingest_status():
+    """Live progress for the lab INGESTION MONITOR card. Cheap query —
+    safe to poll every few seconds."""
+    stats = await db.validation_stats()
+    total = stats["pending"] + stats["validated"] + stats["failed"]
+    done = stats["validated"] + stats["failed"]
+    pct = (done / total * 100) if total else 0
+    return {
+        **stats,
+        "total": total,
+        "done": done,
+        "percent": round(pct, 1),
+    }
+
+
+@app.get("/api/storage")
+async def api_storage():
+    """Disk + memory snapshot for the lab dashboard. Uses only stdlib
+    so this works on the minimal Lightsail Python."""
+    import os as _os
+    import resource as _resource
+    db_path = db.DB_PATH
+    db_bytes = db_path.stat().st_size if db_path.exists() else 0
+    # Disk space (Unix). Falls back to 0/0 on weird filesystems.
+    try:
+        st = _os.statvfs(str(db_path.parent))
+        disk_free = st.f_bavail * st.f_frsize
+        disk_total = st.f_blocks * st.f_frsize
+    except Exception:
+        disk_free = disk_total = 0
+    # Resident memory of this process (Linux returns KB, macOS returns
+    # bytes — normalise to bytes).
+    try:
+        usage = _resource.getrusage(_resource.RUSAGE_SELF)
+        rss_kb = usage.ru_maxrss
+        # macOS reports in bytes; Linux in kilobytes. Heuristic: any
+        # value over 4 GB is bytes.
+        rss_bytes = rss_kb if rss_kb > 4 * 1024 * 1024 else rss_kb * 1024
+    except Exception:
+        rss_bytes = 0
+    # Cache footprint (number of keys + rough byte size).
+    cache_keys = len(cache._store)
+    return {
+        "db_bytes": db_bytes,
+        "disk_free": disk_free,
+        "disk_total": disk_total,
+        "disk_used_pct": (
+            round((disk_total - disk_free) / disk_total * 100, 1)
+            if disk_total else 0
+        ),
+        "rss_bytes": rss_bytes,
+        "cache_keys": cache_keys,
+    }
 
 
 @app.get("/api/health")
@@ -167,10 +336,38 @@ async def brief():
     # Probe + filter only this ranked head — way cheaper than touching
     # every RSS candidate.
     top = await rss.enrich_top(raw_top, top_n=int(config.TOP_K * 1.5))
+    # Dedup pass: collapse same-story-from-multiple-outlets clusters
+    # down to at most 2 picks each (best by quality), so the per-
+    # category quota doesn't get filled with Reuters/AP/Bloomberg
+    # copies of the same headline.
+    top, dedup_stats = dedup.deduplicate(top)
+    if dedup_stats["removed"]:
+        print(
+            f"[dedup] {dedup_stats['clusters']} cluster(s), "
+            f"removed {dedup_stats['removed']}, "
+            f"kept {len(top)}",
+            flush=True,
+        )
     # Smart sorter: enforce per-category quotas, per-outlet caps, premium
     # weight, and top-up. Replaces the naive `top[:TOP_K]` slice with a
     # balanced page that the curator could never produce alone.
     top = sorter.balance(top, target_total=config.TOP_K)
+
+    # Quality gate: drop anything the validation worker has already
+    # marked as failing (validated=-1) so the feed never shows articles
+    # that can't actually be opened. Pending (validated=0) and passing
+    # (validated=1) items still flow through; the worker chips through
+    # the backlog within minutes after a fresh deploy.
+    try:
+        top_urls = [t.get("url") for t in top if t.get("url")]
+        states = await db.get_validation_states(top_urls)
+        rejected = {u for u, v in states.items() if v == -1}
+        if rejected:
+            top = [t for t in top if t.get("url") not in rejected]
+            print(f"[gate] dropped {len(rejected)} validated=-1 items", flush=True)
+    except Exception as exc:
+        print(f"[gate] validation lookup failed: {exc!r}", flush=True)
+
     await tickers.enrich_with_sparks(top)
 
     # Annotate each top item with its saved card-level translation
@@ -532,6 +729,15 @@ async def article(url: str):
                 await db.update_article_summary(url, first[:400])
     except Exception as exc:
         print(f"[supervisor] dek backfill failed: {exc!r}", flush=True)
+    # Image backfill — if the article entered the feed without an image
+    # but reader.extract found one, stamp it onto the articles row so
+    # the card shows a photo on the next refresh. Fixes "blank card,
+    # picture appears when opened" complaint.
+    try:
+        if result.get("image"):
+            await db.update_article_image(url, result["image"])
+    except Exception as exc:
+        print(f"[supervisor] image backfill failed: {exc!r}", flush=True)
     await db.bump_counter("reader_extracts_ok")
     return result
 

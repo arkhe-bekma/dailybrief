@@ -55,6 +55,73 @@ async function tick() {
     const r3 = await fetch("/api/lab/agents");
     if (r3.ok) paintAgents(await r3.json());
   } catch {}
+  try {
+    const r4 = await fetch("/api/ingest/status");
+    if (r4.ok) paintIngest(await r4.json());
+  } catch {}
+  try {
+    const r5 = await fetch("/api/storage");
+    if (r5.ok) paintStorage(await r5.json());
+  } catch {}
+}
+
+function paintIngest(d) {
+  const elPass = document.getElementById("ingest-pass");
+  const elFail = document.getElementById("ingest-fail");
+  const elPend = document.getElementById("ingest-pending");
+  const elSum  = document.getElementById("ingest-summary");
+  const elBar  = document.getElementById("ingest-bar-fill");
+  const elTxt  = document.getElementById("ingest-bar-text");
+  const elReasons = document.getElementById("ingest-reasons");
+  if (elPass) elPass.textContent = fmt(d.validated || 0);
+  if (elFail) elFail.textContent = fmt(d.failed || 0);
+  if (elPend) elPend.textContent = fmt(d.pending || 0);
+  if (elSum)  elSum.textContent = `${d.validated || 0} pass · ${d.failed || 0} reject · ${d.pending || 0} pending`;
+  if (elBar)  elBar.style.width = `${d.percent || 0}%`;
+  if (elTxt)  elTxt.textContent = `${d.percent || 0}% checked (${d.done || 0}/${d.total || 0})`;
+  if (elReasons) {
+    const reasons = d.reasons || [];
+    elReasons.innerHTML = reasons.length
+      ? `<span class="ingest-reasons-label">TOP REJECTION REASONS</span>` +
+        reasons.map((r) => `
+          <span class="ingest-reason-pill" title="${r.reason}">
+            <span class="ingest-reason-name">${r.reason || "—"}</span>
+            <span class="ingest-reason-n">${r.n}</span>
+          </span>
+        `).join("")
+      : "";
+  }
+}
+
+function paintStorage(d) {
+  const set = (id, txt) => {
+    const e = document.getElementById(id);
+    if (e) e.textContent = txt;
+  };
+  set("kpi-db-size2", fmtBytes(d.db_bytes));
+  set("kpi-disk-free", fmtBytes(d.disk_free));
+  set("kpi-disk-used", `${d.disk_used_pct || 0}%`);
+  set("kpi-rss",       fmtBytes(d.rss_bytes));
+  set("kpi-cache2",    fmt(d.cache_keys || 0));
+
+  // Alert when storage is tight
+  const alert = document.getElementById("storage-alert");
+  if (alert) {
+    let msg = null;
+    if (d.disk_free && d.disk_free < 1 * 1e9) {
+      msg = `⚠ disk space low: ${fmtBytes(d.disk_free)} free`;
+    } else if (d.disk_used_pct && d.disk_used_pct > 85) {
+      msg = `⚠ disk ${d.disk_used_pct}% full`;
+    } else if (d.rss_bytes && d.rss_bytes > 700 * 1e6) {
+      msg = `⚠ uvicorn RSS ${fmtBytes(d.rss_bytes)}`;
+    }
+    if (msg) {
+      alert.hidden = false;
+      alert.textContent = msg;
+    } else {
+      alert.hidden = true;
+    }
+  }
 }
 
 function paintAgents(d) {

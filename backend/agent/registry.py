@@ -44,6 +44,28 @@ AGENTS: list[dict] = [
         "always_on": True,
     },
     {
+        "key": "dedup",
+        "name": "Dedupe",
+        "role": "Same-story collapser",
+        "summary": "Title-Jaccard clustering across the enriched candidate list. When 5 "
+                   "outlets cover the same event, keeps at most the 2 best (premium, body "
+                   "depth, image presence) and drops the rest before they fill quota slots.",
+        "lang": "py",
+        "file": "backend/agent/dedup.py",
+        "always_on": True,
+    },
+    {
+        "key": "validator",
+        "name": "Validator",
+        "role": "Quality gate",
+        "summary": "Background worker that pulls unvalidated articles, runs reader.extract, "
+                   "checks for real body / image / no paywall, and marks pass/fail in the "
+                   "DB. Failed articles never reach the feed.",
+        "lang": "py",
+        "file": "backend/agent/validator.py",
+        "always_on": True,
+    },
+    {
         "key": "reader",
         "name": "Reader",
         "role": "Article body extractor",

@@ -596,20 +596,31 @@ a { color: inherit; text-decoration: none; }
   /* The price tape and the three flow strips were inheriting desktop
      padding (24px) but now share the same 12px. Same with the chip
      scroll gutter. */
+  /* Tape + strips share a flat stacking context AND identical track
+     dimensions on phone, so the tape's bottom edge lines up cleanly
+     with the WHALES line below — no more visual overlap during
+     sticky scroll. The semi-transparent background was the other half
+     of the bug: when the tape stickied over the strip, the strip
+     content bled through. Make the tape opaque on phone. */
   .tape {
     font-size: 11px;
-    /* On mobile the tape's backdrop-filter halo + z-index 20 was
-       bleeding into the whales strip below, making the bottom edge of
-       the tape look like it was covering the top of WHALES. Drop the
-       blur on small screens (the tape is short enough that no blur is
-       visible anyway) and let the strips share a flat stacking
-       context with the tape. */
     backdrop-filter: none;
+    background: rgba(11,13,24,0.96);
+    border-bottom: 1px solid var(--line);
     z-index: 1;
   }
-  /* Give the whales / trades / videos strips a clear z-index so the
-     tape above cannot visually overlap them. */
+  /* Strips get their own z-index so the natural document flow is
+     preserved; once the tape stickies, the strip slides cleanly
+     underneath instead of being half-covered. */
   .strip { position: relative; z-index: 2; }
+  /* Match track dimensions exactly between tape and strips so all
+     four horizontal bands have the same height — the user reported
+     the stock row sitting taller than the rest, which is what made
+     the overlap visually obvious. */
+  .tape-track, .strip-track {
+    padding: 4px 12px;
+    font-size: 11px;
+  }
 
   /* Main column padding too — same edge alignment as everything above */
   .main-col {

@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=41">
-  <link rel="stylesheet" href="/static/lab.css?v=42">
+  <link rel="stylesheet" href="/static/style.css?v=43">
+  <link rel="stylesheet" href="/static/lab.css?v=43">
 </head>
 <body class="lab">
   <header class="lab-mast">
@@ -98,6 +98,46 @@
       <div class="kpi-stack" id="counter-list"></div>
     </section>
 
+    <!-- INGESTION MONITOR -->
+    <section class="card span-3">
+      <div class="card-head">
+        INGESTION MONITOR · QUALITY-GATE PIPELINE
+        <span class="outlet-summary" id="ingest-summary">— · — · —</span>
+      </div>
+      <div class="ingest-bar-wrap">
+        <div class="ingest-bar"><span id="ingest-bar-fill" class="ingest-bar-fill"></span></div>
+        <span id="ingest-bar-text" class="ingest-bar-text">—</span>
+      </div>
+      <div class="ingest-grid">
+        <div class="ingest-tile ok">
+          <span class="ingest-tile-label">PASSED</span>
+          <span class="ingest-tile-v" id="ingest-pass">—</span>
+        </div>
+        <div class="ingest-tile fail">
+          <span class="ingest-tile-label">REJECTED</span>
+          <span class="ingest-tile-v" id="ingest-fail">—</span>
+        </div>
+        <div class="ingest-tile pending">
+          <span class="ingest-tile-label">PENDING</span>
+          <span class="ingest-tile-v" id="ingest-pending">—</span>
+        </div>
+      </div>
+      <div class="ingest-reasons" id="ingest-reasons"></div>
+    </section>
+
+    <!-- STORAGE + MEMORY -->
+    <section class="card span-2">
+      <div class="card-head">STORAGE & MEMORY · BOX HEALTH</div>
+      <div class="kpi-stack">
+        <div class="kpi"><span class="kpi-label">DB SIZE</span>            <span class="kpi-v" id="kpi-db-size2">—</span></div>
+        <div class="kpi"><span class="kpi-label">DISK FREE</span>          <span class="kpi-v" id="kpi-disk-free">—</span></div>
+        <div class="kpi"><span class="kpi-label">DISK USED</span>          <span class="kpi-v" id="kpi-disk-used">—</span></div>
+        <div class="kpi"><span class="kpi-label">PROCESS MEMORY</span>     <span class="kpi-v" id="kpi-rss">—</span></div>
+        <div class="kpi"><span class="kpi-label">CACHE KEYS LIVE</span>    <span class="kpi-v" id="kpi-cache2">—</span></div>
+      </div>
+      <div id="storage-alert" class="storage-alert" hidden></div>
+    </section>
+
     <!-- WORKFLOW PICKER -->
     <section class="card span-3">
       <div class="card-head">WORKFLOW · CHOOSE THE AUTOMATION</div>
@@ -137,6 +177,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=30"></script>
+  <script src="/static/lab.js?v=43"></script>
 </body>
 </html>

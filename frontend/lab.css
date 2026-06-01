@@ -441,6 +441,124 @@ body.lab {
   border-radius: 3px;
 }
 
+/* ── Ingestion monitor ──────────────────────────────────────── */
+.ingest-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.ingest-bar {
+  flex: 1 1 auto;
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ingest-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-mag));
+  border-radius: 4px;
+  transition: width 320ms ease-out;
+}
+.ingest-bar-text {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--neon-cyan);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  min-width: 132px;
+  text-align: right;
+}
+.ingest-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ingest-tile {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.02);
+}
+.ingest-tile-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.ingest-tile-v {
+  display: block;
+  font-family: var(--display);
+  font-variation-settings: "opsz" 40, "wdth" 92, "wght" 800;
+  font-size: 24px;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.ingest-tile.ok      { border-color: rgba(182,255,60,0.45); }
+.ingest-tile.ok      .ingest-tile-v { color: var(--neon-lime);   text-shadow: 0 0 12px rgba(182,255,60,0.35); }
+.ingest-tile.fail    { border-color: rgba(255,77,109,0.45); }
+.ingest-tile.fail    .ingest-tile-v { color: var(--down); }
+.ingest-tile.pending { border-color: rgba(0,225,255,0.40); }
+.ingest-tile.pending .ingest-tile-v { color: var(--neon-cyan); text-shadow: 0 0 12px rgba(0,225,255,0.30); }
+
+.ingest-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ingest-reasons-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  font-weight: 800;
+  color: var(--muted);
+  width: 100%;
+  margin-bottom: 4px;
+}
+.ingest-reason-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255,77,109,0.10);
+  border: 1px solid rgba(255,77,109,0.30);
+  font-family: var(--mono);
+}
+.ingest-reason-name {
+  color: var(--down);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+.ingest-reason-n {
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Storage alert (RAM / disk warning). Hidden by default. */
+.storage-alert {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(255,77,109,0.10);
+  border: 1px solid rgba(255,77,109,0.45);
+  color: var(--down);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
 .lab-foot {
   padding: 14px 22px;
   border-top: 1px solid var(--line);
@@ -449,6 +567,15 @@ body.lab {
   color: var(--muted);
   text-align: center;
   letter-spacing: 1px;
+}
+
+/* Ingestion grid on phone — 3 → 2 cols + smaller numbers */
+@media (max-width: 640px) {
+  .ingest-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .ingest-tile { padding: 6px 8px; }
+  .ingest-tile-v { font-size: 18px; }
+  .ingest-bar-text { min-width: 96px; font-size: 9.5px; }
+  .ingest-reason-name, .ingest-reason-n { font-size: 9px; }
 }
 
 /* ════════════════════════════════════════════════════════════

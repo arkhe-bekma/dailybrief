@@ -111,6 +111,15 @@ def _init_sync() -> None:
             "ALTER TABLE articles ADD COLUMN title_ko TEXT",
             "ALTER TABLE articles ADD COLUMN dek_ko TEXT",
             "ALTER TABLE articles ADD COLUMN translated_at INTEGER",
+            # Quality-validation flags. validated:
+            #   0  = not yet checked (initial state, waiting on the worker)
+            #   1  = passes validator.validate → safe to show on the feed
+            #  -1  = failed validation (see validation_reason)
+            # The body + image have been confirmed in reader_results by the
+            # time validated=1, so the article is link-rot proof.
+            "ALTER TABLE articles ADD COLUMN validated INTEGER DEFAULT 0",
+            "ALTER TABLE articles ADD COLUMN validation_reason TEXT",
+            "ALTER TABLE articles ADD COLUMN validated_at INTEGER",
         ):
             try:
                 c.execute(stmt)
@@ -124,6 +133,7 @@ def _init_sync() -> None:
             CREATE INDEX IF NOT EXISTS idx_articles_category  ON articles(category);
             CREATE INDEX IF NOT EXISTS idx_articles_score     ON articles(score DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_premium   ON articles(premium DESC, score DESC);
+            CREATE INDEX IF NOT EXISTS idx_articles_validated ON articles(validated, fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_reader_used        ON reader_results(last_used_at DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
         """)
@@ -177,6 +187,7 @@ def _upsert_article_sync(row: dict) -> None:
 # ── page query (lazy / from-disk pagination) ───────────────────────
 def _list_articles_sync(
     offset: int, limit: int, cat: str | None, premium_only: bool = False,
+    validated_only: bool = True,
 ) -> list[dict]:
     args: list = []
     where_parts: list[str] = []
@@ -185,6 +196,13 @@ def _list_articles_sync(
         args.append(cat)
     if premium_only:
         where_parts.append("premium = 1")
+    if validated_only:
+        # Default mode: hide articles the validator has confirmed
+        # broken (validated = -1). Pending (0) and passed (1) both
+        # flow through so a fresh deploy isn't an empty feed while
+        # the worker chews through the backlog. Pass validated_only
+        # =False to see the full archive (lab debug).
+        where_parts.append("validated != -1")
     where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
     args += [limit, offset]
     with closing(_conn()) as c:
@@ -211,13 +229,33 @@ def _count_articles_sync(cat: str | None) -> int:
 
 async def list_articles(
     offset: int, limit: int, cat: str | None = None, premium_only: bool = False,
+    validated_only: bool = True,
 ) -> list[dict]:
     return await asyncio.to_thread(
-        _list_articles_sync, offset, limit, cat, premium_only,
+        _list_articles_sync, offset, limit, cat, premium_only, validated_only,
     )
 
 
-async def count_articles(cat: str | None = None) -> int:
+def _count_articles_validated_sync(cat: str | None) -> int:
+    # Same semantics as the listing path: hide validated=-1, count
+    # passed + pending so the page counter doesn't whiplash as the
+    # worker chips through the backlog.
+    args: list = []
+    where = "WHERE validated != -1"
+    if cat:
+        where += " AND category = ?"
+        args.append(cat)
+    with closing(_conn()) as c:
+        return c.execute(
+            f"SELECT COUNT(*) AS n FROM articles {where}", args,
+        ).fetchone()["n"]
+
+
+async def count_articles(
+    cat: str | None = None, validated_only: bool = True,
+) -> int:
+    if validated_only:
+        return await asyncio.to_thread(_count_articles_validated_sync, cat)
     return await asyncio.to_thread(_count_articles_sync, cat)
 
 
@@ -352,6 +390,30 @@ async def get_card_translations(urls: list[str]) -> dict[str, dict]:
     return await asyncio.to_thread(_get_card_translations_batch_sync, urls)
 
 
+def _get_validation_states_sync(urls: list[str]) -> dict[str, int]:
+    """Returns {url: validated_status} for every requested URL that has
+    a row in articles. Used by /api/brief to keep "not yet validated"
+    and "failed" articles off the feed."""
+    if not urls:
+        return {}
+    out: dict[str, int] = {}
+    with closing(_conn()) as c:
+        for i in range(0, len(urls), 200):
+            chunk = urls[i:i + 200]
+            placeholders = ",".join("?" * len(chunk))
+            rows = c.execute(
+                f"SELECT url, validated FROM articles WHERE url IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for r in rows:
+                out[r["url"]] = r["validated"]
+    return out
+
+
+async def get_validation_states(urls: list[str]) -> dict[str, int]:
+    return await asyncio.to_thread(_get_validation_states_sync, urls)
+
+
 def _update_article_summary_sync(url: str, summary: str) -> bool:
     """Refresh articles.summary with a richer body excerpt (typically
     the first paragraph of a successful reader extract). Only updates
@@ -371,6 +433,97 @@ def _update_article_summary_sync(url: str, summary: str) -> bool:
 
 async def update_article_summary(url: str, summary: str) -> bool:
     return await asyncio.to_thread(_update_article_summary_sync, url, summary)
+
+
+def _update_article_image_sync(url: str, image: str) -> bool:
+    """Stamp the article's image URL onto the articles row — only when
+    there isn't one yet. Used by /api/article so a successful
+    reader.extract gives blank-image cards a photo on the next refresh."""
+    if not image:
+        return False
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles SET image = ? "
+            "WHERE url = ? AND (image IS NULL OR image = '')",
+            (image, url),
+        )
+        return cur.rowcount > 0
+
+
+async def update_article_image(url: str, image: str) -> bool:
+    return await asyncio.to_thread(_update_article_image_sync, url, image)
+
+
+# ── Validation worker helpers ──────────────────────────────────────
+def _list_unvalidated_sync(limit: int) -> list[dict]:
+    """Pick the next batch of articles the worker should check. Ordered
+    by recency so the freshest items get validated first — that's what
+    the user is most likely staring at."""
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT url, title, image, outlet, category, lang, summary "
+            "FROM articles "
+            "WHERE validated = 0 "
+            "ORDER BY fetched_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def list_unvalidated(limit: int = 20) -> list[dict]:
+    return await asyncio.to_thread(_list_unvalidated_sync, limit)
+
+
+def _set_article_validated_sync(
+    url: str, status: int, reason: str | None = None,
+) -> bool:
+    """status: 1=pass, -1=fail, 0=reset to pending."""
+    now = int(time.time())
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles "
+            "SET validated = ?, validation_reason = ?, validated_at = ? "
+            "WHERE url = ?",
+            (status, reason, now, url),
+        )
+        return cur.rowcount > 0
+
+
+async def set_article_validated(
+    url: str, status: int, reason: str | None = None,
+) -> bool:
+    return await asyncio.to_thread(_set_article_validated_sync, url, status, reason)
+
+
+def _validation_stats_sync() -> dict:
+    """Snapshot of the validation queue for the lab dashboard."""
+    with closing(_conn()) as c:
+        c1 = c.execute("SELECT COUNT(*) AS n FROM articles WHERE validated = 0").fetchone()
+        c2 = c.execute("SELECT COUNT(*) AS n FROM articles WHERE validated = 1").fetchone()
+        c3 = c.execute("SELECT COUNT(*) AS n FROM articles WHERE validated = -1").fetchone()
+        # Failure breakdown — surface the top reasons so we can tighten
+        # outlet config when a particular failure dominates.
+        reason_rows = c.execute(
+            "SELECT validation_reason AS reason, COUNT(*) AS n "
+            "FROM articles WHERE validated = -1 AND validation_reason IS NOT NULL "
+            "GROUP BY validation_reason ORDER BY n DESC LIMIT 12"
+        ).fetchall()
+        recent_rows = c.execute(
+            "SELECT url, outlet, validated, validation_reason, validated_at "
+            "FROM articles WHERE validated_at IS NOT NULL "
+            "ORDER BY validated_at DESC LIMIT 15"
+        ).fetchall()
+        return {
+            "pending": c1["n"],
+            "validated": c2["n"],
+            "failed": c3["n"],
+            "reasons": [dict(r) for r in reason_rows],
+            "recent": [dict(r) for r in recent_rows],
+        }
+
+
+async def validation_stats() -> dict:
+    return await asyncio.to_thread(_validation_stats_sync)
 
 
 # ── reader cache ────────────────────────────────────────────────────
