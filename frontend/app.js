@@ -525,7 +525,7 @@ function renderReader(content, data, item) {
 
 function closeReader() {
   document.getElementById("reader").classList.add("hidden");
-  document.body.style.overflow = "";
+  unlockBodyScroll();
 }
 
 // ── Flow detail modal (whales / trades / videos) ───────────────
