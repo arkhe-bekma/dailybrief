@@ -266,7 +266,10 @@ def _claude_translate_sync(prompt: str) -> dict | None:
         )
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=4000,
+            # Korean output tokenises ~1.5-2x denser than English.
+            # 8192 = Haiku 4.5 output ceiling, prevents truncation on
+            # long EN→KO translations.
+            max_tokens=8192,
             messages=[{"role": "user", "content": full_prompt}],
         )
     except Exception as exc:
@@ -294,31 +297,33 @@ def _claude_translate_sync(prompt: str) -> dict | None:
 
 
 def _translate_sync(prompt: str) -> tuple[dict | None, str]:
-    """Try Gemini first; on rate-limit / capacity errors fall back to
-    Claude. Returns (parsed_dict_or_None, provider_used)."""
+    """Try Claude Haiku first (user's chosen primary); fall back to
+    Gemini Flash only when Claude is missing / errors out. Returns
+    (parsed_dict_or_None, provider_used)."""
+    if os.getenv("ANTHROPIC_API_KEY"):
+        out = _claude_translate_sync(prompt)
+        if out:
+            return out, "claude-haiku-4-5"
+        # Claude returned a permanent failure (parse / non-200) — try
+        # Gemini as last resort if it's configured.
+        if _gemini_api_key():
+            try:
+                gout = _gemini_translate_sync(prompt)
+                if gout:
+                    return gout, "gemini-2.5-flash"
+            except _RateLimited as exc:
+                print(f"[translator] claude failed, gemini also rate-limited: {exc}", flush=True)
+        return None, "claude-failed"
+    # No Claude key — fall through to Gemini.
     if _gemini_api_key():
         try:
             out = _gemini_translate_sync(prompt)
             if out:
                 return out, "gemini-2.5-flash"
-            # None = permanent / parse failure — DON'T fall through (the
-            # output is bad, not the provider).
-            if os.getenv("ANTHROPIC_API_KEY"):
-                # But if Gemini gave a bad response, try Claude as last resort.
-                out = _claude_translate_sync(prompt)
-                if out:
-                    return out, "claude-haiku-4-5"
             return None, "gemini-failed"
         except _RateLimited as exc:
-            print(f"[translator] gemini rate-limited → claude: {exc}", flush=True)
-            out = _claude_translate_sync(prompt)
-            if out:
-                return out, "claude-haiku-4-5"
+            print(f"[translator] gemini rate-limited (no claude key): {exc}", flush=True)
             return None, "both-failed"
-    # No Gemini configured — go straight to Claude.
-    out = _claude_translate_sync(prompt)
-    if out:
-        return out, "claude-haiku-4-5"
     return None, "no-provider"
 
 
