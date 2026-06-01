@@ -455,6 +455,12 @@ async function load() {
     head.textContent = STATE.headline || "";
     head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
 
+    if (typeof STATE.db_total_articles === "number") {
+      DB_TOTAL_PAGES = Math.max(
+        1, Math.ceil(STATE.db_total_articles / PAGE_SIZE),
+      );
+    }
+
     renderWhalesStrip(STATE.whales || []);
     renderTradesStrip(STATE.trades || []);
     renderVideosStrip(STATE.youtube || []);
@@ -481,6 +487,11 @@ async function silentRefresh() {
     const head = $("#headline");
     head.textContent = STATE.headline || "";
     head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
+    if (typeof STATE.db_total_articles === "number") {
+      DB_TOTAL_PAGES = Math.max(
+        1, Math.ceil(STATE.db_total_articles / PAGE_SIZE),
+      );
+    }
     renderWhalesStrip(STATE.whales || []);
     renderTradesStrip(STATE.trades || []);
     renderVideosStrip(STATE.youtube || []);
