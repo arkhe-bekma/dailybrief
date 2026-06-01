@@ -45,6 +45,7 @@ def _init_sync() -> None:
                 category       TEXT,
                 lang           TEXT,
                 summary        TEXT,
+                score          INTEGER DEFAULT 0,
                 published_at   TEXT,
                 fetched_at     INTEGER NOT NULL,
                 last_seen_at   INTEGER NOT NULL
@@ -52,6 +53,7 @@ def _init_sync() -> None:
             CREATE INDEX IF NOT EXISTS idx_articles_fetched   ON articles(fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_outlet    ON articles(outlet);
             CREATE INDEX IF NOT EXISTS idx_articles_category  ON articles(category);
+            CREATE INDEX IF NOT EXISTS idx_articles_score     ON articles(score DESC);
 
             CREATE TABLE IF NOT EXISTS reader_results (
                 url           TEXT PRIMARY KEY,
@@ -86,6 +88,14 @@ def _init_sync() -> None:
 
 async def init() -> None:
     await asyncio.to_thread(_init_sync)
+    # Online schema migrations — safe to re-run, ignore if column already exists.
+    def _migrate():
+        with closing(_conn()) as c:
+            try:
+                c.execute("ALTER TABLE articles ADD COLUMN score INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+    await asyncio.to_thread(_migrate)
 
 
 # ── articles ────────────────────────────────────────────────────────
@@ -94,8 +104,8 @@ def _upsert_article_sync(row: dict) -> None:
     with closing(_conn()) as c:
         c.execute("""
             INSERT INTO articles
-              (url, title, image, outlet, category, lang, summary, published_at, fetched_at, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (url, title, image, outlet, category, lang, summary, score, published_at, fetched_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
               title=excluded.title,
               image=COALESCE(excluded.image, articles.image),
@@ -103,13 +113,51 @@ def _upsert_article_sync(row: dict) -> None:
               category=excluded.category,
               lang=excluded.lang,
               summary=excluded.summary,
+              score=MAX(IFNULL(excluded.score, 0), IFNULL(articles.score, 0)),
               last_seen_at=excluded.last_seen_at
         """, (
             row.get("url"), row.get("title"), row.get("image"),
             row.get("outlet"), row.get("category"), row.get("lang"),
-            row.get("summary"), row.get("published_at"),
+            row.get("summary"), int(row.get("score") or 0),
+            row.get("published_at"),
             row.get("fetched_at") or now, now,
         ))
+
+
+# ── page query (lazy / from-disk pagination) ───────────────────────
+def _list_articles_sync(offset: int, limit: int, cat: str | None) -> list[dict]:
+    args: list = []
+    where = ""
+    if cat:
+        where = "WHERE category = ?"
+        args.append(cat)
+    args += [limit, offset]
+    with closing(_conn()) as c:
+        rows = c.execute(
+            f"SELECT url, title, image, outlet, category, lang, summary, score, "
+            f"published_at, fetched_at FROM articles {where} "
+            f"ORDER BY score DESC, fetched_at DESC LIMIT ? OFFSET ?",
+            args,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def _count_articles_sync(cat: str | None) -> int:
+    args: list = []
+    where = ""
+    if cat:
+        where = "WHERE category = ?"
+        args.append(cat)
+    with closing(_conn()) as c:
+        return c.execute(f"SELECT COUNT(*) AS n FROM articles {where}", args).fetchone()["n"]
+
+
+async def list_articles(offset: int, limit: int, cat: str | None = None) -> list[dict]:
+    return await asyncio.to_thread(_list_articles_sync, offset, limit, cat)
+
+
+async def count_articles(cat: str | None = None) -> int:
+    return await asyncio.to_thread(_count_articles_sync, cat)
 
 
 async def upsert_articles(rows: list[dict]) -> int:

@@ -318,6 +318,28 @@ function filteredNews() {
   });
 }
 
+// Lazy DB-backed pagination: page 1 comes from the in-memory feed
+// (fast, freshly curated). Pages 2+ are pulled from /api/page so the
+// total page count is unbounded — it grows with the archive.
+let PAGE_OVERRIDE = null;   // items[] for the current page when >1
+let PAGE_OVERRIDE_N = null; // which page that override belongs to
+let DB_TOTAL_PAGES = 1;
+
+async function fetchPage(n) {
+  if (n <= 1) { PAGE_OVERRIDE = null; PAGE_OVERRIDE_N = null; return; }
+  try {
+    const r = await fetch(`/api/page?n=${n}&size=${PAGE_SIZE}&cat=${encodeURIComponent(CAT)}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    PAGE_OVERRIDE = d.items || [];
+    PAGE_OVERRIDE_N = d.page;
+    DB_TOTAL_PAGES = d.total_pages || 1;
+  } catch (e) {
+    PAGE_OVERRIDE = null;
+    PAGE_OVERRIDE_N = null;
+  }
+}
+
 function fmtAge(ts) {
   if (!ts) return "—";
   const diff = Math.floor((Date.now() - ts) / 1000);
@@ -328,10 +350,19 @@ function fmtAge(ts) {
 
 function paint(scrollTop = true) {
   const all = filteredNews();
-  const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
-  if (PAGE > totalPages) PAGE = totalPages;
-  const startIdx = (PAGE - 1) * PAGE_SIZE;
-  const slice = all.slice(startIdx, startIdx + PAGE_SIZE);
+  const memPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  // Total pages = whatever the DB archive supports, never the cached
+  // in-memory window. Always > memPages once articles accumulate.
+  const totalPages = Math.max(memPages, DB_TOTAL_PAGES || 1);
+
+  let slice;
+  if (PAGE > 1 && PAGE_OVERRIDE && PAGE_OVERRIDE_N === PAGE) {
+    slice = PAGE_OVERRIDE;
+  } else {
+    if (PAGE > memPages) PAGE = memPages;   // safety while async fetch finishes
+    const startIdx = (PAGE - 1) * PAGE_SIZE;
+    slice = all.slice(startIdx, startIdx + PAGE_SIZE);
+  }
 
   const paper = $("#paper");
   const paperNoImg = $("#paper-noimg");
@@ -371,7 +402,14 @@ function renderPager(totalPages) {
   const p = $("#pager");
   p.innerHTML = "";
   if (totalPages <= 1) return;
-  const go = (n) => { PAGE = Math.max(1, Math.min(totalPages, n)); paint(); };
+  const go = async (n) => {
+    PAGE = Math.max(1, Math.min(totalPages, n));
+    // Fetch the page from the archive if it's beyond the in-memory
+    // window. fetchPage clears the override for page 1 so the fast
+    // path keeps working.
+    await fetchPage(PAGE);
+    paint();
+  };
   const prev = el("button", { type: "button" }, "‹ PREV");
   prev.disabled = PAGE === 1;
   prev.onclick = () => go(PAGE - 1);

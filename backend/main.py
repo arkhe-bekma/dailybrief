@@ -143,12 +143,17 @@ async def brief():
                 "category": m.get("category"),
                 "lang": m.get("lang"),
                 "summary": m.get("dek") or "",
+                "score": m.get("score") or 0,
                 "published_at": m.get("ts"),
             }
             for m in mixed if m.get("kind") == "news" and m.get("url")
         ]
         await db.upsert_articles(rows)
         await db.bump_counter("articles_ingested", by=len(rows))
+
+        # Tell the frontend how deep the archive goes so its pager can
+        # render however many pages the DB actually supports.
+        payload["db_total_articles"] = await db.count_articles()
     except Exception as exc:
         print(f"[db] upsert articles failed: {exc}")
 
@@ -412,6 +417,41 @@ async def lab_settings_set(body: dict):
 @app.get("/lab")
 async def lab_page():
     return FileResponse(FRONTEND_DIR / "lab.html")
+
+
+@app.get("/api/page")
+async def api_page(n: int = 1, size: int = 31, cat: str | None = None):
+    """Lazy pagination — page 2+ pulls from the SQLite archive instead
+    of the in-memory curator output. Total page count grows as the DB
+    grows, with no upper limit baked in."""
+    n = max(1, n)
+    size = max(1, min(size, 100))
+    cat_clean = cat if cat and cat != "all" else None
+    total = await db.count_articles(cat=cat_clean)
+    pages = max(1, (total + size - 1) // size)
+    n = min(n, pages)
+    items = await db.list_articles(
+        offset=(n - 1) * size,
+        limit=size,
+        cat=cat_clean,
+    )
+    converted = [
+        {
+            "kind": "news",
+            "url": r.get("url"),
+            "title": r.get("title"),
+            "image": r.get("image"),
+            "outlet": r.get("outlet"),
+            "category": r.get("category"),
+            "lang": r.get("lang"),
+            "dek": r.get("summary"),
+            "ts": r.get("published_at"),
+            "score": r.get("score") or 0,
+            "tickers": [], "sparks": {},
+        }
+        for r in items
+    ]
+    return {"page": n, "size": size, "total_pages": pages, "total_items": total, "items": converted}
 
 
 @app.get("/api/outlets")
