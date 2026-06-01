@@ -107,7 +107,7 @@ async def api_translate(url: str, lang: str = "ko"):
 
     out = await translator.translate(payload, target_lang=lang)
     if out is None:
-        return {"error": "translation unavailable — check ANTHROPIC_API_KEY or model error"}
+        return {"error": "translation unavailable — check GEMINI_API_KEY or model error"}
     return out
 
 

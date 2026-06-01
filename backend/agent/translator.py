@@ -1,30 +1,40 @@
-"""Article translator agent.
+"""Article translator agent — Gemini Flash edition.
 
-Takes a reader payload (title + paragraphs in some source language) and
-returns a translated version. Drives the "translate" button in the
-reader modal.
+DESIGN NOTES
+============
 
-Design notes:
-  - Uses Claude Haiku 4.5 (cheap, fast, fluent KR/EN).
-  - The prompt asks the model to MATCH the article's energy / tone /
-    register — a hard-news lead stays formal, an op-ed stays opinionated,
-    an entertainment headline stays punchy. Newspaper tone is the default.
-  - Mixing the source language IN where it reads more naturally is
-    explicitly allowed. Names, technical terms, ticker symbols, brand
-    names, and English jargon that's already in common KR usage
-    (예: "AI", "GPU", "ETF", "SaaS") stay in source form.
-  - The model may compress a long article into a shorter translation if
-    that produces a more readable result. We expose the compression
-    in the response so the UI can label it.
-  - Cached in SQLite keyed by (url, target_lang). Re-translation
-    only happens if the source paragraphs change.
+  - LLM:  google-genai SDK calling `gemini-2.5-flash`. Free tier on
+          Google AI Studio is plenty for personal use (15 RPM, 1500
+          RPD as of 2025). Reads GEMINI_API_KEY (also accepts
+          GOOGLE_API_KEY as a synonym).
 
-Falls back to None (UI shows an error toast) when ANTHROPIC_API_KEY
-is missing or the model errors out.
+  - CACHE-FIRST POLICY: every translate() call hits two caches before
+          touching the network:
+            1. in-memory cache.get(...) — instant
+            2. SQLite reader_results table — survives restarts AND
+               is GLOBAL across users, so if anyone has translated
+               this URL into this language before, every subsequent
+               viewer gets the cached version free.
+          Only on a full miss does the agent call Gemini, and the
+          fresh response is written to BOTH caches before returning.
+
+  - PROMPT: newspaper register by default; reads the article first and
+          matches the energy/tone of the source (urgent news → urgent
+          target; opinion → opinionated; entertainment → playful).
+          May keep proper nouns / ticker symbols / common English
+          acronyms (AI, GPU, ETF, IPO …) in source form; mixing KO+EN
+          is preferred over forced literal translation. May compress
+          long articles (~70-90% length) when that reads better, with
+          a `summarized` flag in the response.
+
+  - SCHEMA: Gemini is asked for response_mime_type="application/json"
+          with an explicit response_schema, so the parser doesn't have
+          to defend against prose drift or code fences.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -69,23 +79,52 @@ REQUIREMENTS:
 - Preserve paragraph structure (~one input paragraph → one output
   paragraph), unless compression merges or drops a paragraph.
 
-OUTPUT — strict JSON, no prose around it:
-{{
-  "title": "<translated title>",
-  "paragraphs": ["<para 1>", "<para 2>", ...],
-  "summarized": <true if you compressed, false if straight translation>,
-  "note": "<optional 1-line translator note in {tgt_name}, or empty>"
-}}
+Return the result strictly in the requested JSON schema:
+  title       — translated title
+  paragraphs  — array of translated paragraph strings, in order
+  summarized  — true if you compressed, false if straight translation
+  note        — optional 1-line translator note in {tgt_name}, or ""
 """
+
+
+# Response schema enforced by Gemini's "controlled generation" mode —
+# protects against prose drift / code fences.
+_TRANSLATE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "paragraphs": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "summarized": {"type": "boolean"},
+        "note": {"type": "string"},
+    },
+    "required": ["title", "paragraphs"],
+}
+
+
+def _gemini_api_key() -> str | None:
+    """GEMINI_API_KEY preferred, GOOGLE_API_KEY accepted for symmetry
+    with Google's other libraries."""
+    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
 def _cache_key(url: str, target_lang: str, body_hash: str) -> str:
     return f"translate:{target_lang}:{body_hash}:{url}"
 
 
+def _disk_key(url: str, target_lang: str, body_hash: str) -> str:
+    """Key for the SQLite reader_results table. The body_hash makes
+    cache entries self-invalidate when the source article actually
+    changes."""
+    return f"translated::{target_lang}::{body_hash}::{url}"
+
+
 def _body_hash(title: str, paragraphs: list[str]) -> str:
-    """Fingerprint the source text so cached translations are invalidated
-    when the reader extractor returns a different body for the same URL."""
+    """Fingerprint the source text so cached translations are
+    invalidated when the reader extractor returns a different body
+    for the same URL."""
     h = hashlib.md5()
     h.update((title or "").encode("utf-8", "ignore"))
     for p in paragraphs or []:
@@ -94,22 +133,65 @@ def _body_hash(title: str, paragraphs: list[str]) -> str:
     return h.hexdigest()[:16]
 
 
+def _gemini_translate_sync(prompt: str) -> dict | None:
+    """Blocking Gemini call — wrapped in to_thread by the caller so the
+    event loop stays responsive. Returns the parsed dict or None on
+    any failure."""
+    api_key = _gemini_api_key()
+    if not api_key:
+        return None
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as exc:
+        print(f"[translator] google-genai import failed: {exc!r}", flush=True)
+        return None
+
+    try:
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=_TRANSLATE_SCHEMA,
+                temperature=0.4,
+                max_output_tokens=4096,
+            ),
+        )
+    except Exception as exc:
+        print(f"[translator] gemini call failed: {exc!r}", flush=True)
+        return None
+
+    text = (getattr(resp, "text", None) or "").strip()
+    if not text:
+        return None
+    # Schema enforcement should already produce clean JSON, but strip
+    # accidental fences just in case.
+    if text.startswith("```"):
+        text = text.split("```", 2)[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip("`").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        print(f"[translator] gemini returned non-JSON: {exc!r}", flush=True)
+        return None
+
+
 async def translate(
     payload: dict, target_lang: str = "ko",
 ) -> dict | None:
-    """Translate a reader payload into `target_lang`. Returns a dict in
-    the same shape as the reader response (title + paragraphs + url +
-    image + lang + word_count) plus a `summarized` flag and an optional
-    `note` from the translator.
+    """Translate a reader payload into `target_lang`. Same return shape
+    as /api/article + {translated, summarized, note, target_lang}.
 
-    Returns None when no LLM key is configured."""
+    Cache-first: in-memory → SQLite → Gemini. The API call only fires
+    on a full miss, and a successful response is immediately written
+    back to BOTH caches so every subsequent viewer of the same URL +
+    target_lang gets it free.
+    """
     if not payload or not isinstance(payload, dict):
-        return None
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        return None
-    try:
-        from anthropic import AsyncAnthropic
-    except ImportError:
         return None
 
     title = payload.get("title") or ""
@@ -117,55 +199,40 @@ async def translate(
     src_lang = payload.get("lang") or "en"
     tgt_lang = target_lang or "ko"
     if src_lang == tgt_lang:
-        # Asking for the same language as the source is a no-op.
         return {**payload, "translated": False, "target_lang": tgt_lang}
 
-    bh = _body_hash(title, paragraphs)
     url = payload.get("url") or ""
-    ck = _cache_key(url, tgt_lang, bh)
+    bh = _body_hash(title, paragraphs)
+    mem_key = _cache_key(url, tgt_lang, bh)
+    disk_url = _disk_key(url, tgt_lang, bh)
 
-    # Memory cache hit?
-    hit = cache.get(ck)
+    # Tier 1: in-memory.
+    hit = cache.get(mem_key)
     if hit is not None:
         return hit
 
-    # Disk-backed cache via the reader_results table (re-using the same
-    # url+payload shape; we just stamp a "translated_…" prefix on URL).
-    disk_url = f"translated::{tgt_lang}::{bh}::{url}"
+    # Tier 2: SQLite. Reuses the existing reader_results table — the
+    # prefixed URL key keeps it sharing space without a schema change.
     disk_hit = await db.get_reader(disk_url)
     if disk_hit is not None:
-        cache.set(ck, disk_hit, 7 * 86_400)
+        cache.set(mem_key, disk_hit, 7 * 86_400)
         return disk_hit
 
-    client = AsyncAnthropic()
+    # Tier 3: Gemini call. Network + token spend lives only here.
+    if not _gemini_api_key():
+        return None
+
     src_name = LANG_NAMES.get(src_lang, src_lang)
     tgt_name = LANG_NAMES.get(tgt_lang, tgt_lang)
-
-    # Cap body length sent to the model — protects token spend on
-    # mega-long articles and matches what the reader modal renders.
+    # Cap source length to keep latency + token usage bounded.
     body_text = "\n\n".join(p for p in paragraphs if p)[:8000]
-
     prompt = _PROMPT.format(
         src_name=src_name, tgt_name=tgt_name,
         title=title, body=body_text,
     )
 
-    try:
-        resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = resp.content[0].text.strip()
-        # Strip code fences if Claude added them.
-        if text.startswith("```"):
-            text = text.split("```", 2)[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip("`").strip()
-        parsed = json.loads(text)
-    except Exception as exc:
-        print(f"[translator] failed for {url[:60]}: {exc!r}", flush=True)
+    parsed = await asyncio.to_thread(_gemini_translate_sync, prompt)
+    if not parsed:
         return None
 
     out_paragraphs = parsed.get("paragraphs") or []
@@ -186,10 +253,12 @@ async def translate(
         "translated": True,
         "summarized": bool(parsed.get("summarized")),
         "note": parsed.get("note") or "",
+        "model": "gemini-2.5-flash",
     }
 
-    # Cache both tiers.
-    cache.set(ck, result, 7 * 86_400)
+    # Write back to BOTH caches before returning. SQLite is the
+    # cross-user / cross-restart store.
+    cache.set(mem_key, result, 7 * 86_400)
     try:
         await db.save_reader(disk_url, result)
     except Exception as exc:
