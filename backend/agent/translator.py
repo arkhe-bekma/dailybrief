@@ -156,29 +156,54 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
         max_output_tokens=8192,
     )
     client = genai.Client(api_key=api_key)
-    try:
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=cfg,
+
+    # Free-tier Flash regularly returns 503 "high demand" on the very
+    # first request and then succeeds a beat later. Without retry the
+    # user sees "click translate, spinner, nothing, click again, works"
+    # — which is exactly what got reported. Retry the transients here
+    # so a single click is enough. Only fall through to Claude when ALL
+    # attempts fail or the error is genuinely fallthrough-worthy.
+    import time as _time
+    transient_markers = ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+    fallthrough_markers = transient_markers + (
+        "QUOTA", "API_KEY_INVALID", "PERMISSION_DENIED", "API key not found",
+    )
+    attempts = (0.0, 1.5, 3.5)   # ~5s total worst case, still tolerable
+    resp = None
+    last_exc: Exception | None = None
+    for i, delay in enumerate(attempts, start=1):
+        if delay:
+            _time.sleep(delay)
+        try:
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=cfg,
+            )
+            if i > 1:
+                print(f"[translator] gemini retry {i}/{len(attempts)} succeeded", flush=True)
+            break
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc)
+            if any(m in msg for m in transient_markers):
+                # Worth retrying — log and loop.
+                print(f"[translator] gemini transient {i}/{len(attempts)}: {msg[:120]}", flush=True)
+                continue
+            # Non-transient but still fallthrough-worthy (e.g. key invalid):
+            # don't burn more retries, raise immediately for Claude fallback.
+            if any(m in msg for m in fallthrough_markers):
+                raise _RateLimited(f"gemini unavailable: {msg[:120]}")
+            # Genuinely permanent (e.g. 400 bad payload). Stop and return None.
+            print(f"[translator] gemini call failed (terminal): {msg[:200]}", flush=True)
+            return None
+
+    if resp is None:
+        # All retries exhausted with transient errors → let Claude try.
+        raise _RateLimited(
+            f"gemini exhausted after {len(attempts)} attempts: "
+            f"{str(last_exc)[:120] if last_exc else 'unknown'}"
         )
-    except Exception as exc:
-        msg = str(exc)
-        # Re-raise so the caller can try Claude when:
-        #   - rate limit / quota exceeded
-        #   - the model is overloaded (503 / UNAVAILABLE)
-        #   - the API key is bad (revoked / typo / not allowed for model)
-        # i.e. anything where "ask the other provider instead" is the
-        # right move. Genuinely permanent things (400 bad request body)
-        # stay terminal.
-        fallthrough_markers = (
-            "429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "QUOTA",
-            "API_KEY_INVALID", "PERMISSION_DENIED", "API key not found",
-        )
-        if any(m in msg for m in fallthrough_markers):
-            raise _RateLimited(f"gemini unavailable: {msg[:120]}")
-        print(f"[translator] gemini call failed (terminal): {msg[:200]}", flush=True)
-        return None
 
     text = (getattr(resp, "text", None) or "").strip()
     if not text:
