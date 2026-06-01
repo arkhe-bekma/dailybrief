@@ -601,13 +601,10 @@ async function openReader(url, item) {
   const modal = document.getElementById("reader");
   if (!modal) return;
   modal.classList.remove("hidden");
-  // Hard-lock the page behind so touch-drag / scroll never leaks through.
-  document.body.style.overflow = "hidden";
-  document.body.style.position = "fixed";
-  document.body.style.left = "0";
-  document.body.style.right = "0";
-  document.body.dataset.scrollY = String(window.scrollY);
-  document.body.style.top = `-${window.scrollY}px`;
+  // Lock the page behind. The helper captures scrollY BEFORE applying
+  // position:fixed — see lockBodyScroll for the iOS scroll-snap bug
+  // that used to send the user back to the top on close.
+  lockBodyScroll();
   const content = modal.querySelector(".reader-content");
   content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
 
@@ -678,21 +675,34 @@ function closeReader() {
 }
 
 // ── Flow detail modal (whales / trades / videos) ───────────────
+// CRITICAL: capture scrollY BEFORE applying position:fixed. iOS Safari
+// (and some Chrome versions) snap the visual scroll to 0 the moment a
+// position:fixed body is committed, so reading window.scrollY AFTER
+// the style change yielded 0 — that's why closing the reader always
+// scrolled the page back to the top.
 function lockBodyScroll() {
+  if (document.body.dataset.scrollLocked === "1") return;
+  const y = window.scrollY || window.pageYOffset || 0;
+  document.body.dataset.scrollY = String(y);
+  document.body.dataset.scrollLocked = "1";
   document.body.style.overflow = "hidden";
   document.body.style.position = "fixed";
   document.body.style.left = "0";
   document.body.style.right = "0";
-  document.body.dataset.scrollY = String(window.scrollY);
-  document.body.style.top = `-${window.scrollY}px`;
+  document.body.style.top = `-${y}px`;
+  document.body.style.width = "100%";
 }
 function unlockBodyScroll() {
+  if (document.body.dataset.scrollLocked !== "1") return;
   const y = parseInt(document.body.dataset.scrollY || "0", 10);
   document.body.style.overflow = "";
   document.body.style.position = "";
   document.body.style.top = "";
   document.body.style.left = "";
   document.body.style.right = "";
+  document.body.style.width = "";
+  delete document.body.dataset.scrollLocked;
+  // Restore the scroll position immediately, before the next paint.
   window.scrollTo(0, y);
 }
 function openFlow(kind, index) {
@@ -707,7 +717,7 @@ function openFlow(kind, index) {
   if (!item) return;
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
-  document.body.style.overflow = "hidden";
+  // lockBodyScroll() above already handles overflow; no extra style nudge.
   const content = document.getElementById("flow-content");
   content.innerHTML = "";
 
@@ -809,8 +819,11 @@ function attachSwipeToClose(modalSelector, closeFn) {
   let atTop = false;
   let atBottom = false;
   let armed = false;
-  const ARM_PX = 6;
-  const DISMISS_DELTA = 110;
+  // Slightly more eager arming + lower dismiss threshold so the
+  // swipe-down-at-top gesture actually feels responsive. Article is
+  // open → finger touches → drag down → release; ~75px ends the modal.
+  const ARM_PX = 4;
+  const DISMISS_DELTA = 75;
 
   function clearTransitions() {
     card.style.transition = "";
