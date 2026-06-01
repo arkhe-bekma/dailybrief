@@ -88,8 +88,13 @@ def _init_sync() -> None:
 
         # Phase 2: migrations. Each ALTER is idempotent — ignore the
         # "duplicate column name" OperationalError on already-migrated DBs.
+        # NB: these columns are API-visible labels: the front-end and any
+        # downstream consumer can rely on them being present per article.
         for stmt in (
             "ALTER TABLE articles ADD COLUMN score INTEGER DEFAULT 0",
+            "ALTER TABLE articles ADD COLUMN why TEXT",
+            "ALTER TABLE articles ADD COLUMN image_source TEXT",
+            "ALTER TABLE articles ADD COLUMN tier TEXT",
         ):
             try:
                 c.execute(stmt)
@@ -117,8 +122,10 @@ def _upsert_article_sync(row: dict) -> None:
     with closing(_conn()) as c:
         c.execute("""
             INSERT INTO articles
-              (url, title, image, outlet, category, lang, summary, score, published_at, fetched_at, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (url, title, image, outlet, category, lang, summary, score,
+               why, image_source, tier,
+               published_at, fetched_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
               title=excluded.title,
               image=COALESCE(excluded.image, articles.image),
@@ -127,11 +134,15 @@ def _upsert_article_sync(row: dict) -> None:
               lang=excluded.lang,
               summary=excluded.summary,
               score=MAX(IFNULL(excluded.score, 0), IFNULL(articles.score, 0)),
+              why=COALESCE(excluded.why, articles.why),
+              image_source=COALESCE(excluded.image_source, articles.image_source),
+              tier=COALESCE(excluded.tier, articles.tier),
               last_seen_at=excluded.last_seen_at
         """, (
             row.get("url"), row.get("title"), row.get("image"),
             row.get("outlet"), row.get("category"), row.get("lang"),
             row.get("summary"), int(row.get("score") or 0),
+            row.get("why"), row.get("image_source"), row.get("tier"),
             row.get("published_at"),
             row.get("fetched_at") or now, now,
         ))
@@ -148,6 +159,7 @@ def _list_articles_sync(offset: int, limit: int, cat: str | None) -> list[dict]:
     with closing(_conn()) as c:
         rows = c.execute(
             f"SELECT url, title, image, outlet, category, lang, summary, score, "
+            f"why, image_source, tier, "
             f"published_at, fetched_at FROM articles {where} "
             f"ORDER BY score DESC, fetched_at DESC LIMIT ? OFFSET ?",
             args,

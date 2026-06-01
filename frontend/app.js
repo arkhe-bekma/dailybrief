@@ -380,7 +380,10 @@ function paint(scrollTop = true) {
   });
 
   // chip counts (from full STATE, not filtered)
-  const counts = { all: 0, world: 0, econ: 0, tech: 0, ai: 0, crypto: 0, korea: 0 };
+  const counts = {
+    all: 0, world: 0, econ: 0, biz: 0, tech: 0, ai: 0, crypto: 0,
+    science: 0, geo: 0, opinion: 0, korea: 0, kent: 0,
+  };
   STATE.mixed.forEach((m) => {
     if (m.kind !== "news") return;
     counts.all++;
@@ -441,35 +444,85 @@ function renderPager(totalPages) {
   p.appendChild(next);
 }
 
+// ── Preset cache (localStorage) ────────────────────────────────
+// Render the last good /api/brief response immediately on page load
+// so a refresh never shows a blank screen while the network call is
+// in flight. The freshest payload then swaps in once it arrives.
+const PRESET_KEY  = "dailybrief.preset.v1";
+const PRESET_MAX  = 1_500_000;   // ~1.5 MB — keeps localStorage happy
+
+function savePreset(state) {
+  try {
+    const lean = {
+      profile: state.profile,
+      tape: state.tape,
+      headline: state.headline,
+      mixed: (state.mixed || []).slice(0, 200),  // cap so we stay under quota
+      by_outlet: undefined,                       // unused on the wall
+      whales: state.whales,
+      trades: state.trades,
+      youtube: state.youtube,
+      db_total_articles: state.db_total_articles,
+      _saved_at: Date.now(),
+    };
+    const s = JSON.stringify(lean);
+    if (s.length <= PRESET_MAX) localStorage.setItem(PRESET_KEY, s);
+  } catch (e) { /* quota or serialization issue — non-fatal */ }
+}
+
+function loadPreset() {
+  try {
+    const s = localStorage.getItem(PRESET_KEY);
+    if (!s) return null;
+    const data = JSON.parse(s);
+    if (!data || !Array.isArray(data.mixed)) return null;
+    return data;
+  } catch (e) { return null; }
+}
+
+function paintFromState() {
+  renderTape(STATE.tape || []);
+  const head = $("#headline");
+  head.textContent = STATE.headline || "";
+  head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
+  if (typeof STATE.db_total_articles === "number") {
+    DB_TOTAL_PAGES = Math.max(
+      1, Math.ceil(STATE.db_total_articles / PAGE_SIZE),
+    );
+  }
+  renderWhalesStrip(STATE.whales || []);
+  renderTradesStrip(STATE.trades || []);
+  renderVideosStrip(STATE.youtube || []);
+  paint(false);
+}
+
 // ── Load ───────────────────────────────────────────────────────
 async function load() {
-  $("#status").textContent = "loading…";
+  // 1. Hydrate from localStorage preset for instant first paint.
+  const cached = loadPreset();
+  if (cached) {
+    STATE = cached;
+    STATE.mixed.forEach((m) => { if (m.dek) m.dek = stripHtml(m.dek); });
+    LAST_LOAD = cached._saved_at || Date.now();
+    paintFromState();
+    $("#status").textContent = "showing cached · refreshing…";
+  } else {
+    $("#status").textContent = "loading…";
+  }
+
+  // 2. Fetch fresh and swap in.
   try {
     const r = await fetch("/api/brief");
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     STATE = await r.json();
     STATE.mixed.forEach((m) => { if (m.dek) m.dek = stripHtml(m.dek); });
-
-    renderTape(STATE.tape || []);
-    const head = $("#headline");
-    head.textContent = STATE.headline || "";
-    head.lang = (STATE.profile && STATE.profile.primary_lang) || "en";
-
-    if (typeof STATE.db_total_articles === "number") {
-      DB_TOTAL_PAGES = Math.max(
-        1, Math.ceil(STATE.db_total_articles / PAGE_SIZE),
-      );
-    }
-
-    renderWhalesStrip(STATE.whales || []);
-    renderTradesStrip(STATE.trades || []);
-    renderVideosStrip(STATE.youtube || []);
-
     LAST_LOAD = Date.now();
     PAGE = 1;
-    paint();
+    paintFromState();
+    paint(false);     // ensure pager + chip counts redrawn
+    savePreset(STATE);
   } catch (e) {
-    $("#status").textContent = `error: ${e.message}`;
+    if (!cached) $("#status").textContent = `error: ${e.message}`;
   }
 }
 
@@ -496,6 +549,7 @@ async function silentRefresh() {
     renderTradesStrip(STATE.trades || []);
     renderVideosStrip(STATE.youtube || []);
     paint(false);  // preserve page + scroll
+    savePreset(STATE);
   } catch (e) {
     console.warn("auto-refresh failed:", e);
   }

@@ -8,7 +8,33 @@ Each item ends up with a uniform shape:
 
 from __future__ import annotations
 
+import html as _html
+import re as _re
 from datetime import datetime, timezone
+
+
+_HTML_TAG_RE = _re.compile(r"<[^>]+>")
+_ATTR_FRAGMENT_RE = _re.compile(
+    r"\b(?:img|src|alt|width|height|border|style|class|figure|figcaption)\s*=\s*['\"][^'\"]*['\"]?",
+    _re.IGNORECASE,
+)
+_ORPHAN_OPEN_TAG_RE = _re.compile(
+    r"<\s*(img|figure|figcaption|span|div|p|br|table|tr|td|a|iframe|script|style)\b[^<]*",
+    _re.IGNORECASE,
+)
+_WS_RE = _re.compile(r"\s+")
+
+
+def _clean_text(raw: str | None) -> str:
+    if not raw:
+        return ""
+    s = _HTML_TAG_RE.sub(" ", raw)
+    s = _html.unescape(s)
+    s = _HTML_TAG_RE.sub(" ", s)
+    s = _html.unescape(s)
+    s = _ORPHAN_OPEN_TAG_RE.sub(" ", s)
+    s = _ATTR_FRAGMENT_RE.sub(" ", s)
+    return _WS_RE.sub(" ", s).strip()
 
 
 def _now() -> float:
@@ -36,8 +62,8 @@ def from_news(items: list[dict]) -> list[dict]:
             "kind": "news",
             "score": round(s),
             "ts": a.get("published"),
-            "title": a.get("title"),
-            "dek": a.get("summary"),
+            "title": _clean_text(a.get("title")),
+            "dek": _clean_text(a.get("summary")),
             "url": a.get("url"),
             "outlet": a.get("outlet"),
             "category": a.get("category"),

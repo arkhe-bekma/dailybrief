@@ -31,15 +31,20 @@
   --neon-red:     #ff4d6d;
 
   /* category colors (neon) */
-  --c-world:  var(--neon-cyan);
-  --c-econ:   var(--neon-lime);
-  --c-tech:   var(--neon-violet);
-  --c-ai:     var(--neon-mag);
-  --c-crypto: var(--neon-orange);
-  --c-korea:  var(--neon-pink);
-  --c-whale:  var(--neon-lime);
-  --c-trade:  var(--neon-yellow);
-  --c-video:  var(--neon-pink);
+  --c-world:   var(--neon-cyan);
+  --c-econ:    var(--neon-lime);
+  --c-biz:     var(--neon-yellow);
+  --c-tech:    var(--neon-violet);
+  --c-ai:      var(--neon-mag);
+  --c-crypto:  var(--neon-orange);
+  --c-science: var(--neon-cyan);
+  --c-geo:     var(--neon-red);
+  --c-opinion: var(--neon-violet);
+  --c-korea:   var(--neon-pink);
+  --c-kent:    var(--neon-pink);
+  --c-whale:   var(--neon-lime);
+  --c-trade:   var(--neon-yellow);
+  --c-video:   var(--neon-pink);
 
   --up:   var(--neon-lime);
   --down: var(--neon-red);
@@ -66,6 +71,11 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Kill the default iOS / Android tap-highlight gray flash on every
+   clickable element. This was the colored overlay the user was seeing
+   on photos when tapping. */
+a, button, .art, .strip-item, .chip { -webkit-tap-highlight-color: transparent; }
 
 html, body {
   margin: 0;
@@ -122,8 +132,8 @@ a { color: inherit; text-decoration: none; }
   display: grid !important;
   grid-template-columns: 1fr auto;   /* brand fills left, date stays right */
   align-items: center;
-  column-gap: 12px;
-  padding: 12px 18px;
+  column-gap: 10px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   background: rgba(5, 6, 10, 0.85);
   backdrop-filter: blur(12px);
@@ -376,8 +386,8 @@ a { color: inherit; text-decoration: none; }
 }
 .tape-track {
   display: flex;
-  gap: 28px;
-  padding: 8px 24px;
+  gap: 22px;
+  padding: 5px 16px;
   white-space: nowrap;
   animation: marquee 30s linear infinite;   /* was 110s — 3.7× faster */
   font-family: var(--mono);
@@ -397,7 +407,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Headline ─────────────────────────────────────────────── */
 .headline {
-  padding: 16px 24px;
+  padding: 10px 18px;
   font-family: var(--display);
   font-variation-settings: "opsz" 24, "wdth" 95;
   font-size: 18px;
@@ -427,14 +437,14 @@ a { color: inherit; text-decoration: none; }
 /* ── Chips ────────────────────────────────────────────────── */
 .chips {
   display: flex;
-  gap: 6px;
-  padding: 10px 24px;
+  gap: 5px;
+  padding: 6px 18px;
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
   background: rgba(5,6,10,0.85);
   backdrop-filter: blur(10px);
   position: sticky;
-  top: 102px;
+  top: 86px;
   z-index: 19;
 }
 .chip {
@@ -474,12 +484,17 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 24px rgba(255,255,255,0.3);
 }
 .chip.active .ct { color: var(--bg-0); opacity: 0.5; }
-.chip.cat-world.active  { background: var(--c-world);  border-color: var(--c-world);  color: #001722; box-shadow: 0 0 24px rgba(0,225,255,0.5); }
-.chip.cat-econ.active   { background: var(--c-econ);   border-color: var(--c-econ);   color: #0b1a00; box-shadow: 0 0 24px rgba(182,255,60,0.45); }
-.chip.cat-tech.active   { background: var(--c-tech);   border-color: var(--c-tech);   color: #170433; box-shadow: 0 0 24px rgba(179,136,255,0.45); }
-.chip.cat-ai.active     { background: var(--c-ai);     border-color: var(--c-ai);     color: #2a0024; box-shadow: 0 0 24px rgba(255,43,214,0.5); }
-.chip.cat-crypto.active { background: var(--c-crypto); border-color: var(--c-crypto); color: #2a1500; box-shadow: 0 0 24px rgba(255,154,60,0.5); }
-.chip.cat-korea.active  { background: var(--c-korea);  border-color: var(--c-korea);  color: #2a001b; box-shadow: 0 0 24px rgba(255,91,232,0.5); }
+.chip.cat-world.active   { background: var(--c-world);   border-color: var(--c-world);   color: #001722; box-shadow: 0 0 24px rgba(0,225,255,0.5); }
+.chip.cat-econ.active    { background: var(--c-econ);    border-color: var(--c-econ);    color: #0b1a00; box-shadow: 0 0 24px rgba(182,255,60,0.45); }
+.chip.cat-biz.active     { background: var(--c-biz);     border-color: var(--c-biz);     color: #1a1305; box-shadow: 0 0 24px rgba(255,230,0,0.45); }
+.chip.cat-tech.active    { background: var(--c-tech);    border-color: var(--c-tech);    color: #170433; box-shadow: 0 0 24px rgba(179,136,255,0.45); }
+.chip.cat-ai.active      { background: var(--c-ai);      border-color: var(--c-ai);      color: #2a0024; box-shadow: 0 0 24px rgba(255,43,214,0.5); }
+.chip.cat-crypto.active  { background: var(--c-crypto);  border-color: var(--c-crypto);  color: #2a1500; box-shadow: 0 0 24px rgba(255,154,60,0.5); }
+.chip.cat-science.active { background: var(--c-science); border-color: var(--c-science); color: #001722; box-shadow: 0 0 24px rgba(0,225,255,0.45); }
+.chip.cat-geo.active     { background: var(--c-geo);     border-color: var(--c-geo);     color: #2a0008; box-shadow: 0 0 24px rgba(255,77,109,0.45); }
+.chip.cat-opinion.active { background: var(--c-opinion); border-color: var(--c-opinion); color: #170433; box-shadow: 0 0 24px rgba(179,136,255,0.45); }
+.chip.cat-korea.active   { background: var(--c-korea);   border-color: var(--c-korea);   color: #2a001b; box-shadow: 0 0 24px rgba(255,91,232,0.5); }
+.chip.cat-kent.active    { background: var(--c-kent);    border-color: var(--c-kent);    color: #2a001b; box-shadow: 0 0 24px rgba(255,91,232,0.5); }
 
 /* ── Layout: main + right rail ────────────────────────────── */
 /* Main column is now full-width — the right rail was retired and its
@@ -487,9 +502,9 @@ a { color: inherit; text-decoration: none; }
 .main-col {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
   min-width: 0;
-  padding: 18px 24px 30px;
+  padding: 10px 18px 22px;
   max-width: 1800px;
   margin: 0 auto;
 }
@@ -507,8 +522,8 @@ a { color: inherit; text-decoration: none; }
 .strip:empty { display: none; }
 .strip-track {
   display: flex;
-  gap: 22px;
-  padding: 7px 16px;
+  gap: 18px;
+  padding: 4px 14px;
   white-space: nowrap;
   animation: marquee 28s linear infinite;   /* was 100s — 3.6× faster */
   font-family: var(--mono);
@@ -579,7 +594,7 @@ a { color: inherit; text-decoration: none; }
        content; no grid row-stretching pulling neighbors taller. ── */
 #paper-noimg {
   display: flow-root;        /* establishes BFC, contains the floats */
-  padding-top: 14px;
+  padding-top: 8px;
   border-top: 1px solid var(--line);
 }
 #paper-noimg:empty { display: none; }
@@ -591,23 +606,23 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 1.8px;
   color: var(--muted);
   font-weight: 700;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 #paper-noimg > .art {
   float: left;
-  width: calc((100% - 36px) / 4);   /* 4 per row, 12px gutters × 3 */
-  margin: 0 12px 12px 0;
+  width: calc((100% - 24px) / 4);   /* 4 per row, 8px gutters × 3 */
+  margin: 0 8px 8px 0;
 }
 #paper-noimg > .art:nth-child(4n) { margin-right: 0; }
 
 @media (max-width: 1400px) {
-  #paper-noimg > .art { width: calc((100% - 24px) / 3); margin-right: 12px; }
-  #paper-noimg > .art:nth-child(4n) { margin-right: 12px; }
+  #paper-noimg > .art { width: calc((100% - 16px) / 3); margin-right: 8px; }
+  #paper-noimg > .art:nth-child(4n) { margin-right: 8px; }
   #paper-noimg > .art:nth-child(3n) { margin-right: 0; }
 }
 @media (max-width: 900px) {
-  #paper-noimg > .art { width: calc((100% - 12px) / 2); }
-  #paper-noimg > .art:nth-child(3n) { margin-right: 12px; }
+  #paper-noimg > .art { width: calc((100% - 8px) / 2); }
+  #paper-noimg > .art:nth-child(3n) { margin-right: 8px; }
   #paper-noimg > .art:nth-child(2n) { margin-right: 0; }
 }
 @media (max-width: 600px) {
@@ -619,7 +634,7 @@ a { color: inherit; text-decoration: none; }
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   grid-auto-flow: dense;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* Spans by tier (image cards only — text-only cards are floated in
@@ -646,51 +661,47 @@ a { color: inherit; text-decoration: none; }
     rgba(11, 13, 24, 0.78);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 8px 11px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   overflow: hidden;
   backdrop-filter: blur(6px);
-  transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
   animation: fadein 0.4s ease-out both;
 }
 
 /* Flex-grow: the headline fills the box on image-less cards.
    Stops short, lonely cards from leaving empty padding wasteland. */
 .art > .h { flex: 1 1 auto; }
-.art:hover {
-  transform: translateY(-3px);
-  z-index: 2;
-}
 
-/* category neon glow on hover, with vertical accent bar */
+/* User wants ONLY the photo zoom on hover/tap — no card lift, no
+   highlight overlay, no accent-bar growth. */
+
+/* category accent bar (static — no grow on hover) */
 .art::before {
   content: "";
   position: absolute;
   left: 0; top: 0; bottom: 0;
   width: 3px;
   background: var(--line-2);
-  transition: width 0.18s, background 0.18s, box-shadow 0.18s;
 }
-.art:hover::before { width: 5px; }
 
-.art.cat-world  { --c: var(--c-world); }
-.art.cat-econ   { --c: var(--c-econ); }
-.art.cat-tech   { --c: var(--c-tech); }
-.art.cat-ai     { --c: var(--c-ai); }
-.art.cat-crypto { --c: var(--c-crypto); }
-.art.cat-korea  { --c: var(--c-korea); }
-.art.cat-whale  { --c: var(--c-whale); }
-.art.cat-trade  { --c: var(--c-trade); }
-.art.cat-video  { --c: var(--c-video); }
+.art.cat-world   { --c: var(--c-world); }
+.art.cat-econ    { --c: var(--c-econ); }
+.art.cat-biz     { --c: var(--c-biz); }
+.art.cat-tech    { --c: var(--c-tech); }
+.art.cat-ai      { --c: var(--c-ai); }
+.art.cat-crypto  { --c: var(--c-crypto); }
+.art.cat-science { --c: var(--c-science); }
+.art.cat-geo     { --c: var(--c-geo); }
+.art.cat-opinion { --c: var(--c-opinion); }
+.art.cat-korea   { --c: var(--c-korea); }
+.art.cat-kent    { --c: var(--c-kent); }
+.art.cat-whale   { --c: var(--c-whale); }
+.art.cat-trade   { --c: var(--c-trade); }
+.art.cat-video   { --c: var(--c-video); }
 
 .art::before { background: var(--c, var(--line-2)); }
-.art:hover {
-  /* User explicitly asked to drop the neon outline + glow on hover.
-     Only the lift (transform: translateY) defined above + the photo
-     ken-burns zoom remain. */
-}
 
 /* ── Meta line ────────────────────────────────────────────── */
 .art .meta {
@@ -777,13 +788,8 @@ a { color: inherit; text-decoration: none; }
       color-mix(in srgb, var(--c, var(--neon-mag)) 22%, transparent),
       color-mix(in srgb, var(--c, var(--neon-cyan)) 14%, transparent));
 }
-.art .img::after {
-  /* subtle vignette so the image edge melts into the dark card */
-  content: "";
-  position: absolute; inset: 0;
-  background: linear-gradient(180deg, transparent 55%, rgba(5,6,10,0.45) 100%);
-  pointer-events: none;
-}
+/* No vignette / overlay on .art .img — user requirement: show the
+   publisher's photo at its real colors, unmodified, full stop. */
 .art:hover .img {
   transform: scale(1.04);
 }
@@ -878,13 +884,13 @@ a { color: inherit; text-decoration: none; }
 .tier-hero .body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 22px 28px 26px;
+  gap: 10px;
+  padding: 14px 20px 18px;
 }
 @media (max-width: 900px) {
   .tier-hero .img { min-height: 240px; aspect-ratio: 16/9; }
 }
-.tier-hero .body { display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+.tier-hero .body { display: flex; flex-direction: column; gap: 10px; justify-content: center; }
 .tier-hero .h {
   font-size: calc(clamp(36px, 4vw, 54px) * var(--text-scale, 1));
   font-weight: 800;
@@ -918,7 +924,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── FEATURE — image ON TOP, full card width, big and dominant ── */
 .tier-feature {
-  padding: 14px 16px;
+  padding: 10px 12px;
   /* default flex-column from .art puts image on top */
 }
 .tier-feature .img {
@@ -947,7 +953,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── LARGE — image ON TOP, full card width ──────────────── */
 .tier-large {
-  padding: 12px 14px;
+  padding: 9px 11px;
 }
 .tier-large .img {
   width: 100%;
@@ -971,7 +977,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── MEDIUM — image ON TOP, full card width ─────────────── */
 .tier-medium {
-  padding: 12px 14px;
+  padding: 9px 11px;
   /* default flex-column from .art puts image on top */
 }
 .tier-medium .img {
@@ -999,7 +1005,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── SMALL — image ON TOP, dominates card height ──────── */
 .tier-small {
-  padding: 11px 13px;
+  padding: 8px 10px;
   /* default flex-column from .art */
 }
 .tier-small .img {
@@ -1028,7 +1034,7 @@ a { color: inherit; text-decoration: none; }
 /* ── HEADLINE — NO image, big bold display title + dek snippet
        Box shrinks to content (no min-height). */
 .tier-headline {
-  padding: 14px 16px;
+  padding: 10px 12px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--c, var(--text-2)) 8%, transparent), transparent 40%),
     rgba(11,13,24,0.82);
@@ -1064,7 +1070,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ── FLASH — no image, smaller, still bold, with one-line dek ── */
 .tier-flash {
-  padding: 11px 13px;
+  padding: 8px 10px;
 }
 .tier-flash .h {
   font-family: var(--display);
@@ -1275,10 +1281,8 @@ a { color: inherit; text-decoration: none; }
   background-position: center;
   background-color: var(--bg-2);
   border-radius: 5px;
-  filter: saturate(1.1);
-  transition: filter 0.2s;
+  /* no filter — photo unmodified */
 }
-.v-row:hover .thumb { filter: saturate(1.4) brightness(1.05); }
 .v-row .meta-block { display: flex; flex-direction: column; gap: 3px; }
 .v-row .title { font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--text); }
 .v-row .ch { font-family: var(--mono); font-size: 10px; color: var(--neon-pink); letter-spacing: 0.4px; }
@@ -1404,7 +1408,7 @@ footer {
   background-color: var(--bg-2);
   border-radius: 12px;
   margin-bottom: 22px;
-  filter: saturate(1.1);
+  /* no filter — photo shown in its real colors */
 }
 
 .reader-meta {

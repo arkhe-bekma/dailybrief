@@ -13,8 +13,46 @@ import feedparser
 import httpx
 import trafilatura
 
-from backend import cache, config
-from backend.agent import illustrator
+from backend import cache, config, db
+from backend.agent import illustrator, reader as reader_agent
+
+
+# Strip raw HTML tags (img, p, span, br, a, etc.) and orphan attribute
+# fragments out of an RSS-supplied summary so they never reach the card.
+# Some publishers (especially 매일경제 / 동아일보) leak <img border=0 …>
+# tags and inline-style attributes into their RSS <description> field.
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_ORPHAN_OPEN_TAG_RE = re.compile(
+    r"<\s*(img|figure|figcaption|span|div|p|br|table|tr|td|a|iframe|script|style)\b[^<]*",
+    re.IGNORECASE,
+)
+_ATTR_FRAGMENT_RE = re.compile(
+    r"\b(?:img|src|alt|width|height|border|style|class|figure|figcaption)\s*=\s*['\"][^'\"]*['\"]?",
+    re.IGNORECASE,
+)
+_WS_RE = re.compile(r"\s+")
+
+
+def _clean_summary(raw: str) -> str:
+    """Two-pass scrub so partial / encoded HTML can't slip through.
+      1. strip raw <…>
+      2. unescape  (turns &lt;img&gt; into <img>)
+      3. strip <…> AGAIN
+      4. unescape once more
+      5. kill orphan opening tags (`<img border…` w/ no `>`)
+      6. kill leftover attribute fragments
+      7. collapse whitespace
+    """
+    if not raw:
+        return ""
+    s = _HTML_TAG_RE.sub(" ", raw)
+    s = unescape(s)
+    s = _HTML_TAG_RE.sub(" ", s)
+    s = unescape(s)
+    s = _ORPHAN_OPEN_TAG_RE.sub(" ", s)
+    s = _ATTR_FRAGMENT_RE.sub(" ", s)
+    s = _WS_RE.sub(" ", s).strip()
+    return s
 
 
 @dataclass
@@ -49,7 +87,7 @@ def _parse_date(entry) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_IMG_TAG_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
+_IMG_TAG_SRC_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
 # Bigger pattern that pulls width/height attrs alongside src — used by
 # _find_body_hero_image to pick the largest in-body photo when the og:image
 # turns out to be a generic brand logo.
@@ -102,7 +140,7 @@ def _extract_image(entry) -> str | None:
         if isinstance(val, dict):
             val = val.get("value", "")
         if isinstance(val, str) and val:
-            m = _IMG_TAG_RE.search(val)
+            m = _IMG_TAG_SRC_RE.search(val)
             if m:
                 return unescape(m.group(1))
 
@@ -308,12 +346,12 @@ def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
         # _extract_image searches every common RSS slot. Anything still
         # missing gets resolved later via og:image scrape + AI fallback.
         items.append(Article(
-            title=title,
+            title=_clean_summary(title)[:300] or title,
             url=entry.get("link", ""),
             outlet=outlet["name"],
             category=outlet["category"],
             lang=outlet.get("lang", "en"),
-            summary=(entry.get("summary", "") or "").strip()[:400],
+            summary=_clean_summary(entry.get("summary", "") or "")[:400],
             published=_parse_date(entry),
             image=_extract_image(entry),
         ))
@@ -393,6 +431,71 @@ async def _rescue_logo_images(items: list[dict]) -> int:
 
         await asyncio.gather(*[_one(it) for it in items])
     return rescued
+
+
+async def _backfill_bodies(items: list[dict]) -> int:
+    """For ranked items whose RSS summary is empty/too short, fetch the
+    article body via the reader agent, take the first ~280 chars as the
+    card dek, and persist the full reader payload to SQLite so the
+    modal renders instantly later. Returns how many we backfilled."""
+    if not items:
+        return 0
+    need = [it for it in items if len((it.get("summary") or "").strip()) < 50 and it.get("url")]
+    if not need:
+        return 0
+
+    sem = asyncio.Semaphore(6)
+    filled = 0
+
+    async def _one(item: dict) -> None:
+        nonlocal filled
+        async with sem:
+            url = item["url"]
+            # Skip if we already have a stored reader payload — use it.
+            stored = await db.get_reader(url)
+            if stored:
+                paras = stored.get("paragraphs") or []
+                if paras:
+                    item["summary"] = paras[0][:400]
+                    filled += 1
+                return
+            reading = await reader_agent.extract(url)
+            if not reading or not (reading.text or reading.excerpt):
+                return
+            first_para = ""
+            if reading.text:
+                for line in reading.text.split("\n"):
+                    line = line.strip()
+                    if len(line) >= 40:
+                        first_para = line
+                        break
+            dek = (first_para or reading.excerpt or "")[:400]
+            if not dek:
+                return
+            item["summary"] = dek
+            # Persist what we scraped so the reader modal can serve it
+            # without re-fetching. Shape mirrors what /api/article returns.
+            try:
+                payload = {
+                    "url": url,
+                    "title": reading.title or item.get("title") or "",
+                    "image": reading.image or item.get("image"),
+                    "byline": reading.byline,
+                    "excerpt": reading.excerpt or "",
+                    "lang": item.get("lang", "en"),
+                    "word_count": len(reading.text.split()) if reading.text else 0,
+                    "paragraphs": [
+                        p.strip() for p in (reading.text or "").split("\n")
+                        if len(p.strip()) >= 30
+                    ][:14],
+                }
+                await db.save_reader(url, payload)
+            except Exception as exc:
+                print(f"[rss] save_reader failed for {url[:60]}: {exc}")
+            filled += 1
+
+    await asyncio.gather(*[_one(it) for it in need])
+    return filled
 
 
 async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
@@ -476,4 +579,12 @@ async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
             f"{len(keep)} kept",
             flush=True,
         )
+
+    # Stage F: any survivor still lacking a real body summary gets one
+    # backfilled from trafilatura, and the full reader payload is saved
+    # to SQLite so the user gets instant body text in the card AND in
+    # the reader modal.
+    backfilled = await _backfill_bodies(keep)
+    if backfilled:
+        print(f"[rss] enrich_top backfilled {backfilled} bodies", flush=True)
     return keep
