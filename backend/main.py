@@ -64,8 +64,16 @@ async def _refresh_agent():
 
 @app.on_event("startup")
 async def _start():
-    await db.init()
-    asyncio.create_task(_refresh_agent())
+    # Wrap startup so a single migration / schedule failure can never
+    # take the whole service down (which is what Caddy reports as 502).
+    try:
+        await db.init()
+    except Exception as exc:
+        print(f"[startup] db.init failed: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_refresh_agent())
+    except Exception as exc:
+        print(f"[startup] refresh agent failed to schedule: {exc!r}", flush=True)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 

@@ -390,23 +390,8 @@ function paint(scrollTop = true) {
     }
   });
 
-  // Chip counts come pre-aggregated from the server (`cat_counts`) so
-  // the wire payload doesn't need to ship every article. Falls back to
-  // counting the in-memory slice if the server didn't send them.
-  const counts = STATE.cat_counts || (() => {
-    const c = {};
-    STATE.mixed.forEach((m) => {
-      if (m.kind !== "news") return;
-      c.all = (c.all || 0) + 1;
-      if (m.premium) c.premium = (c.premium || 0) + 1;
-      c[m.category] = (c[m.category] || 0) + 1;
-    });
-    return c;
-  })();
-  Object.entries(counts).forEach(([k, v]) => {
-    const n = document.getElementById(`ct-${k}`);
-    if (n) n.textContent = v;
-  });
+  // (Chip counters removed — user said the numbers are noise; the lab
+  // dashboard is the source of truth for per-outlet counts.)
 
   renderPager(totalPages);
 

@@ -350,50 +350,69 @@ def _stats_sync() -> dict:
             "SELECT COALESCE(SUM(use_count - 1), 0) AS n FROM reader_results"
         ).fetchone()["n"]
         # Pull per-outlet counts + last-fetched from the articles table.
-        db_outlets = {
-            r["outlet"]: dict(r) for r in c.execute("""
-                SELECT outlet, COUNT(*) AS articles,
-                       MAX(fetched_at) AS last_fetched
-                FROM articles GROUP BY outlet
-            """).fetchall() if r["outlet"]
-        }
-        # Roster = every CONFIGURED outlet, with 0 / NULL for the ones
-        # that have never produced an article. This way the user can
-        # spot dead feeds in the lab dashboard.
-        from backend import config as _cfg
-        outlets = []
-        seen: set[str] = set()
-        for o in _cfg.OUTLETS:
-            name = o["name"]
-            row = db_outlets.get(name, {})
-            meta = _cfg.outlet_meta(name)
-            outlets.append({
-                "outlet": name,
-                "category": o.get("category"),
-                "lang": o.get("lang", "en"),
-                "premium": meta["premium"],
-                "weight": meta["weight"],
-                "articles": row.get("articles", 0),
-                "last_fetched": row.get("last_fetched"),
-                "configured": True,
-            })
-            seen.add(name)
-        # Also append any DB-only outlets (renamed in config, but still
-        # in the DB from past runs) so nothing silently disappears.
-        for name, row in db_outlets.items():
-            if name in seen:
-                continue
-            outlets.append({
-                "outlet": name,
-                "category": None,
-                "lang": "?",
-                "premium": False,
-                "weight": 1.0,
-                "articles": row.get("articles", 0),
-                "last_fetched": row.get("last_fetched"),
-                "configured": False,
-            })
-        outlets.sort(key=lambda r: (-(r["articles"] or 0), r["outlet"]))
+        # Wrapped in try/except so a hiccup here never 500s /api/lab
+        # (the prior version took the whole service down on prod).
+        outlets: list[dict] = []
+        try:
+            rows = c.execute(
+                "SELECT outlet, COUNT(*) AS articles, "
+                "MAX(fetched_at) AS last_fetched "
+                "FROM articles GROUP BY outlet"
+            ).fetchall()
+            db_outlets: dict = {}
+            for r in rows:
+                name = r["outlet"]
+                if not name:
+                    continue
+                db_outlets[name] = {
+                    "articles": r["articles"] or 0,
+                    "last_fetched": r["last_fetched"],
+                }
+            # Roster = every CONFIGURED outlet, with 0 for the ones that
+            # have never produced an article. Lets the user spot dead
+            # feeds in the lab dashboard.
+            from backend import config as _cfg
+            seen: set = set()
+            for o in getattr(_cfg, "OUTLETS", []):
+                name = o.get("name")
+                if not name:
+                    continue
+                row = db_outlets.get(name, {})
+                try:
+                    meta = _cfg.outlet_meta(name)
+                except Exception:
+                    meta = {"premium": False, "weight": 1.0}
+                outlets.append({
+                    "outlet": name,
+                    "category": o.get("category"),
+                    "lang": o.get("lang", "en"),
+                    "premium": bool(meta.get("premium")),
+                    "weight": float(meta.get("weight") or 1.0),
+                    "articles": row.get("articles", 0),
+                    "last_fetched": row.get("last_fetched"),
+                    "configured": True,
+                })
+                seen.add(name)
+            # Append DB-only outlets (renamed/retired in config) so the
+            # roster keeps history rather than silently dropping them.
+            for name, row in db_outlets.items():
+                if name in seen:
+                    continue
+                outlets.append({
+                    "outlet": name,
+                    "category": None,
+                    "lang": "?",
+                    "premium": False,
+                    "weight": 1.0,
+                    "articles": row.get("articles", 0),
+                    "last_fetched": row.get("last_fetched"),
+                    "configured": False,
+                })
+            outlets.sort(key=lambda r: (-(r.get("articles") or 0), r.get("outlet") or ""))
+        except Exception as exc:
+            # Never let the roster path 500 the whole lab endpoint.
+            print(f"[db] stats outlets path failed: {exc!r}", flush=True)
+            outlets = []
         counters = [dict(r) for r in c.execute("SELECT key, n FROM counters").fetchall()]
         size_bytes = DB_PATH.stat().st_size if DB_PATH.exists() else 0
         return {

@@ -669,19 +669,10 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase;
   line-height: 1.25;
 }
-.chip .ct {
-  display: inline-block;
-  min-width: 14px;
-  padding: 0 4px;
-  margin-left: 1px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.08);
-  color: var(--text-2);
-  font-family: var(--mono);
-  font-size: 9.5px;
-  font-weight: 700;
-  text-align: center;
-}
+/* Counter pill retired — chips show just a glyph + label now.
+   Rule kept as display:none in case a stale browser cache renders
+   the old HTML that included <span class="ct">. */
+.chip .ct { display: none !important; }
 .chip .ct:empty { display: none; }
 .chip.active .ct { background: rgba(0,0,0,0.18); color: inherit; opacity: 0.65; }
 .chip:hover { border-color: var(--text-2); color: var(--text); }
