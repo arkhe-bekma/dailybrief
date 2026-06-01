@@ -540,10 +540,12 @@ a { color: inherit; text-decoration: none; }
     padding-left: 12px;
     padding-right: 12px;
   }
-  /* Chip nav: very tight on phone so the whole row fits in one strip.
-     Smaller pad + font + tighter counter pill = more chips per row. */
-  .chips { gap: 3px; padding-left: 12px; padding-right: 12px; padding-top: 4px; padding-bottom: 4px; }
-  .chip { padding: 2px 7px; font-size: 10.5px; gap: 3px; letter-spacing: 0.2px; }
+  /* Chip nav: very tight on phone so the whole row fits in two lines.
+     Was overflowing K-연예 onto a 3rd line; tightening padding + font
+     + gap shaves ~3-4 px per chip, which is enough for all 12 to
+     pack into 2 lines on 360px-wide screens. */
+  .chips { gap: 2px; padding-left: 10px; padding-right: 10px; padding-top: 4px; padding-bottom: 4px; }
+  .chip { padding: 1px 6px; font-size: 9.5px; gap: 2px; letter-spacing: 0.1px; }
   .chip .ct { min-width: 12px; padding: 0 3px; font-size: 9px; }
 
   /* The headline (top-of-day brief) was 17px italic — too big on a
