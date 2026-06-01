@@ -72,6 +72,11 @@ def from_news(items: list[dict]) -> list[dict]:
             "why": a.get("why"),
             "tickers": a.get("tickers", []),
             "sparks": a.get("sparks", {}),
+            # Sorter-supplied fields — surfaced to the frontend so the
+            # premium chip + per-card ★ pip work.
+            "premium": bool(a.get("premium")),
+            "weight": float(a.get("weight") or 1.0),
+            "quality": float(a.get("quality") or 0),
         })
     return out
 

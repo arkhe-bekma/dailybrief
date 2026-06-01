@@ -147,6 +147,76 @@ def _extract_image(entry) -> str | None:
     return None
 
 
+# ── Body sanitiser ─────────────────────────────────────────────────
+# Card dek shouldn't start with leaked author-avatar markdown, a repeat
+# of the title, or a reporter byline. Centralised here so backfill paths
+# all get the same scrub. Tuned from observed failures: HuggingFace
+# blogs leak `![](https://cdn-avatars…)`, Korean dailies prepend
+# `[속보] 기자 …`, Reuters duplicates the headline as the lede.
+_DEK_IMG_MD_RE = re.compile(r"!\[(?:[^\]\[]|\[[^\]]*\])*\]\([^)]*\)")
+_DEK_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_DEK_BRACKET_PREFIX_RE = re.compile(
+    r"^\s*\[(?:속보|단독|영상|포토|사진|인터뷰|기획|특파원|업데이트|"
+    r"BREAKING|EXCLUSIVE|UPDATE|VIDEO|PHOTOS?)\]\s*",
+    re.IGNORECASE,
+)
+_DEK_BYLINE_RE = re.compile(
+    r"^\s*(?:By\s+|글\s*[=:]|취재\s*[=:]|"
+    r"(?:[가-힣]{2,4}\s+기자\s*[=·:]|[가-힣]{2,4}\s+특파원\s*[=·:]))",
+    re.IGNORECASE,
+)
+_DEK_DATELINE_RE = re.compile(
+    r"^\s*\(?(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?|[가-힣]{2,6})\)?\s*[—–-]\s*",
+)
+_DEK_CREDIT_RE = re.compile(
+    r"^\s*(?:사진|영상|이미지|일러스트|그래픽|자료(?:사진)?|"
+    r"Photo|Image|Credit|©)\s*[=·:]",
+    re.IGNORECASE,
+)
+_DEK_WS_RE = re.compile(r"\s+")
+
+
+def _scrub_dek_line(s: str) -> str:
+    """One-pass cleanup for a candidate dek line. Strips markdown
+    images, HTML tags, common Korean/English byline + dateline prefixes,
+    photo-credit prefixes, then collapses whitespace."""
+    if not s:
+        return ""
+    s = _DEK_IMG_MD_RE.sub("", s)
+    s = _DEK_HTML_TAG_RE.sub("", s)
+    s = _DEK_BRACKET_PREFIX_RE.sub("", s)
+    s = _DEK_BYLINE_RE.sub("", s)
+    s = _DEK_DATELINE_RE.sub("", s)
+    s = _DEK_CREDIT_RE.sub("", s)
+    return _DEK_WS_RE.sub(" ", s).strip()
+
+
+def _pick_dek(text: str, title: str = "") -> str:
+    """Walk the article body and return the first real prose line.
+    Skips: blank lines, lines shorter than 40 chars, lines that are
+    just the title, lines that are mostly markdown/HTML/bracketed
+    boilerplate, and image-markdown-only lines."""
+    if not text:
+        return ""
+    title_norm = _DEK_WS_RE.sub(" ", (title or "").strip()).lower()
+    for raw in text.split("\n"):
+        line = _scrub_dek_line(raw)
+        # 25 chars is enough to filter one-word lines / dividers without
+        # accidentally dropping dense Korean sentences (which pack a lot
+        # of meaning into fewer characters than English).
+        if not line or len(line) < 25:
+            continue
+        # Skip lines that ARE the title (or contain it as the only content)
+        norm = _DEK_WS_RE.sub(" ", line).lower()
+        if title_norm and (norm == title_norm or norm.startswith(title_norm + " ")):
+            continue
+        # Skip lines that are mostly URLs
+        if line.count("http") >= 2 and len(line) - line.count("http") * 8 < 40:
+            continue
+        return line
+    return ""
+
+
 _OG_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
@@ -224,11 +294,13 @@ def _is_readable(article_url: str) -> bool:
     return True if v is None else bool(v)
 
 
-# URL patterns that we know are never extractable. Skip them up front
-# rather than waste an HTTP fetch.
-_DEAD_URL_PATTERNS = (
-    "news.google.com/rss/articles/",   # Google News interstitial — body is JS
-)
+# URL patterns that we know are never extractable. We used to drop
+# news.google.com/rss/articles/ entries here, but that nuked the entire
+# K-Ent category (which gets all its feeds via the Google News search
+# proxy). Now we KEEP them: the user can still click through (Google
+# redirects to the publisher) and the title/dek work fine. We only drop
+# completely empty URLs.
+_DEAD_URL_PATTERNS: tuple[str, ...] = ()
 
 
 def _is_obviously_dead(url: str) -> bool:
@@ -345,13 +417,19 @@ def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
         title = entry.get("title", "(no title)").strip()
         # _extract_image searches every common RSS slot. Anything still
         # missing gets resolved later via og:image scrape + AI fallback.
+        cleaned_title = _clean_summary(title)[:300] or title
+        raw_summary = _clean_summary(entry.get("summary", "") or "")
+        # Strip image-markdown / brackets / bylines that publishers
+        # frequently leak into RSS <description> (HuggingFace blog
+        # author avatars, [속보] tags, Reuters dateline, etc.).
+        cleaned_summary = _scrub_dek_line(raw_summary)[:400]
         items.append(Article(
-            title=_clean_summary(title)[:300] or title,
+            title=cleaned_title,
             url=entry.get("link", ""),
             outlet=outlet["name"],
             category=outlet["category"],
             lang=outlet.get("lang", "en"),
-            summary=_clean_summary(entry.get("summary", "") or "")[:400],
+            summary=cleaned_summary,
             published=_parse_date(entry),
             image=_extract_image(entry),
         ))
@@ -451,25 +529,22 @@ async def _backfill_bodies(items: list[dict]) -> int:
         nonlocal filled
         async with sem:
             url = item["url"]
+            title = item.get("title") or ""
             # Skip if we already have a stored reader payload — use it.
             stored = await db.get_reader(url)
             if stored:
                 paras = stored.get("paragraphs") or []
                 if paras:
-                    item["summary"] = paras[0][:400]
+                    cleaned = _pick_dek("\n".join(paras), title) or paras[0]
+                    item["summary"] = cleaned[:400]
                     filled += 1
                 return
             reading = await reader_agent.extract(url)
             if not reading or not (reading.text or reading.excerpt):
                 return
-            first_para = ""
-            if reading.text:
-                for line in reading.text.split("\n"):
-                    line = line.strip()
-                    if len(line) >= 40:
-                        first_para = line
-                        break
-            dek = (first_para or reading.excerpt or "")[:400]
+            first_para = _pick_dek(reading.text or "", title)
+            dek_src = first_para or _scrub_dek_line(reading.excerpt or "")
+            dek = dek_src[:400]
             if not dek:
                 return
             item["summary"] = dek
@@ -531,18 +606,16 @@ async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
     # (Cached per URL → only fresh URLs touch the network.)
     await _probe_readability(boxes)
 
-    # Stage C: drop unreachable / paywalled / image-less items.
+    # Stage C: relaxed pass. We used to drop unreadable + image-less
+    # items here, which nuked the entire K-Ent category (all Google
+    # News-proxied). Now we keep everything — text-only items naturally
+    # flow into the no-image tier on the frontend, and the sorter +
+    # curator already handle quality control upstream.
     keep: list[dict] = []
     dropped_unread = dropped_noimg = 0
     for box in boxes:
-        if not _is_readable(box.url):
-            dropped_unread += 1
-            continue
         if box.image:
-            box._src["image"] = box.image  # propagate any newly-scraped image
-        if not box._src.get("image"):
-            dropped_noimg += 1
-            continue
+            box._src["image"] = box.image  # propagate newly-scraped image
         keep.append(box._src)
 
     # Stage D: identify recycled outlet logos (same image used by 2+

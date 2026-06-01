@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=21">
-  <link rel="stylesheet" href="/static/lab.css?v=21">
+  <link rel="stylesheet" href="/static/style.css?v=26">
+  <link rel="stylesheet" href="/static/lab.css?v=26">
 </head>
 <body class="lab">
   <header class="lab-mast">
@@ -90,6 +90,22 @@
       <div class="kpi-stack" id="counter-list"></div>
     </section>
 
+    <!-- WORKFLOW PICKER -->
+    <section class="card span-3">
+      <div class="card-head">WORKFLOW · CHOOSE THE AUTOMATION</div>
+      <div id="workflow-list" class="workflow-list">
+        <span class="ago">loading workflows…</span>
+      </div>
+    </section>
+
+    <!-- AGENT ROSTER -->
+    <section class="card span-3">
+      <div class="card-head">AGENTS · ROLES IN THE PIPELINE</div>
+      <div id="agent-list" class="agent-list">
+        <span class="ago">loading agents…</span>
+      </div>
+    </section>
+
     <!-- AGENT ACTIVITY -->
     <section class="card span-3">
       <div class="card-head">AGENT ACTIVITY · LAST 50 RUNS</div>
@@ -113,6 +129,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=21"></script>
+  <script src="/static/lab.js?v=26"></script>
 </body>
 </html>

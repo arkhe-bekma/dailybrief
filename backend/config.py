@@ -40,6 +40,47 @@ PROFILE = InterestProfile()
 
 # ── Outlets ────────────────────────────────────────────────────────────────
 # category + lang power the UI badges and the curator prompt.
+#
+# Outlets in the PREMIUM_OUTLETS set get a weight bump in the curator and
+# are tagged in the DB so the UI can render a ★ pip + use them for the
+# "premium picks" rail. Add/remove by display name — case-sensitive.
+PREMIUM_OUTLETS: set[str] = {
+    # English: top-tier reporting / paywalled / institutional voice
+    "Bloomberg", "WSJ", "FT", "NYT", "Reuters", "Nikkei Asia", "Economist",
+    "Foreign Affairs", "Foreign Policy", "The Atlantic", "New Yorker",
+    "MIT Tech Rev", "HBR", "Nature", "Science Magazine", "Quanta",
+    "Ars Technica", "The Verge", "TechCrunch", "MarketWatch",
+    "Bloomberg Op-Ed", "NYT Opinion", "WaPo Opinion", "FT Opinion",
+    "War on the Rocks", "The Diplomat", "Defense One",
+    # Korean: flagship dailies / economic newspapers of record
+    "조선일보", "한겨레", "동아일보", "중앙일보", "매일경제", "한국경제",
+    "연합뉴스", "연합 경제", "SBS 뉴스", "경향신문", "서울신문",
+    "조선 오피니언", "한경 오피니언", "동아 오피니언",
+}
+
+# Per-outlet weight multiplier the curator applies before its base score.
+# Higher = the outlet's stories float up more, lower = they don't crowd
+# the feed. Defaults to 1.0 (neutral). Premium outlets default to 1.25.
+OUTLET_WEIGHT: dict[str, float] = {
+    # Bumps beyond the premium default — house picks the user explicitly
+    # cares about. Curator multiplies score by this value.
+    "Bloomberg": 1.45, "FT": 1.40, "Reuters": 1.40, "WSJ": 1.35, "NYT": 1.30,
+    "Nikkei Asia": 1.35, "Economist": 1.30, "Foreign Affairs": 1.25,
+    "조선일보": 1.30, "한겨레": 1.20, "한국경제": 1.30, "매일경제": 1.30,
+    "연합뉴스": 1.30, "연합 경제": 1.30,
+    # Light de-emphasis — useful but lower priority than majors.
+    "Hacker News": 0.90, "allkpop": 0.85, "Koreaboo": 0.80, "Soompi": 0.85,
+    "K-Pop Herald": 0.85, "Hellokpop": 0.80,
+}
+
+
+def outlet_meta(name: str) -> dict:
+    """Look up the premium flag + weight for an outlet by display name.
+    Used by the curator and the DB writer. Stable across config edits."""
+    premium = name in PREMIUM_OUTLETS
+    weight = OUTLET_WEIGHT.get(name, 1.25 if premium else 1.0)
+    return {"premium": premium, "weight": weight}
+
 
 OUTLETS: list[dict] = [
     # World / general (en)
@@ -49,6 +90,11 @@ OUTLETS: list[dict] = [
     {"name": "Guardian",     "category": "world", "lang": "en", "url": "https://www.theguardian.com/world/rss"},
     {"name": "Al Jazeera",   "category": "world", "lang": "en", "url": "https://www.aljazeera.com/xml/rss/all.xml"},
     {"name": "Reuters",      "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "WaPo",         "category": "world", "lang": "en", "url": "https://feeds.washingtonpost.com/rss/world"},
+    {"name": "ABC News",     "category": "world", "lang": "en", "url": "https://abcnews.go.com/abcnews/topstories"},
+    {"name": "NBC News",     "category": "world", "lang": "en", "url": "https://feeds.nbcnews.com/nbcnews/public/news"},
+    {"name": "AP",           "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:apnews.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "AFP",          "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:afp.com&hl=en-US&gl=US&ceid=US:en"},
 
     # USA economics / business (en)
     {"name": "WSJ",          "category": "econ",  "lang": "en", "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml"},
@@ -63,6 +109,10 @@ OUTLETS: list[dict] = [
     {"name": "TechCrunch",   "category": "tech",  "lang": "en", "url": "https://techcrunch.com/feed/"},
     {"name": "Hacker News",  "category": "tech",  "lang": "en", "url": "https://news.ycombinator.com/rss"},
     {"name": "Tom's Hardware","category": "tech", "lang": "en", "url": "https://www.tomshardware.com/feeds/all"},
+    {"name": "Wired",        "category": "tech",  "lang": "en", "url": "https://www.wired.com/feed/rss"},
+    {"name": "Engadget",     "category": "tech",  "lang": "en", "url": "https://www.engadget.com/rss.xml"},
+    {"name": "AnandTech",    "category": "tech",  "lang": "en", "url": "https://www.anandtech.com/rss/"},
+    {"name": "9to5Mac",      "category": "tech",  "lang": "en", "url": "https://9to5mac.com/feed/"},
 
     # AI / LLM (en)
     {"name": "OpenAI",       "category": "ai",    "lang": "en", "url": "https://openai.com/blog/rss.xml"},
@@ -101,6 +151,20 @@ OUTLETS: list[dict] = [
     {"name": "네이버 부동산",   "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:land.naver.com+OR+site:n.news.naver.com+%EB%B6%80%EB%8F%99%EC%82%B0&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "ZDNet Korea",  "category": "korea", "lang": "ko", "url": "https://feeds.feedburner.com/zdkorea"},
     {"name": "전자신문",      "category": "korea", "lang": "ko", "url": "https://rss.etnews.com/Section902.xml"},
+    # Additional Korean mainstream + economic dailies (round out the roster
+    # alongside the existing big four). All Google-News-proxied because
+    # most KR publishers retired their public RSS several years ago.
+    {"name": "중앙일보",      "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:joongang.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "한국일보",      "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankookilbo.com&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "머니투데이",    "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:mt.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "이데일리",      "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:edaily.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "헤럴드경제",    "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:heraldcorp.com&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "파이낸셜뉴스",  "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:fnnews.com&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "KBS 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.kbs.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "MBC 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:imnews.imbc.com&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "JTBC 뉴스",    "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.jtbc.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "YTN",          "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:ytn.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "Yonhap EN",    "category": "korea", "lang": "en", "url": "https://en.yna.co.kr/RSS/news.xml"},
 
     # Opinion / Columnists (en) — 칼럼
     {"name": "NYT Opinion",      "category": "opinion", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Opinion.xml"},

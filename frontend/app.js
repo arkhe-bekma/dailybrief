@@ -220,6 +220,7 @@ function newsBody(item) {
   const meta = el("div", { class: "meta" }, [
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
+    item.premium ? el("span", { class: "premium-pip", title: "premium outlet" }, "★ PREMIUM") : null,
     el("span", { class: `lang lang-${lang}` }, lang.toUpperCase()),
     el("span", { class: "when" }, fmtPub(item.ts)),
     item.score != null ? el("span", { class: "score-pill" }, `★${item.score}`) : null,
@@ -326,9 +327,17 @@ let PAGE_OVERRIDE_N = null; // which page that override belongs to
 let DB_TOTAL_PAGES = 1;
 
 async function fetchPage(n) {
-  if (n <= 1) { PAGE_OVERRIDE = null; PAGE_OVERRIDE_N = null; return; }
+  // For "all" page 1 we use the in-memory mixed (fast). Every other
+  // combination — page 2+, or any specific category — pulls straight
+  // from the SQLite archive. This is what makes the chip nav reach
+  // beyond the lean wire payload.
+  const fromDb = (n > 1) || (CAT && CAT !== "all");
+  if (!fromDb) { PAGE_OVERRIDE = null; PAGE_OVERRIDE_N = null; return; }
   try {
-    const r = await fetch(`/api/page?n=${n}&size=${PAGE_SIZE}&cat=${encodeURIComponent(CAT)}`);
+    const params = new URLSearchParams({ n: String(n), size: String(PAGE_SIZE) });
+    if (CAT && CAT !== "all" && CAT !== "premium") params.set("cat", CAT);
+    if (CAT === "premium") params.set("premium", "1");
+    const r = await fetch(`/api/page?${params.toString()}`);
     if (!r.ok) return;
     const d = await r.json();
     PAGE_OVERRIDE = d.items || [];
@@ -356,7 +365,9 @@ function paint(scrollTop = true) {
   const totalPages = Math.max(memPages, DB_TOTAL_PAGES || 1);
 
   let slice;
-  if (PAGE > 1 && PAGE_OVERRIDE && PAGE_OVERRIDE_N === PAGE) {
+  // Use the DB-served override when present (page 2+, or any category
+  // filter). Otherwise use the in-memory mixed slice.
+  if (PAGE_OVERRIDE && PAGE_OVERRIDE_N === PAGE) {
     slice = PAGE_OVERRIDE;
   } else {
     if (PAGE > memPages) PAGE = memPages;   // safety while async fetch finishes
@@ -379,16 +390,19 @@ function paint(scrollTop = true) {
     }
   });
 
-  // chip counts (from full STATE, not filtered)
-  const counts = {
-    all: 0, world: 0, econ: 0, biz: 0, tech: 0, ai: 0, crypto: 0,
-    science: 0, geo: 0, opinion: 0, korea: 0, kent: 0,
-  };
-  STATE.mixed.forEach((m) => {
-    if (m.kind !== "news") return;
-    counts.all++;
-    if (counts[m.category] != null) counts[m.category]++;
-  });
+  // Chip counts come pre-aggregated from the server (`cat_counts`) so
+  // the wire payload doesn't need to ship every article. Falls back to
+  // counting the in-memory slice if the server didn't send them.
+  const counts = STATE.cat_counts || (() => {
+    const c = {};
+    STATE.mixed.forEach((m) => {
+      if (m.kind !== "news") return;
+      c.all = (c.all || 0) + 1;
+      if (m.premium) c.premium = (c.premium || 0) + 1;
+      c[m.category] = (c[m.category] || 0) + 1;
+    });
+    return c;
+  })();
   Object.entries(counts).forEach(([k, v]) => {
     const n = document.getElementById(`ct-${k}`);
     if (n) n.textContent = v;
@@ -396,8 +410,11 @@ function paint(scrollTop = true) {
 
   renderPager(totalPages);
 
-  const outlets = Object.keys(STATE.by_outlet || {}).length;
-  $("#status").textContent = `${all.length} news · page ${PAGE}/${totalPages} · ${outlets} sources · updated ${fmtAge(LAST_LOAD)}`;
+  const outlets = STATE.outlets_count
+    || Object.keys(STATE.by_outlet || {}).length || 0;
+  const totalMixed = STATE.total_mixed || all.length;
+  $("#status").textContent =
+    `${totalMixed} news · page ${PAGE}/${totalPages} · ${outlets} sources · updated ${fmtAge(LAST_LOAD)}`;
   if (scrollTop) window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -889,11 +906,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!seg) return;
     applyTextScale(parseFloat(seg.dataset.scale));
   });
-  $("#settings-refresh")?.addEventListener("click", async () => {
-    toggleSettings(false);
-    await fetch("/api/refresh", { method: "POST" });
-    await load();
-  });
   // Click outside / Escape closes the popover
   document.addEventListener("click", (e) => {
     const pop = document.getElementById("settings-pop");
@@ -905,13 +917,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Escape") toggleSettings(false);
   });
 
-  $("#chips").addEventListener("click", (e) => {
+  $("#chips").addEventListener("click", async (e) => {
     const chip = e.target.closest(".chip");
     if (!chip) return;
     CAT = chip.dataset.cat;
     PAGE = 1;
     document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
+    // Category views (and premium) pull from the DB so the user sees
+    // the full archive for that category, not just the lean wire slice.
+    PAGE_OVERRIDE = null; PAGE_OVERRIDE_N = null;
+    if (CAT !== "all") await fetchPage(1);
     paint();
   });
   // Intercept article-card clicks → open the reader modal.
@@ -948,9 +964,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
   load();
 
-  // Auto-refresh every 5 minutes — quietly pulls the freshest data and
-  // updates the page without disturbing the user's pagination or scroll.
-  setInterval(silentRefresh, AUTO_REFRESH_MS);
+  // ── Smart refresh ──────────────────────────────────────────────
+  // No user toggle, no fixed timer. Rules:
+  //   - Only refresh while the tab is visible.
+  //   - When the tab returns to visible and it's been > 3 min since
+  //     the last successful refresh, pull immediately.
+  //   - While visible, top up every 5 minutes (matches the backend
+  //     brief-cache TTL ≫ 2 min so we don't pay for repeated LLM
+  //     curation cycles).
+  const VISIBLE_INTERVAL_MS = 5 * 60 * 1000;
+  const VISIBILITY_STALE_MS = 3 * 60 * 1000;
+  function smartCheck() {
+    if (document.hidden) return;
+    if (!LAST_LOAD) return;
+    if (Date.now() - LAST_LOAD < VISIBLE_INTERVAL_MS) return;
+    silentRefresh();
+  }
+  setInterval(smartCheck, 60 * 1000);  // probe every 60 s, cheap noop
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    if (!LAST_LOAD || Date.now() - LAST_LOAD > VISIBILITY_STALE_MS) {
+      silentRefresh();
+    }
+  });
 
   // Tick the "updated Xm ago" label every 30s so it stays accurate
   // between refreshes.

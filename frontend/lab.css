@@ -229,6 +229,160 @@ body.lab {
 .bar-fill  { height: 100%; background: linear-gradient(90deg, var(--neon-cyan), var(--neon-mag)); border-radius: 4px; }
 .bar-n     { font-family: var(--mono); font-size: 11px; color: var(--neon-cyan); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
 
+/* ── Workflow picker ────────────────────────────────────────── */
+.workflow-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+.wf-item {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.wf-item:hover { border-color: var(--line-2); }
+.wf-item.wf-active {
+  border-color: var(--neon-cyan);
+  background: linear-gradient(135deg, rgba(0,225,255,0.08), rgba(255,43,214,0.04));
+  box-shadow: 0 0 22px rgba(0,225,255,0.18);
+}
+.wf-item input[type=radio] {
+  appearance: none;
+  width: 14px; height: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  margin-top: 2px;
+  flex-shrink: 0;
+  position: relative;
+  cursor: pointer;
+  background: rgba(255,255,255,0.04);
+}
+.wf-item input[type=radio]:checked {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0,225,255,0.5);
+}
+.wf-item input[type=radio]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+}
+.wf-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.wf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.wf-label {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 36, "wdth" 92;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--text);
+}
+.wf-pill {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--neon-cyan);
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(0,225,255,0.10);
+  border: 1px solid rgba(0,225,255,0.35);
+}
+.wf-desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.wf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.wf-chip {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+/* ── Agent roster ───────────────────────────────────────────── */
+.agent-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+.agent-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-card.always { border-left: 3px solid var(--neon-lime); }
+.agent-card.optional { border-left: 3px solid var(--neon-yellow); }
+.agent-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+.agent-name {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 36, "wdth" 92;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.3px;
+}
+.agent-status {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+.agent-card.always .agent-status { color: var(--neon-lime); text-shadow: 0 0 10px rgba(182,255,60,0.4); }
+.agent-card.optional .agent-status { color: var(--neon-yellow); text-shadow: 0 0 10px rgba(255,230,0,0.4); }
+.agent-role {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--neon-cyan);
+  text-transform: uppercase;
+}
+.agent-summary {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.agent-file code {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  background: rgba(255,255,255,0.03);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .lab-foot {
   padding: 14px 22px;
   border-top: 1px solid var(--line);

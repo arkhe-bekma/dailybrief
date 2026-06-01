@@ -51,6 +51,60 @@ async function tick() {
     const r2 = await fetch("/api/lab/agent-runs");
     if (r2.ok) paintRuns((await r2.json()).runs || []);
   } catch {}
+  try {
+    const r3 = await fetch("/api/lab/agents");
+    if (r3.ok) paintAgents(await r3.json());
+  } catch {}
+}
+
+function paintAgents(d) {
+  const wfWrap = document.getElementById("workflow-list");
+  const active = d.active_workflow;
+  wfWrap.innerHTML = (d.workflows || []).map((w) => `
+    <label class="wf-item ${w.key === active ? "wf-active" : ""}">
+      <input type="radio" name="workflow" value="${w.key}" ${w.key === active ? "checked" : ""}/>
+      <div class="wf-body">
+        <div class="wf-head">
+          <span class="wf-label">${w.label}</span>
+          <span class="wf-pill">${(w.agents || []).length} AGENTS</span>
+        </div>
+        <div class="wf-desc">${w.description || ""}</div>
+        <div class="wf-chips">${(w.agents || []).map((a) => `<span class="wf-chip">${a}</span>`).join("")}</div>
+      </div>
+    </label>
+  `).join("");
+  wfWrap.querySelectorAll('input[name="workflow"]').forEach((r) => {
+    r.addEventListener("change", async () => {
+      if (!r.checked) return;
+      try {
+        await fetch("/api/lab/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow: r.value }),
+        });
+        document.getElementById("lab-status").textContent = `workflow saved: ${r.value}`;
+        setTimeout(() => {
+          document.getElementById("lab-status").textContent = `refreshing every ${POLL_MS / 1000}s`;
+        }, 2200);
+        tick();
+      } catch (e) {
+        document.getElementById("lab-status").textContent = `save failed: ${e.message}`;
+      }
+    });
+  });
+
+  const agentsWrap = document.getElementById("agent-list");
+  agentsWrap.innerHTML = (d.agents || []).map((a) => `
+    <div class="agent-card ${a.always_on ? "always" : "optional"}">
+      <div class="agent-head">
+        <span class="agent-name">${a.name}</span>
+        <span class="agent-status">${a.always_on ? "● ALWAYS ON" : "○ OPT-IN"}</span>
+      </div>
+      <div class="agent-role">${a.role}</div>
+      <div class="agent-summary">${a.summary}</div>
+      <div class="agent-file"><code>${a.file}</code></div>
+    </div>
+  `).join("");
 }
 
 function paintOverview(d) {

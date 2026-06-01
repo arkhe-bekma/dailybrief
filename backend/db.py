@@ -95,6 +95,14 @@ def _init_sync() -> None:
             "ALTER TABLE articles ADD COLUMN why TEXT",
             "ALTER TABLE articles ADD COLUMN image_source TEXT",
             "ALTER TABLE articles ADD COLUMN tier TEXT",
+            # Premium-pick metadata. premium=1 → tier-1 outlet, weight is
+            # a float multiplier the curator already applied. premium_body
+            # is the longer-form summary the smart agents generate for
+            # paywalled / high-quality stories.
+            "ALTER TABLE articles ADD COLUMN premium INTEGER DEFAULT 0",
+            "ALTER TABLE articles ADD COLUMN weight REAL DEFAULT 1.0",
+            "ALTER TABLE articles ADD COLUMN premium_body TEXT",
+            "ALTER TABLE articles ADD COLUMN quality REAL DEFAULT 0",
         ):
             try:
                 c.execute(stmt)
@@ -107,6 +115,7 @@ def _init_sync() -> None:
             CREATE INDEX IF NOT EXISTS idx_articles_outlet    ON articles(outlet);
             CREATE INDEX IF NOT EXISTS idx_articles_category  ON articles(category);
             CREATE INDEX IF NOT EXISTS idx_articles_score     ON articles(score DESC);
+            CREATE INDEX IF NOT EXISTS idx_articles_premium   ON articles(premium DESC, score DESC);
             CREATE INDEX IF NOT EXISTS idx_reader_used        ON reader_results(last_used_at DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
         """)
@@ -124,8 +133,9 @@ def _upsert_article_sync(row: dict) -> None:
             INSERT INTO articles
               (url, title, image, outlet, category, lang, summary, score,
                why, image_source, tier,
+               premium, weight, premium_body, quality,
                published_at, fetched_at, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
               title=excluded.title,
               image=COALESCE(excluded.image, articles.image),
@@ -137,31 +147,44 @@ def _upsert_article_sync(row: dict) -> None:
               why=COALESCE(excluded.why, articles.why),
               image_source=COALESCE(excluded.image_source, articles.image_source),
               tier=COALESCE(excluded.tier, articles.tier),
+              premium=MAX(IFNULL(excluded.premium, 0), IFNULL(articles.premium, 0)),
+              weight=COALESCE(excluded.weight, articles.weight),
+              premium_body=COALESCE(excluded.premium_body, articles.premium_body),
+              quality=MAX(IFNULL(excluded.quality, 0), IFNULL(articles.quality, 0)),
               last_seen_at=excluded.last_seen_at
         """, (
             row.get("url"), row.get("title"), row.get("image"),
             row.get("outlet"), row.get("category"), row.get("lang"),
             row.get("summary"), int(row.get("score") or 0),
             row.get("why"), row.get("image_source"), row.get("tier"),
+            int(bool(row.get("premium"))),
+            float(row.get("weight") or 1.0),
+            row.get("premium_body"),
+            float(row.get("quality") or 0),
             row.get("published_at"),
             row.get("fetched_at") or now, now,
         ))
 
 
 # ── page query (lazy / from-disk pagination) ───────────────────────
-def _list_articles_sync(offset: int, limit: int, cat: str | None) -> list[dict]:
+def _list_articles_sync(
+    offset: int, limit: int, cat: str | None, premium_only: bool = False,
+) -> list[dict]:
     args: list = []
-    where = ""
+    where_parts: list[str] = []
     if cat:
-        where = "WHERE category = ?"
+        where_parts.append("category = ?")
         args.append(cat)
+    if premium_only:
+        where_parts.append("premium = 1")
+    where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
     args += [limit, offset]
     with closing(_conn()) as c:
         rows = c.execute(
             f"SELECT url, title, image, outlet, category, lang, summary, score, "
-            f"why, image_source, tier, "
+            f"why, image_source, tier, premium, weight, premium_body, quality, "
             f"published_at, fetched_at FROM articles {where} "
-            f"ORDER BY score DESC, fetched_at DESC LIMIT ? OFFSET ?",
+            f"ORDER BY premium DESC, score DESC, fetched_at DESC LIMIT ? OFFSET ?",
             args,
         ).fetchall()
         return [dict(r) for r in rows]
@@ -177,8 +200,12 @@ def _count_articles_sync(cat: str | None) -> int:
         return c.execute(f"SELECT COUNT(*) AS n FROM articles {where}", args).fetchone()["n"]
 
 
-async def list_articles(offset: int, limit: int, cat: str | None = None) -> list[dict]:
-    return await asyncio.to_thread(_list_articles_sync, offset, limit, cat)
+async def list_articles(
+    offset: int, limit: int, cat: str | None = None, premium_only: bool = False,
+) -> list[dict]:
+    return await asyncio.to_thread(
+        _list_articles_sync, offset, limit, cat, premium_only,
+    )
 
 
 async def count_articles(cat: str | None = None) -> int:

@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import cache, config, db, mixer, tickers
-from backend.agent import curator, illustrator, reader, summary
+from backend.agent import curator, illustrator, reader, registry, sorter, summary
 from backend.sources import politicians, prices, rss, whales, youtube
 
 load_dotenv()
@@ -93,12 +93,11 @@ async def brief():
     # Probe + filter only this ranked head — way cheaper than touching
     # every RSS candidate.
     top = await rss.enrich_top(raw_top, top_n=int(config.TOP_K * 1.5))
-    top = top[: config.TOP_K]
+    # Smart sorter: enforce per-category quotas, per-outlet caps, premium
+    # weight, and top-up. Replaces the naive `top[:TOP_K]` slice with a
+    # balanced page that the curator could never produce alone.
+    top = sorter.balance(top, target_total=config.TOP_K)
     await tickers.enrich_with_sparks(top)
-
-    by_outlet: dict[str, list[dict]] = {}
-    for a in articles:
-        by_outlet.setdefault(a.outlet, []).append(a.to_dict())
 
     whale_moves = [w.to_dict() for w in whale_moves_raw]
     insider_trades = [t.to_dict() for t in insider_trades_raw]
@@ -111,7 +110,28 @@ async def brief():
         mixer.from_videos(yt),
     )
 
+    # Per-category counts for the chip nav — sent as a tiny dict so the
+    # frontend can show real totals without us shipping every article.
+    cat_counts: dict[str, int] = {}
+    premium_count = 0
+    for m in mixed:
+        if m.get("kind") != "news":
+            continue
+        c = m.get("category") or "world"
+        cat_counts[c] = cat_counts.get(c, 0) + 1
+        if m.get("premium"):
+            premium_count += 1
+    cat_counts["all"] = sum(v for k, v in cat_counts.items())
+    cat_counts["premium"] = premium_count
+
     headline = await summary.generate(mixed)
+
+    # Trim the wire payload: only ship the first ~60 mixed items (enough
+    # for the initial 2 pages of 31). The rest of the archive is reached
+    # via /api/page on demand, which reads straight from SQLite. This
+    # keeps initial load tiny — was ~750 KB, now ~150 KB.
+    INITIAL_WIRE_ITEMS = 62
+    mixed_wire = mixed[:INITIAL_WIRE_ITEMS]
 
     payload = {
         "profile": {
@@ -121,9 +141,12 @@ async def brief():
         },
         "tape": [q.to_dict() for q in tape],
         "headline": headline,
-        "mixed": mixed,
-        "top": top,
-        "by_outlet": by_outlet,
+        "mixed": mixed_wire,
+        "cat_counts": cat_counts,
+        "total_mixed": len(mixed),
+        # `top` and `by_outlet` were unused on the frontend and just
+        # bloated the response — dropped.
+        "outlets_count": len({a.outlet for a in articles}),
         "whales": whale_moves,
         "trades": insider_trades,
         "youtube": yt,
@@ -135,8 +158,15 @@ async def brief():
     # Persist what we just decided to show. Survives restart and
     # powers the /lab dashboard counts.
     try:
-        rows = [
-            {
+        # Look up premium/weight/quality from the sorter-annotated `top`
+        # list (keyed by URL) so the DB row carries those fields too.
+        top_by_url = {t.get("url"): t for t in top if t.get("url")}
+        rows = []
+        for m in mixed:
+            if m.get("kind") != "news" or not m.get("url"):
+                continue
+            src = top_by_url.get(m["url"], {})
+            rows.append({
                 "url": m.get("url"),
                 "title": m.get("title"),
                 "image": m.get("image"),
@@ -148,10 +178,11 @@ async def brief():
                 "score": m.get("score") or 0,
                 "why": m.get("why"),
                 "tier": m.get("tier"),
+                "premium": bool(src.get("premium")),
+                "weight": float(src.get("weight") or 1.0),
+                "quality": float(src.get("quality") or 0),
                 "published_at": m.get("ts"),
-            }
-            for m in mixed if m.get("kind") == "news" and m.get("url")
-        ]
+            })
         await db.upsert_articles(rows)
         await db.bump_counter("articles_ingested", by=len(rows))
 
@@ -402,6 +433,7 @@ async def lab_settings_get():
         "agent_interval_seconds": await db.get_setting(
             "agent_interval_seconds", AGENT_INTERVAL_SECONDS
         ),
+        "workflow": await db.get_setting("workflow", registry.DEFAULT_WORKFLOW),
     }
 
 
@@ -415,7 +447,22 @@ async def lab_settings_set(body: dict):
         v = max(60, min(v, 6 * 3600))   # clamp 1 min … 6 h
         await db.set_setting("agent_interval_seconds", v)
         out["agent_interval_seconds"] = v
+    if "workflow" in body:
+        wf = str(body["workflow"])
+        if wf in registry.WORKFLOWS:
+            await db.set_setting("workflow", wf)
+            out["workflow"] = wf
     return out
+
+
+@app.get("/api/lab/agents")
+async def lab_agents():
+    """Agent + workflow metadata for the lab dashboard."""
+    return {
+        "agents": registry.agents_list(),
+        "workflows": registry.workflow_list(),
+        "active_workflow": await db.get_setting("workflow", registry.DEFAULT_WORKFLOW),
+    }
 
 
 @app.get("/lab")
@@ -424,13 +471,18 @@ async def lab_page():
 
 
 @app.get("/api/page")
-async def api_page(n: int = 1, size: int = 31, cat: Optional[str] = None):
+async def api_page(
+    n: int = 1, size: int = 31,
+    cat: Optional[str] = None, premium: int = 0,
+):
     """Lazy pagination — page 2+ pulls from the SQLite archive instead
     of the in-memory curator output. Total page count grows as the DB
-    grows, with no upper limit baked in."""
+    grows, with no upper limit baked in. Pass `premium=1` to filter to
+    only premium-outlet articles."""
     n = max(1, n)
     size = max(1, min(size, 100))
     cat_clean = cat if cat and cat != "all" else None
+    premium_only = bool(premium)
     total = await db.count_articles(cat=cat_clean)
     pages = max(1, (total + size - 1) // size)
     n = min(n, pages)
@@ -438,6 +490,7 @@ async def api_page(n: int = 1, size: int = 31, cat: Optional[str] = None):
         offset=(n - 1) * size,
         limit=size,
         cat=cat_clean,
+        premium_only=premium_only,
     )
     converted = [
         {
@@ -452,6 +505,10 @@ async def api_page(n: int = 1, size: int = 31, cat: Optional[str] = None):
             "dek": r.get("summary"),
             "why": r.get("why"),
             "tier": r.get("tier"),
+            "premium": bool(r.get("premium")),
+            "weight": float(r.get("weight") or 1.0),
+            "quality": float(r.get("quality") or 0),
+            "premium_body": r.get("premium_body"),
             "ts": r.get("published_at"),
             "score": r.get("score") or 0,
             "tickers": [], "sparks": {},
@@ -464,6 +521,65 @@ async def api_page(n: int = 1, size: int = 31, cat: Optional[str] = None):
 @app.get("/api/outlets")
 async def outlets():
     return {"outlets": config.OUTLETS}
+
+
+@app.get("/api/sources")
+async def api_sources():
+    """Grouped outlet list for the settings source picker. Each entry
+    carries the premium flag + weight so the UI can show ★ next to
+    premium publishers and offer 'enable only premium' as a quick action."""
+    by_cat: dict[str, list[dict]] = {}
+    for o in config.OUTLETS:
+        cat = o.get("category") or "world"
+        meta = config.outlet_meta(o["name"])
+        by_cat.setdefault(cat, []).append({
+            "name": o["name"],
+            "lang": o.get("lang", "en"),
+            "premium": meta["premium"],
+            "weight": meta["weight"],
+        })
+    return {
+        "categories": [
+            {
+                "key": k,
+                "label": config.CATEGORY_LABELS.get(k, {}).get("en", k.title()),
+                "label_ko": config.CATEGORY_LABELS.get(k, {}).get("ko", k),
+                "outlets": sorted(v, key=lambda x: (-int(x["premium"]), x["name"])),
+            }
+            for k, v in by_cat.items()
+        ],
+        "total": sum(len(v) for v in by_cat.values()),
+    }
+
+
+@app.get("/api/user-prefs")
+async def user_prefs_get():
+    """Server-side store for user prefs. localStorage holds the same data
+    on the client; this endpoint is the source of truth across devices."""
+    return await db.get_setting("user_prefs", {
+        "disabled_outlets": [],
+        "hide_no_image": False,
+        "premium_only": False,
+        "page_size": 31,
+        "auto_refresh": True,
+        "workflow": "balanced",
+    })
+
+
+@app.post("/api/user-prefs")
+async def user_prefs_set(body: dict):
+    """Replace stored user prefs. Body is the full prefs object —
+    frontend reads, edits, posts back."""
+    safe = {
+        "disabled_outlets": [str(s) for s in (body.get("disabled_outlets") or [])][:300],
+        "hide_no_image": bool(body.get("hide_no_image")),
+        "premium_only": bool(body.get("premium_only")),
+        "page_size": max(10, min(100, int(body.get("page_size") or 31))),
+        "auto_refresh": bool(body.get("auto_refresh", True)),
+        "workflow": str(body.get("workflow") or "balanced")[:32],
+    }
+    await db.set_setting("user_prefs", safe)
+    return safe
 
 
 # ── Static frontend ────────────────────────────────────────────────────────
