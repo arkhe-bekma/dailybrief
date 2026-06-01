@@ -651,19 +651,30 @@ function updateTranslateButton() {
   const btn = document.getElementById("reader-translate");
   if (!btn) return;
   const data = READER_STATE.original;
+  const label = btn.querySelector(".rt-label");
+
+  // Hide the button entirely until we know the source language AND
+  // the source is NOT already Korean. User explicitly: no KO→EN button.
   if (!data) {
+    btn.hidden = true;
     btn.classList.remove("active", "loading");
     return;
   }
-  const tgt = targetLangFor(data.lang || "en");
-  const label = btn.querySelector(".rt-label");
+  const srcLang = (data.lang || "en").toLowerCase();
+  if (srcLang === "ko") {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+
   if (label) {
-    // Glyph reflects what you'll see AFTER toggling.
+    // Label tells the user what the click WILL do.
     if (READER_STATE.view === "translated") {
-      // Currently showing translated → button takes you back to source.
-      label.textContent = (data.lang || "en").toUpperCase() === "KO" ? "한" : "EN";
+      label.textContent = "원문";       // "original" — flip back
+      label.setAttribute("lang", "ko");
     } else {
-      label.textContent = tgt === "ko" ? "한" : "EN";
+      label.textContent = "번역";       // "translate" — go to KR
+      label.setAttribute("lang", "ko");
     }
   }
   btn.classList.toggle("active", READER_STATE.view === "translated");

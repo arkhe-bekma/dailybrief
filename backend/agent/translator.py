@@ -134,11 +134,9 @@ def _body_hash(title: str, paragraphs: list[str]) -> str:
 
 
 def _gemini_translate_sync(prompt: str) -> dict | None:
-    """Blocking Gemini call — wrapped in to_thread by the caller so the
-    event loop stays responsive. Returns the parsed dict or None on
-    any failure. Retries transient 429/503 a few times before giving
-    up, since the free Flash tier sometimes returns "high demand"."""
-    import time as _time
+    """Blocking Gemini call. Returns the parsed dict, or RAISES on
+    rate-limit / quota errors so the caller knows to try the fallback.
+    Returns None for permanent failures (auth, malformed response)."""
     api_key = _gemini_api_key()
     if not api_key:
         return None
@@ -153,44 +151,38 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
         response_mime_type="application/json",
         response_schema=_TRANSLATE_SCHEMA,
         temperature=0.4,
-        # 8192 = Gemini 2.5 Flash output ceiling. Korean tokenises ~2x
-        # denser than English, so EN→KO at 4096 was getting truncated
-        # mid-JSON for any article over ~400 English words — json.loads
-        # then failed and the user saw a spinner that ended with no
-        # Korean. Going to the model's max keeps full articles intact.
+        # Gemini 2.5 Flash output ceiling — Korean tokenises ~2x denser
+        # than English, so EN→KO at 4096 was getting truncated mid-JSON.
         max_output_tokens=8192,
     )
     client = genai.Client(api_key=api_key)
-    resp = None
-    last_exc: Exception | None = None
-    for attempt, delay in enumerate((0.0, 1.2, 3.0), start=1):
-        if delay:
-            _time.sleep(delay)
-        try:
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=cfg,
-            )
-            break
-        except Exception as exc:
-            last_exc = exc
-            msg = str(exc)
-            # Retry only on transient capacity errors. Auth / 400 stay fatal.
-            if not any(code in msg for code in ("429", "503", "UNAVAILABLE",
-                                                "RESOURCE_EXHAUSTED")):
-                break
-            print(f"[translator] transient ({attempt}/3): {msg[:120]}", flush=True)
-    if resp is None:
-        if last_exc:
-            print(f"[translator] gemini call failed: {last_exc!r}", flush=True)
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=cfg,
+        )
+    except Exception as exc:
+        msg = str(exc)
+        # Re-raise so the caller can try Claude when:
+        #   - rate limit / quota exceeded
+        #   - the model is overloaded (503 / UNAVAILABLE)
+        #   - the API key is bad (revoked / typo / not allowed for model)
+        # i.e. anything where "ask the other provider instead" is the
+        # right move. Genuinely permanent things (400 bad request body)
+        # stay terminal.
+        fallthrough_markers = (
+            "429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "QUOTA",
+            "API_KEY_INVALID", "PERMISSION_DENIED", "API key not found",
+        )
+        if any(m in msg for m in fallthrough_markers):
+            raise _RateLimited(f"gemini unavailable: {msg[:120]}")
+        print(f"[translator] gemini call failed (terminal): {msg[:200]}", flush=True)
         return None
 
     text = (getattr(resp, "text", None) or "").strip()
     if not text:
         return None
-    # Schema enforcement should already produce clean JSON, but strip
-    # accidental fences just in case.
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):
@@ -199,8 +191,6 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        # Surface the actual response shape so we can spot truncation
-        # (Korean output hitting max_output_tokens) vs. real parse fail.
         finish = getattr(resp, "candidates", [{}])
         finish_reason = None
         try:
@@ -208,12 +198,96 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
         except Exception:
             pass
         print(
-            f"[translator] gemini returned non-JSON: {exc!r} | "
-            f"finish_reason={finish_reason} | "
-            f"text_head={text[:200]!r} | text_tail={text[-200:]!r}",
+            f"[translator] gemini non-JSON: {exc!r} | finish={finish_reason} | "
+            f"head={text[:200]!r} | tail={text[-200:]!r}",
             flush=True,
         )
         return None
+
+
+class _RateLimited(Exception):
+    """Internal sentinel meaning: try the next provider."""
+    pass
+
+
+def _claude_translate_sync(prompt: str) -> dict | None:
+    """Fallback Claude Haiku call — same JSON contract as Gemini.
+    Reads ANTHROPIC_API_KEY. Returns parsed dict or None."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except Exception as exc:
+        print(f"[translator] anthropic import failed: {exc!r}", flush=True)
+        return None
+    try:
+        client = Anthropic(api_key=api_key)
+        # Claude doesn't have schema-mode like Gemini — ask explicitly
+        # for the JSON shape and parse it from the text reply.
+        full_prompt = (
+            prompt
+            + '\n\nReturn ONLY a JSON object matching this shape '
+            + '(no prose, no fences):\n'
+            + '{"title": "...", "paragraphs": ["...", "..."], '
+            + '"summarized": false, "note": ""}\n'
+        )
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": full_prompt}],
+        )
+    except Exception as exc:
+        print(f"[translator] claude call failed: {exc!r}", flush=True)
+        return None
+
+    text = (resp.content[0].text or "").strip() if resp.content else ""
+    if text.startswith("```"):
+        text = text.split("```", 2)[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip("`").strip()
+    # Find the first {...} block in case Claude wrapped in narration.
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start:end + 1]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        print(f"[translator] claude non-JSON: {exc!r} | head={text[:200]!r}",
+              flush=True)
+        return None
+
+
+def _translate_sync(prompt: str) -> tuple[dict | None, str]:
+    """Try Gemini first; on rate-limit / capacity errors fall back to
+    Claude. Returns (parsed_dict_or_None, provider_used)."""
+    if _gemini_api_key():
+        try:
+            out = _gemini_translate_sync(prompt)
+            if out:
+                return out, "gemini-2.5-flash"
+            # None = permanent / parse failure — DON'T fall through (the
+            # output is bad, not the provider).
+            if os.getenv("ANTHROPIC_API_KEY"):
+                # But if Gemini gave a bad response, try Claude as last resort.
+                out = _claude_translate_sync(prompt)
+                if out:
+                    return out, "claude-haiku-4-5"
+            return None, "gemini-failed"
+        except _RateLimited as exc:
+            print(f"[translator] gemini rate-limited → claude: {exc}", flush=True)
+            out = _claude_translate_sync(prompt)
+            if out:
+                return out, "claude-haiku-4-5"
+            return None, "both-failed"
+    # No Gemini configured — go straight to Claude.
+    out = _claude_translate_sync(prompt)
+    if out:
+        return out, "claude-haiku-4-5"
+    return None, "no-provider"
 
 
 async def translate(
@@ -254,8 +328,9 @@ async def translate(
         cache.set(mem_key, disk_hit, 7 * 86_400)
         return disk_hit
 
-    # Tier 3: Gemini call. Network + token spend lives only here.
-    if not _gemini_api_key():
+    # Tier 3: model call. Gemini Flash is primary (free); Claude Haiku
+    # is the fallback for when Gemini's free quota / rate-limit kicks in.
+    if not (_gemini_api_key() or os.getenv("ANTHROPIC_API_KEY")):
         return None
 
     src_name = LANG_NAMES.get(src_lang, src_lang)
@@ -267,7 +342,7 @@ async def translate(
         title=title, body=body_text,
     )
 
-    parsed = await asyncio.to_thread(_gemini_translate_sync, prompt)
+    parsed, provider = await asyncio.to_thread(_translate_sync, prompt)
     if not parsed:
         return None
 
@@ -289,7 +364,7 @@ async def translate(
         "translated": True,
         "summarized": bool(parsed.get("summarized")),
         "note": parsed.get("note") or "",
-        "model": "gemini-2.5-flash",
+        "model": provider,
     }
 
     # Write back to BOTH caches before returning. SQLite is the
