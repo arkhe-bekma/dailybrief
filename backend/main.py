@@ -725,9 +725,13 @@ async def delete_article_by_user(body: dict):
     note = (body or {}).get("note") or ""
     if not url.startswith(("http://", "https://")):
         return {"error": "invalid url"}
+    # Current picker slugs (in display order) + legacy aliases from
+    # older clients still in the wild. Anything else falls to "other".
     valid_reasons = {
-        "quality", "irrelevant", "incomplete", "broken",
-        "duplicate", "misleading", "other",
+        "too-short", "irrelevant", "quality", "clickbait",
+        "duplicate", "broken", "other",
+        # legacy
+        "incomplete", "misleading",
     }
     if reason not in valid_reasons:
         reason = "other"

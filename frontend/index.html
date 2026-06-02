@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=61" />
+  <link rel="stylesheet" href="/static/style.css?v=62" />
 </head>
 <body>
   <header class="masthead">
@@ -126,41 +126,41 @@
     <div class="reader-backdrop" data-close="delete"></div>
     <div class="delete-card" role="dialog" aria-label="remove article">
       <button class="reader-close" data-close="delete" aria-label="close">×</button>
-      <div class="delete-title">REMOVE ARTICLE</div>
+      <div class="delete-title">Remove article</div>
       <div class="delete-headline" id="delete-headline"></div>
-      <div class="delete-sub">Tell us why so the curator can stop suggesting articles like this:</div>
+      <div class="delete-sub">Why?</div>
       <div class="delete-reasons" id="delete-reasons">
-        <button class="del-reason" data-reason="quality" type="button">
-          <span class="dr-tag">QUALITY</span>
-          <span class="dr-text">Article quality is too poor</span>
+        <button class="del-reason" data-reason="too-short" type="button">
+          <span class="dr-tag">Too short</span>
+          <span class="dr-text">Body lacks substance</span>
         </button>
         <button class="del-reason" data-reason="irrelevant" type="button">
-          <span class="dr-tag">RELEVANCE</span>
+          <span class="dr-tag">Off-topic</span>
           <span class="dr-text">Not relevant to me</span>
         </button>
-        <button class="del-reason" data-reason="incomplete" type="button">
-          <span class="dr-tag">INCOMPLETE</span>
-          <span class="dr-text">Body cut off / missing information</span>
+        <button class="del-reason" data-reason="quality" type="button">
+          <span class="dr-tag">Low quality</span>
+          <span class="dr-text">Weak writing or sourcing</span>
         </button>
-        <button class="del-reason" data-reason="broken" type="button">
-          <span class="dr-tag">RENDER</span>
-          <span class="dr-text">Image broken / rendering error</span>
+        <button class="del-reason" data-reason="clickbait" type="button">
+          <span class="dr-tag">Clickbait</span>
+          <span class="dr-text">Misleading headline</span>
         </button>
         <button class="del-reason" data-reason="duplicate" type="button">
-          <span class="dr-tag">DUPLICATE</span>
-          <span class="dr-text">Already covered / duplicate story</span>
+          <span class="dr-tag">Duplicate</span>
+          <span class="dr-text">Already covered</span>
         </button>
-        <button class="del-reason" data-reason="misleading" type="button">
-          <span class="dr-tag">CLICKBAIT</span>
-          <span class="dr-text">Misleading title or clickbait</span>
+        <button class="del-reason" data-reason="broken" type="button">
+          <span class="dr-tag">Broken</span>
+          <span class="dr-text">Image or render issue</span>
         </button>
         <button class="del-reason" data-reason="other" type="button">
-          <span class="dr-tag">OTHER</span>
-          <span class="dr-text">Other — just remove it</span>
+          <span class="dr-tag">Other</span>
+          <span class="dr-text">Just remove it</span>
         </button>
       </div>
       <div class="delete-actions">
-        <button class="del-cancel" type="button" data-close="delete">CANCEL</button>
+        <button class="del-cancel" type="button" data-close="delete">Cancel</button>
       </div>
     </div>
   </div>
@@ -175,6 +175,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=61"></script>
+  <script src="/static/app.js?v=62"></script>
 </body>
 </html>

@@ -1164,21 +1164,23 @@ a { color: inherit; text-decoration: none; }
   right: 10px;
 }
 #delete-modal .delete-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 1.4px;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: var(--down);
-  margin-bottom: 6px;
+  font-family: var(--display);
+  font-variation-settings: "opsz" 72, "wdth" 96;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -0.4px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
 }
 #delete-modal .delete-headline {
   font-family: var(--display);
-  font-size: 17px;
-  line-height: 1.28;
-  font-weight: 700;
-  color: var(--text);
-  margin: 2px 0 14px;
+  font-variation-settings: "opsz" 24, "wdth" 95;
+  font-size: 14.5px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--text-2);
+  margin: 2px 0 18px;
   /* clamp to two lines so a huge headline can't push the picker
      below the fold on phones */
   display: -webkit-box;
@@ -1187,53 +1189,65 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 #delete-modal .delete-headline[lang="ko"],
-#delete-modal .delete-headline:lang(ko) { font-family: var(--kr); }
+#delete-modal .delete-headline:lang(ko) {
+  font-family: var(--kr);
+  font-variation-settings: normal;
+}
 #delete-modal .delete-sub {
   font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.6px;
+  font-size: 10px;
+  letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 #delete-modal .delete-reasons {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 #delete-modal .del-reason {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
-  padding: 11px 12px;
+  padding: 12px 14px;
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
   color: var(--text);
   cursor: pointer;
   text-align: left;
-  font-family: var(--sans);
-  transition: background 120ms, border-color 120ms, transform 60ms;
+  transition: background 140ms, border-color 140ms, transform 60ms;
 }
 #delete-modal .del-reason:hover {
   background: rgba(255,71,87,0.10);
   border-color: var(--down);
 }
-#delete-modal .del-reason:active { transform: scale(0.99); }
+#delete-modal .del-reason:hover .dr-tag {
+  color: #ffd5da;
+}
+#delete-modal .del-reason:active { transform: scale(0.995); }
 #delete-modal .dr-tag {
-  flex: 0 0 92px;
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: 9.5px;
-  letter-spacing: 1.0px;
+  flex: 0 0 110px;
+  /* Display face for the option label — Bricolage Grotesque set at
+     a narrower opsz so the picker reads like a proper editorial menu
+     instead of a tag list. Title case, not all-caps. */
+  font-family: var(--display);
+  font-variation-settings: "opsz" 18, "wdth" 95;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.2;
+  letter-spacing: -0.1px;
   color: var(--down);
-  text-transform: uppercase;
+  transition: color 140ms;
 }
 #delete-modal .dr-text {
   flex: 1;
-  font-size: 13.5px;
+  font-family: var(--sans);
+  font-size: 13px;
   line-height: 1.35;
-  color: var(--text);
+  font-weight: 400;
+  color: var(--muted);
 }
 #delete-modal .delete-actions {
   display: flex;
@@ -1242,24 +1256,26 @@ a { color: inherit; text-decoration: none; }
 }
 #delete-modal .del-cancel {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.15);
-  color: var(--muted);
-  padding: 8px 16px;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--text-2);
+  padding: 8px 18px;
   border-radius: 8px;
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: 10.5px;
-  letter-spacing: 1.2px;
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.1px;
   cursor: pointer;
-  transition: color 120ms, border-color 120ms;
+  transition: color 120ms, border-color 120ms, background 120ms;
 }
 #delete-modal .del-cancel:hover {
   color: var(--text);
-  border-color: rgba(255,255,255,0.32);
+  border-color: rgba(255,255,255,0.40);
+  background: rgba(255,255,255,0.04);
 }
 @media (max-width: 500px) {
-  #delete-modal .dr-tag { flex-basis: 76px; font-size: 9px; }
-  #delete-modal .dr-text { font-size: 13px; }
+  #delete-modal .delete-title { font-size: 20px; }
+  #delete-modal .dr-tag { flex-basis: 92px; font-size: 13.5px; }
+  #delete-modal .dr-text { font-size: 12px; }
 }
 
 /* category accent bar (static — no grow on hover) */
