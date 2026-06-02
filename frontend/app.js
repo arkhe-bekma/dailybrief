@@ -694,11 +694,21 @@ async function silentRefresh() {
 }
 
 // ── Reader modal ───────────────────────────────────────────────
-// Minimal state: just what's currently open. The in-modal translation
-// flow was removed — articles render in their original language only.
-// Card-level KO toggle (✦한 badge) still works for preview swap, but
-// nothing in the modal touches it.
-let READER_STATE = { url: null, item: null };
+// Holds the article currently open + a cached translation if the
+// user has already toggled to the other language during this open.
+// On every renderReader the meta strip + the translate button get
+// rebuilt fresh; this state just remembers which view to render.
+let READER_STATE = {
+  url: null,
+  item: null,
+  original: null,
+  translated: null,
+  view: "original",   // "original" | "translated"
+};
+
+function _targetLang(srcLang) {
+  return (srcLang || "en").toLowerCase() === "ko" ? "en" : "ko";
+}
 
 async function openReader(url, item) {
   const modal = document.getElementById("reader");
@@ -710,7 +720,10 @@ async function openReader(url, item) {
   lockBodyScroll();
   const content = modal.querySelector(".reader-content");
   content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
-  READER_STATE = { url, item: item || {} };
+  READER_STATE = {
+    url, item: item || {},
+    original: null, translated: null, view: "original",
+  };
 
   try {
     const r = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
@@ -721,10 +734,98 @@ async function openReader(url, item) {
         `<a class="reader-original" href="${url}" target="_blank" rel="noopener">open original ↗</a></div>`;
       return;
     }
+    READER_STATE.original = data;
     renderReader(content, data, item || {});
   } catch (e) {
     content.innerHTML = `<div class="reader-loading">error: ${e.message}</div>`;
   }
+}
+
+// Toggle handler attached to the inline translate button (rebuilt in
+// renderReader). Logic:
+//   - if already in translated view → flip back to original (no fetch)
+//   - if we have a cached translation in READER_STATE → just swap views
+//   - otherwise fetch /api/translate. The backend is cache-first
+//     (in-memory → SQLite reader_results → Gemini) so a translation
+//     that was made before by anyone, in either direction, comes back
+//     instantly without burning quota.
+async function toggleTranslation() {
+  if (!READER_STATE.original) return;
+  const content = document.querySelector("#reader .reader-content");
+
+  // Cached round-trip.
+  if (READER_STATE.view === "translated") {
+    READER_STATE.view = "original";
+    renderReader(content, READER_STATE.original, READER_STATE.item);
+    return;
+  }
+  if (READER_STATE.translated) {
+    READER_STATE.view = "translated";
+    renderReader(content, READER_STATE.translated, READER_STATE.item);
+    return;
+  }
+
+  // First time on this article + direction. Mark loading + fetch.
+  const btn = content?.querySelector(".reader-translate");
+  if (btn) {
+    btn.classList.add("loading");
+    btn.disabled = true;
+  }
+  try {
+    const tgt = _targetLang(READER_STATE.original.lang);
+    const r = await fetch(
+      `/api/translate?url=${encodeURIComponent(READER_STATE.url)}&lang=${tgt}`,
+    );
+    const data = await r.json();
+    if (data.error || !data.paragraphs) {
+      if (btn) {
+        btn.classList.remove("loading");
+        btn.disabled = false;
+        btn.title = data.error || "Translation failed";
+      }
+      return;
+    }
+    READER_STATE.translated = data;
+    READER_STATE.view = "translated";
+    // renderReader rebuilds the button with the "原文 / Original" label
+    // and clears any loading state.
+    renderReader(content, data, READER_STATE.item);
+  } catch (e) {
+    console.warn("translate failed:", e);
+    if (btn) { btn.classList.remove("loading"); btn.disabled = false; }
+  }
+}
+
+// Build the translate pill inline. Rebuilt on every renderReader call,
+// so a stale state can't outlive a render. Click handler attached to
+// the fresh element directly.
+function buildTranslateButton() {
+  const data = READER_STATE.original;
+  if (!data) return null;
+  const srcLang = (data.lang || "en").toLowerCase();
+  const isTranslated = READER_STATE.view === "translated";
+  let labelText, labelLang;
+  if (isTranslated) {
+    labelText = srcLang === "ko" ? "원문" : "Original";
+    labelLang = srcLang === "ko" ? "ko" : "en";
+  } else if (srcLang === "ko") {
+    labelText = "English";
+    labelLang = "en";
+  } else {
+    labelText = "한국어";
+    labelLang = "ko";
+  }
+  const btn = el("button", {
+    class: "reader-translate" + (isTranslated ? " active" : ""),
+    type: "button",
+    title: isTranslated ? "Show original" : "Translate",
+    "aria-label": "translate toggle",
+  }, [
+    el("span", { class: "rt-glyph", "aria-hidden": "true" }, "✦"),
+    el("span", { class: "rt-label", lang: labelLang }, labelText),
+  ]);
+  btn.addEventListener("click", toggleTranslation);
+  return btn;
 }
 
 
@@ -757,6 +858,11 @@ function renderReader(content, data, item) {
     data.word_count ? el("span", { class: "reader-stats" }, `${data.word_count} WORDS`) : null,
     dateLabel ? el("span", { class: "reader-stats" }, dateLabel) : null,
   ]);
+  // Translate pill rendered inline at the end of the meta strip.
+  // Built fresh every renderReader call so a stale element can't
+  // outlive a state change. Click handler is attached at build time.
+  const translateBtn = buildTranslateButton();
+  if (translateBtn) metaEl.appendChild(translateBtn);
   content.appendChild(metaEl);
 
   content.appendChild(el("h1", { class: "reader-title", lang },
@@ -812,7 +918,10 @@ function renderReader(content, data, item) {
 function closeReader() {
   document.getElementById("reader").classList.add("hidden");
   unlockBodyScroll();
-  READER_STATE = { url: null, item: null };
+  READER_STATE = {
+    url: null, item: null, original: null, translated: null,
+    view: "original",
+  };
   // If a refresh was deferred while we were reading, run it now —
   // background articles update without jolting the user's scroll
   // position during their read.

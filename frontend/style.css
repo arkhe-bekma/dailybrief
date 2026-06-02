@@ -2233,6 +2233,91 @@ footer {
   color: #f6c060;
 }
 
+/* ── Translate pill (inline in the reader meta strip) ────────────
+   Rendered fresh by buildTranslateButton on every renderReader call.
+   Matches the editorial polish of the rest of the modal — display
+   face for the language label, soft cyan tint at rest, amber active
+   state mirroring the lang.translated pip. */
+.reader-translate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  height: 24px;
+  margin-left: 2px;
+  background: rgba(0,225,255,0.08);
+  border: 1px solid rgba(0,225,255,0.38);
+  border-radius: 999px;
+  color: var(--neon-cyan);
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+  transition: background 140ms, border-color 140ms, color 140ms,
+              box-shadow 140ms, transform 80ms;
+}
+.reader-translate:hover {
+  background: rgba(0,225,255,0.14);
+  border-color: rgba(0,225,255,0.65);
+  box-shadow: 0 0 12px rgba(0,225,255,0.30);
+}
+.reader-translate:active { transform: scale(0.97); }
+.reader-translate:disabled { cursor: progress; }
+.reader-translate .rt-glyph {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 8px rgba(0,225,255,0.55);
+}
+.reader-translate .rt-label {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 18, "wdth" 95;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: -0.1px;
+  text-transform: none;
+}
+.reader-translate .rt-label[lang="ko"] {
+  font-family: var(--kr);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+/* Active state: viewing the translation. Amber to match the lang
+   pip's "translated" state so the user sees one consistent signal. */
+.reader-translate.active {
+  background: rgba(246,192,96,0.16);
+  border-color: rgba(246,192,96,0.60);
+  color: #ffe7b6;
+}
+.reader-translate.active .rt-glyph {
+  color: #ffe7b6;
+  text-shadow: 0 0 10px rgba(246,192,96,0.65);
+}
+.reader-translate.active:hover {
+  background: rgba(246,192,96,0.24);
+  box-shadow: 0 0 14px rgba(246,192,96,0.35);
+}
+/* Loading state: spinner replaces the glyph. */
+.reader-translate.loading { pointer-events: none; opacity: 0.85; }
+.reader-translate.loading .rt-glyph,
+.reader-translate.loading .rt-label { visibility: hidden; }
+.reader-translate.loading::after {
+  content: "";
+  position: absolute;
+  width: 12px; height: 12px;
+  margin-top: 0;
+  border: 2px solid var(--neon-cyan);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: rt-spin 0.6s linear infinite;
+}
+.reader-translate { position: relative; }
+@keyframes rt-spin { to { transform: rotate(360deg); } }
+@media (max-width: 500px) {
+  .reader-translate { padding: 3px 9px; height: 22px; }
+  .reader-translate .rt-label { font-size: 12px; }
+}
+
 /* Tiny translator's note rendered below the title when the model
    compresses or adds context. */
 .reader-tnote {
