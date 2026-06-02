@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=67">
-  <link rel="stylesheet" href="/static/lab.css?v=49">
+  <link rel="stylesheet" href="/static/style.css?v=69">
+  <link rel="stylesheet" href="/static/lab.css?v=50">
 </head>
 <body class="lab">
   <header class="lab-mast">
@@ -249,6 +249,10 @@
           <span class="ab-title">RE-SUMMARIZE</span>
           <span class="ab-desc">Walk the last 500 articles with stored bodies and rewrite their card deks from the extracted prose (lang-aware length cap).</span>
         </button>
+        <button class="action-btn act-danger" id="act-strict">
+          <span class="ab-title">STRICT REVALIDATE + PURGE</span>
+          <span class="ab-desc">One-shot deep clean: resets every article, re-runs the validator with the strictest current heuristics, then drops everything that fails. Use this after tightening thresholds. <b>Permanent.</b></span>
+        </button>
         <button class="action-btn act-danger" id="act-purge">
           <span class="ab-title">PURGE FAILED</span>
           <span class="ab-desc">Permanently drop every article currently marked <code>validated = -1</code> along with its cached body. <b>Cannot be undone.</b></span>
@@ -306,6 +310,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=49"></script>
+  <script src="/static/lab.js?v=50"></script>
 </body>
 </html>

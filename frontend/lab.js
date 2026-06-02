@@ -480,6 +480,10 @@ document.getElementById("act-purge")?.addEventListener("click", () => {
   if (!confirm("Permanently DELETE every article currently failing validation? This cannot be undone.")) return;
   runAction("PURGE FAILED", "/api/admin/purge-failed", { method: "POST" });
 });
+document.getElementById("act-strict")?.addEventListener("click", () => {
+  if (!confirm("Re-validate the entire archive against the strictest current rules, then permanently DELETE everything that fails? This can take a few minutes.")) return;
+  runAction("STRICT REVALIDATE", "/api/admin/strict-revalidate?batch_size=30", { method: "POST" });
+});
 
 $("#interval-save").addEventListener("click", async () => {
   const v = parseInt($("#interval-input").value, 10);

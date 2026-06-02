@@ -19,14 +19,51 @@ import re
 
 
 # ── Heuristics ─────────────────────────────────────────────────────
-MIN_PARAGRAPHS = 2
-MIN_BODY_CHARS = 400        # ≈ 80 English words / 130 Korean chars —
-                            # tightened from 350 after the Al Jazeera
-                            # 67-word "title repeated 3x + 1 short
-                            # paragraph" pattern leaked through.
+# Tightened 2026-06: a Korean breaking-news stub ("속보입니다. 업데이트를
+# 위해 새로고침 해주십시오." after one short lede) and a 3-line Intel
+# article both leaked through the old 400-char / 2-paragraph gate and
+# ended up on the feed top. Raising the bar means we drop more rows
+# but the survivors actually feel like premium articles.
+MIN_PARAGRAPHS = 4          # was 2 — needs real lede + body + context
+MIN_BODY_CHARS = 1200       # ≈ 240 EN words / 400 KO chars
 MIN_TITLE_CHARS = 10
 MAX_PAYWALL_SCAN = 600
 MAX_TITLE_REPEATS_IN_BODY = 1   # >1 means the body just echoes the title
+
+# Premium tier: bumped requirement so an article promoted to the
+# hero/feature slots can't be a 4-paragraph stub.
+PREMIUM_MIN_BODY_CHARS = 1800
+PREMIUM_MIN_PARAGRAPHS = 5
+
+
+# Placeholder / live-update markers. If the body ends with one of
+# these, the article is a stub waiting for a real update — drop it.
+# Patterns are CASE-INSENSITIVE substrings (Korean stays case-sensitive
+# since Hangul has no case).
+_LIVE_UPDATE_PATTERNS = (
+    # Korean
+    "업데이트를 위해 새로고침",
+    "추후 업데이트",
+    "추후 업데이트됩니다",
+    "기사 업데이트 예정",
+    "내용 추가",
+    "추가될 예정",
+    "더 자세한 내용은 추후",
+    # English
+    "this story is developing",
+    "this is a developing story",
+    "developing story",
+    "this story is being updated",
+    "more to come",
+    "story will be updated",
+    "this article will be updated",
+    "refresh for updates",
+    "check back for updates",
+    "more details to come",
+    "stay tuned for updates",
+    "this is a breaking news story",
+    "breaking news, please check back",
+)
 
 
 # Paywall / consent-wall / interstitial signals.
@@ -154,6 +191,27 @@ def _is_paywall_stub(body_text: str) -> bool:
     return any(p in head for p in _PAYWALL_PATTERNS)
 
 
+def _is_live_update_stub(body_text: str, paragraphs: list[str]) -> bool:
+    """True when the article is a placeholder waiting to be filled in
+    (속보 with 'refresh for updates', 'this is a developing story', etc.)
+    Match anywhere in the body — these phrases routinely show up in the
+    LAST paragraph but Korean wire copy sometimes leads with them too."""
+    if not body_text:
+        return False
+    lower = body_text.lower()
+    for needle in _LIVE_UPDATE_PATTERNS:
+        if needle.lower() in lower:
+            return True
+    # Hyper-short Korean breaking-news pattern: "속보" or "[속보]" anywhere
+    # combined with a body < 600 chars. This catches outlets that put
+    # 속보 in the body itself rather than as a placeholder tail.
+    if len(body_text) < 600:
+        for marker in ("[속보]", "속보:", "[BREAKING]", "BREAKING:"):
+            if marker in body_text or marker.lower() in lower:
+                return True
+    return False
+
+
 def _looks_like_logo(image_url: str | None) -> bool:
     """Reject the publisher's brand share-card — those count as
     "image-less" for validation purposes."""
@@ -226,6 +284,8 @@ def validate(
         return False, "paywall"
     if _is_mostly_copyright(body_text):
         return False, "mostly-copyright"
+    if _is_live_update_stub(body_text, paras):
+        return False, "live-update-stub"
 
     # Image rule: either the article has a usable image, OR the body
     # is long enough that the card can stand on its own as a text card.
@@ -233,9 +293,22 @@ def validate(
              or body_payload.get("image")
              or "")
     has_real_image = bool(image) and not _looks_like_logo(image)
-    text_self_supporting = len(body_text) >= 600
+    # Pumped from 600 → 1400 so the text-only fallback only fires for
+    # articles that really do have substance. A 600-char text-only card
+    # was usually a wire-service stub.
+    text_self_supporting = len(body_text) >= 1400
 
     if not has_real_image and not text_self_supporting:
         return False, "no-image-and-short"
+
+    # Tier downgrade: premium outlets (NYT, FT, Bloomberg, etc.) can
+    # still ship short hits. If the body is below PREMIUM_MIN, strip
+    # the premium flag so the sorter doesn't promote it to a hero slot
+    # — the article still appears on the wall, just in the regular pool.
+    if article.get("premium"):
+        if (len(body_text) < PREMIUM_MIN_BODY_CHARS
+                or len(paras) < PREMIUM_MIN_PARAGRAPHS):
+            article["premium"] = False
+            article["weight"] = min(1.0, float(article.get("weight") or 1.0))
 
     return True, "ok"

@@ -836,6 +836,83 @@ async def admin_purge_failed(request: Request):
     return {"purged": purged}
 
 
+_STRICT_RUNNING = False
+
+
+@app.post("/api/admin/strict-revalidate")
+async def admin_strict_revalidate(request: Request, batch_size: int = 50):
+    """Resets every article to validated=0 and kicks off a fast async
+    revalidation in the background. Returns immediately — poll
+    /api/ingest/status to watch progress; when pending hits 0, the
+    background task auto-purges everything that failed and clears the
+    in-memory caches so /api/brief picks up the new feed.
+
+    Use after tightening validator thresholds. Synchronous variants
+    would block past Caddy/uvicorn timeouts on archives this size.
+    """
+    await _require_admin(request)
+    global _STRICT_RUNNING
+    if _STRICT_RUNNING:
+        return {"ok": False, "message": "A strict revalidation is already in progress."}
+
+    reset = await db.reset_validation()
+    cache.clear()
+    batch_size = max(1, min(batch_size, 100))
+
+    async def _strict_runner():
+        global _STRICT_RUNNING
+        _STRICT_RUNNING = True
+        examined = passed = failed = 0
+        try:
+            while True:
+                batch = await db.list_unvalidated(limit=batch_size)
+                if not batch:
+                    break
+                results = await asyncio.gather(
+                    *[_validate_one(a) for a in batch], return_exceptions=True,
+                )
+                for art, res in zip(batch, results):
+                    url = art.get("url")
+                    if not url:
+                        continue
+                    if isinstance(res, Exception):
+                        status, reason = -1, f"crash:{type(res).__name__}"
+                    else:
+                        status, reason = res
+                    try:
+                        await db.set_article_validated(url, status, reason)
+                        examined += 1
+                        if status == 1:
+                            passed += 1
+                            await db.bump_counter("ingest_pass")
+                        else:
+                            failed += 1
+                            await db.bump_counter("ingest_fail")
+                    except Exception as exc:
+                        print(f"[strict] mark failed for {url[:60]}: {exc!r}", flush=True)
+                # Yield so other requests stay responsive.
+                await asyncio.sleep(0.05)
+            try:
+                purged = await db.purge_failed_articles()
+                cache.clear()
+                print(
+                    f"[strict] done. examined={examined} passed={passed} "
+                    f"failed={failed} purged={purged}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"[strict] purge failed: {exc!r}", flush=True)
+        finally:
+            _STRICT_RUNNING = False
+
+    asyncio.create_task(_strict_runner())
+    return {
+        "ok": True,
+        "reset": reset,
+        "message": "Strict revalidation started. Watch /api/ingest/status — when pending hits 0 the failed rows auto-purge.",
+    }
+
+
 @app.get("/api/brief")
 async def brief():
     """The main payload: ticker tape + mixed feed + sidebars + summary."""
