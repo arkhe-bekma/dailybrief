@@ -691,16 +691,28 @@ async def _backfill_bodies(items: list[dict]) -> int:
             if stored:
                 paras = stored.get("paragraphs") or []
                 if paras:
-                    cleaned = _pick_dek("\n".join(paras), title) or paras[0]
-                    item["summary"] = cleaned[:400]
-                    filled += 1
+                    # Combine first 2 paragraphs for a meatier preview.
+                    cleaned = " ".join(p.strip() for p in paras[:2] if p.strip())[:700]
+                    if cleaned:
+                        item["summary"] = cleaned
+                        filled += 1
                 return
             reading = await reader_agent.extract(url)
             if not reading or not (reading.text or reading.excerpt):
                 return
-            first_para = _pick_dek(reading.text or "", title)
-            dek_src = first_para or _scrub_dek_line(reading.excerpt or "")
-            dek = dek_src[:400]
+            # Walk the body for the first 2 prose paragraphs, joined.
+            text = reading.text or ""
+            picks: list[str] = []
+            seen = 0
+            for raw in text.split("\n"):
+                line = _scrub_dek_line(raw)
+                if line and len(line) >= 25:
+                    picks.append(line)
+                    seen += 1
+                    if seen >= 2:
+                        break
+            dek_src = " ".join(picks) if picks else _scrub_dek_line(reading.excerpt or "")
+            dek = dek_src[:700]
             if not dek:
                 return
             item["summary"] = dek

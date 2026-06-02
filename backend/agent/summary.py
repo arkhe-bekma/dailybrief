@@ -87,6 +87,18 @@ async def generate(mixed: list[dict]) -> str | None:
                 ),
             }],
         )
+        # Cost telemetry — fire-and-forget.
+        try:
+            from backend import db as _db
+            u = getattr(resp, "usage", None)
+            await _db.log_api_call(
+                provider="claude-haiku-4-5",
+                purpose="headline",
+                input_tokens=(getattr(u, "input_tokens", 0) or 0) if u else 0,
+                output_tokens=(getattr(u, "output_tokens", 0) or 0) if u else 0,
+            )
+        except Exception:
+            pass
         headline = resp.content[0].text.strip()
         _cache.set(cache_key, headline, 3600)  # 1h
         return headline

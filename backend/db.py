@@ -84,6 +84,20 @@ def _init_sync() -> None:
                 key    TEXT PRIMARY KEY,
                 n      INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS api_calls (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              INTEGER NOT NULL,
+                provider        TEXT NOT NULL,
+                purpose         TEXT NOT NULL,
+                input_tokens    INTEGER DEFAULT 0,
+                output_tokens   INTEGER DEFAULT 0,
+                cost_usd        REAL DEFAULT 0,
+                success         INTEGER NOT NULL DEFAULT 1,
+                note            TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_api_calls_ts ON api_calls(ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_api_calls_provider ON api_calls(provider, ts DESC);
         """)
 
         # Phase 2: migrations. Each ALTER is idempotent — ignore the
@@ -785,3 +799,117 @@ def _prune_sync() -> dict:
 
 async def prune_once() -> dict:
     return await asyncio.to_thread(_prune_sync)
+
+
+# ── API call ledger ────────────────────────────────────────────────
+# Every LLM round-trip lands here so the lab can show the user
+# exactly when / how often / how expensively the agents talk to the
+# paid APIs. Critical for cost monitoring on the Claude side.
+#
+# Per-1M-token prices are baked in here; if Anthropic/Google change
+# them, update _COST_TABLE below.
+_COST_TABLE = {
+    # provider key: (input_per_M_usd, output_per_M_usd)
+    "claude-haiku-4-5":  (1.00, 5.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-opus-4-5":   (15.00, 75.00),
+    # Gemini 2.5 Flash free-tier on AI Studio = $0 up to limit.
+    # Paid tier prices kept here in case the user switches.
+    "gemini-2.5-flash":  (0.30, 2.50),
+    "gemini-2.0-flash":  (0.075, 0.30),
+}
+
+
+def _estimate_cost(provider: str, in_tok: int, out_tok: int) -> float:
+    p = _COST_TABLE.get(provider, (0.0, 0.0))
+    return (in_tok * p[0] + out_tok * p[1]) / 1_000_000
+
+
+def _log_api_call_sync(
+    provider: str, purpose: str,
+    input_tokens: int, output_tokens: int,
+    success: bool, note: str | None,
+) -> None:
+    now = int(time.time())
+    cost = _estimate_cost(provider, input_tokens, output_tokens)
+    with closing(_conn()) as c:
+        c.execute(
+            "INSERT INTO api_calls "
+            "(ts, provider, purpose, input_tokens, output_tokens, cost_usd, success, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (now, provider, purpose, input_tokens, output_tokens, cost,
+             1 if success else 0, (note or "")[:200]),
+        )
+
+
+async def log_api_call(
+    provider: str, purpose: str, *,
+    input_tokens: int = 0, output_tokens: int = 0,
+    success: bool = True, note: str | None = None,
+) -> None:
+    """Fire-and-forget logger. Never raises — cost telemetry must
+    never break the actual API path that's calling us."""
+    try:
+        await asyncio.to_thread(
+            _log_api_call_sync,
+            provider, purpose, input_tokens, output_tokens, success, note,
+        )
+    except Exception as exc:
+        print(f"[api_log] write failed: {exc!r}", flush=True)
+
+
+def _api_usage_sync() -> dict:
+    """Aggregate views for the lab USAGE card."""
+    now = int(time.time())
+    day_ago = now - 86_400
+    week_ago = now - 7 * 86_400
+    with closing(_conn()) as c:
+        def _slice(where: str, args: list) -> dict:
+            r = c.execute(
+                f"SELECT COUNT(*) AS calls, "
+                f"COALESCE(SUM(input_tokens), 0) AS in_tok, "
+                f"COALESCE(SUM(output_tokens), 0) AS out_tok, "
+                f"COALESCE(SUM(cost_usd), 0) AS cost "
+                f"FROM api_calls WHERE {where}",
+                args,
+            ).fetchone()
+            return dict(r)
+        today = _slice("ts > ?", [day_ago])
+        week  = _slice("ts > ?", [week_ago])
+        total = _slice("1=1", [])
+        # Per-provider today
+        prov_rows = c.execute(
+            "SELECT provider, COUNT(*) AS calls, "
+            "COALESCE(SUM(cost_usd), 0) AS cost, "
+            "COALESCE(SUM(input_tokens), 0) AS in_tok, "
+            "COALESCE(SUM(output_tokens), 0) AS out_tok "
+            "FROM api_calls WHERE ts > ? GROUP BY provider "
+            "ORDER BY cost DESC",
+            [day_ago],
+        ).fetchall()
+        # Per-purpose today
+        purpose_rows = c.execute(
+            "SELECT purpose, COUNT(*) AS calls, "
+            "COALESCE(SUM(cost_usd), 0) AS cost "
+            "FROM api_calls WHERE ts > ? GROUP BY purpose "
+            "ORDER BY cost DESC",
+            [day_ago],
+        ).fetchall()
+        # Recent log lines
+        recent = c.execute(
+            "SELECT ts, provider, purpose, input_tokens, output_tokens, "
+            "cost_usd, success, note "
+            "FROM api_calls ORDER BY ts DESC LIMIT 20"
+        ).fetchall()
+        return {
+            "today": today,
+            "week": week,
+            "total": total,
+            "by_provider_today": [dict(r) for r in prov_rows],
+            "by_purpose_today":  [dict(r) for r in purpose_rows],
+            "recent": [dict(r) for r in recent],
+        }
+
+
+async def api_usage() -> dict:
+    return await asyncio.to_thread(_api_usage_sync)

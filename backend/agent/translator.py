@@ -140,19 +140,19 @@ def _body_hash(title: str, paragraphs: list[str]) -> str:
     return h.hexdigest()[:16]
 
 
-def _gemini_translate_sync(prompt: str) -> dict | None:
-    """Blocking Gemini call. Returns the parsed dict, or RAISES on
-    rate-limit / quota errors so the caller knows to try the fallback.
-    Returns None for permanent failures (auth, malformed response)."""
+def _gemini_translate_sync(prompt: str) -> tuple[dict | None, dict]:
+    """Blocking Gemini call. Returns (parsed_dict_or_None, usage_dict).
+    RAISES _RateLimited on transient errors so the caller falls back."""
+    empty_usage = {"input_tokens": 0, "output_tokens": 0}
     api_key = _gemini_api_key()
     if not api_key:
-        return None
+        return None, empty_usage
     try:
         from google import genai
         from google.genai import types
     except Exception as exc:
         print(f"[translator] google-genai import failed: {exc!r}", flush=True)
-        return None
+        return None, empty_usage
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",
@@ -194,34 +194,40 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
             last_exc = exc
             msg = str(exc)
             if any(m in msg for m in transient_markers):
-                # Worth retrying — log and loop.
                 print(f"[translator] gemini transient {i}/{len(attempts)}: {msg[:120]}", flush=True)
                 continue
-            # Non-transient but still fallthrough-worthy (e.g. key invalid):
-            # don't burn more retries, raise immediately for Claude fallback.
             if any(m in msg for m in fallthrough_markers):
                 raise _RateLimited(f"gemini unavailable: {msg[:120]}")
-            # Genuinely permanent (e.g. 400 bad payload). Stop and return None.
             print(f"[translator] gemini call failed (terminal): {msg[:200]}", flush=True)
-            return None
+            return None, empty_usage
 
     if resp is None:
-        # All retries exhausted with transient errors → let Claude try.
         raise _RateLimited(
             f"gemini exhausted after {len(attempts)} attempts: "
             f"{str(last_exc)[:120] if last_exc else 'unknown'}"
         )
 
+    # Pull token counts from the SDK response. Both fields are safe to
+    # read defensively in case the SDK omits them on some paths.
+    usage = empty_usage.copy()
+    try:
+        um = getattr(resp, "usage_metadata", None)
+        if um:
+            usage["input_tokens"]  = getattr(um, "prompt_token_count", 0) or 0
+            usage["output_tokens"] = getattr(um, "candidates_token_count", 0) or 0
+    except Exception:
+        pass
+
     text = (getattr(resp, "text", None) or "").strip()
     if not text:
-        return None
+        return None, usage
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):
             text = text[4:]
         text = text.strip("`").strip()
     try:
-        return json.loads(text)
+        return json.loads(text), usage
     except json.JSONDecodeError as exc:
         finish = getattr(resp, "candidates", [{}])
         finish_reason = None
@@ -234,7 +240,7 @@ def _gemini_translate_sync(prompt: str) -> dict | None:
             f"head={text[:200]!r} | tail={text[-200:]!r}",
             flush=True,
         )
-        return None
+        return None, usage
 
 
 class _RateLimited(Exception):
@@ -242,17 +248,18 @@ class _RateLimited(Exception):
     pass
 
 
-def _claude_translate_sync(prompt: str) -> dict | None:
+def _claude_translate_sync(prompt: str) -> tuple[dict | None, dict]:
     """Fallback Claude Haiku call — same JSON contract as Gemini.
-    Reads ANTHROPIC_API_KEY. Returns parsed dict or None."""
+    Returns (parsed_dict_or_None, usage_dict)."""
+    empty_usage = {"input_tokens": 0, "output_tokens": 0}
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        return None
+        return None, empty_usage
     try:
         from anthropic import Anthropic
     except Exception as exc:
         print(f"[translator] anthropic import failed: {exc!r}", flush=True)
-        return None
+        return None, empty_usage
     try:
         client = Anthropic(api_key=api_key)
         # Claude doesn't have schema-mode like Gemini — ask explicitly
@@ -274,7 +281,17 @@ def _claude_translate_sync(prompt: str) -> dict | None:
         )
     except Exception as exc:
         print(f"[translator] claude call failed: {exc!r}", flush=True)
-        return None
+        return None, empty_usage
+
+    # Pull token usage from the SDK response.
+    usage = empty_usage.copy()
+    try:
+        u = getattr(resp, "usage", None)
+        if u:
+            usage["input_tokens"]  = getattr(u, "input_tokens", 0) or 0
+            usage["output_tokens"] = getattr(u, "output_tokens", 0) or 0
+    except Exception:
+        pass
 
     text = (resp.content[0].text or "").strip() if resp.content else ""
     if text.startswith("```"):
@@ -282,49 +299,51 @@ def _claude_translate_sync(prompt: str) -> dict | None:
         if text.startswith("json"):
             text = text[4:]
         text = text.strip("`").strip()
-    # Find the first {...} block in case Claude wrapped in narration.
     if not text.startswith("{"):
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end > start:
             text = text[start:end + 1]
     try:
-        return json.loads(text)
+        return json.loads(text), usage
     except json.JSONDecodeError as exc:
         print(f"[translator] claude non-JSON: {exc!r} | head={text[:200]!r}",
               flush=True)
-        return None
+        return None, usage
 
 
-def _translate_sync(prompt: str) -> tuple[dict | None, str]:
+def _translate_sync(prompt: str) -> tuple[dict | None, str, dict]:
     """Try Claude Haiku first (user's chosen primary); fall back to
     Gemini Flash only when Claude is missing / errors out. Returns
-    (parsed_dict_or_None, provider_used)."""
+    (parsed_dict_or_None, provider_used, usage_dict).
+    usage_dict carries {input_tokens, output_tokens} from whichever
+    provider actually answered, so the lab can attribute spend."""
+    empty_usage = {"input_tokens": 0, "output_tokens": 0}
     if os.getenv("ANTHROPIC_API_KEY"):
-        out = _claude_translate_sync(prompt)
+        out, usage = _claude_translate_sync(prompt)
         if out:
-            return out, "claude-haiku-4-5"
+            return out, "claude-haiku-4-5", usage
         # Claude returned a permanent failure (parse / non-200) — try
         # Gemini as last resort if it's configured.
         if _gemini_api_key():
             try:
-                gout = _gemini_translate_sync(prompt)
+                gout, gusage = _gemini_translate_sync(prompt)
                 if gout:
-                    return gout, "gemini-2.5-flash"
+                    return gout, "gemini-2.5-flash", gusage
             except _RateLimited as exc:
                 print(f"[translator] claude failed, gemini also rate-limited: {exc}", flush=True)
-        return None, "claude-failed"
+        return None, "claude-failed", usage
     # No Claude key — fall through to Gemini.
     if _gemini_api_key():
         try:
-            out = _gemini_translate_sync(prompt)
+            out, usage = _gemini_translate_sync(prompt)
             if out:
-                return out, "gemini-2.5-flash"
-            return None, "gemini-failed"
+                return out, "gemini-2.5-flash", usage
+            return None, "gemini-failed", usage
         except _RateLimited as exc:
             print(f"[translator] gemini rate-limited (no claude key): {exc}", flush=True)
-            return None, "both-failed"
-    return None, "no-provider"
+            return None, "both-failed", empty_usage
+    return None, "no-provider", empty_usage
 
 
 async def translate(
@@ -379,7 +398,22 @@ async def translate(
         title=title, body=body_text,
     )
 
-    parsed, provider = await asyncio.to_thread(_translate_sync, prompt)
+    # _translate_sync runs in a thread so we have to lift the token
+    # counters back out — pack them into the tuple it returns.
+    parsed, provider, usage = await asyncio.to_thread(_translate_sync, prompt)
+    # Log the API call (cost telemetry). Fire-and-forget; cost
+    # tracking must never break translation itself.
+    try:
+        await db.log_api_call(
+            provider=provider,
+            purpose="translate",
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            success=bool(parsed),
+            note=f"{src_lang}→{tgt_lang}",
+        )
+    except Exception as exc:
+        print(f"[translator] log_api_call failed: {exc!r}", flush=True)
     if not parsed:
         return None
 

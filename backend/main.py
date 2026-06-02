@@ -157,12 +157,14 @@ async def _validate_one(article: dict) -> tuple[int, str]:
     # 3. Run the validator.
     passed, reason = validator.validate(article, body_payload)
     if passed:
-        # First paragraph becomes the card dek — saves the supervisor
-        # path from re-extracting on the next view.
+        # Backfill the card dek with up to two paragraphs joined — gives
+        # every card the same rich preview density the KR outlets have
+        # natively from their RSS summaries.
         paras = body_payload.get("paragraphs") or []
-        if paras:
+        combined = " ".join(p.strip() for p in paras[:2] if p.strip())[:700]
+        if combined:
             try:
-                await db.update_article_summary(url, paras[0][:400])
+                await db.update_article_summary(url, combined)
             except Exception as exc:
                 print(f"[ingest] summary update failed: {exc!r}", flush=True)
         # If the article didn't have an image but extraction found one,
@@ -248,6 +250,14 @@ async def api_translate(url: str, lang: str = "ko"):
     if out is None:
         return {"error": "translation unavailable — check GEMINI_API_KEY or model error"}
     return out
+
+
+@app.get("/api/usage")
+async def api_usage():
+    """LLM cost telemetry. Returns today / week / total token counts +
+    cost, plus a breakdown by provider and purpose. Lab Usage card
+    polls this every 4s alongside ingest status."""
+    return await db.api_usage()
 
 
 @app.get("/api/ingest/status")
@@ -788,15 +798,16 @@ async def article(url: str):
     cache.set(full_key, result, 86400)
     # Persist so a restart doesn't drop the scraped body.
     await db.save_reader(url, result)
-    # Supervisor pass: enrich the card dek with the first real paragraph
-    # of the extracted body. Solves the "title only, no dek" pain point
-    # the user flagged — every article a reader opens now also enriches
-    # the deck for the next viewer browsing the feed.
+    # Supervisor pass: enrich the card dek with up to two paragraphs
+    # of the extracted body. User asked for a meatier preview — KR
+    # outlets like 서울신문 ship long RSS summaries, EN outlets don't,
+    # and the cards looked inconsistent. Combining 2 paragraphs
+    # (capped at ~700 chars) so all cards have similar body density.
     try:
-        if result["paragraphs"]:
-            first = result["paragraphs"][0]
-            if first and len(first) >= 60:
-                await db.update_article_summary(url, first[:400])
+        paras = result.get("paragraphs") or []
+        combined = " ".join(p.strip() for p in paras[:2] if p.strip())[:700]
+        if combined and len(combined) >= 60:
+            await db.update_article_summary(url, combined)
     except Exception as exc:
         print(f"[supervisor] dek backfill failed: {exc!r}", flush=True)
     # Image backfill — if the article entered the feed without an image

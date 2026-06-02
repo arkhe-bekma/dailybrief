@@ -74,6 +74,20 @@ Return ONLY a JSON array, no prose. Example:
         messages=[{"role": "user", "content": prompt}],
     )
 
+    # Cost telemetry — fire-and-forget; never breaks the rank path.
+    try:
+        from backend import db as _db
+        u = getattr(resp, "usage", None)
+        await _db.log_api_call(
+            provider="claude-haiku-4-5",
+            purpose="curator-rank",
+            input_tokens=(getattr(u, "input_tokens", 0) or 0) if u else 0,
+            output_tokens=(getattr(u, "output_tokens", 0) or 0) if u else 0,
+            note=f"top_k={top_k} n={len(articles)}",
+        )
+    except Exception:
+        pass
+
     text = resp.content[0].text.strip()
     # Strip code fences if Claude adds them.
     if text.startswith("```"):

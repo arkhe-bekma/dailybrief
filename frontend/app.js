@@ -792,28 +792,27 @@ function updateTranslateButton() {
   const data = READER_STATE.original;
   const label = btn.querySelector(".rt-label");
 
-  // Hide the button entirely until we know the source language AND
-  // the source is NOT already Korean. User explicitly: no KO→EN button.
+  // Show on EVERY article, regardless of source language. EN articles
+  // translate to KO; KO articles translate to EN. The label tells the
+  // user what direction the click will take them.
   if (!data) {
     btn.hidden = true;
     btn.classList.remove("active", "loading");
     return;
   }
-  const srcLang = (data.lang || "en").toLowerCase();
-  if (srcLang === "ko") {
-    btn.hidden = true;
-    return;
-  }
   btn.hidden = false;
-
+  const srcLang = (data.lang || "en").toLowerCase();
+  const tgt = targetLangFor(srcLang);
   if (label) {
-    // Label tells the user what the click WILL do.
     if (READER_STATE.view === "translated") {
-      label.textContent = "원문";       // "original" — flip back
-      label.setAttribute("lang", "ko");
+      // Currently showing the translation → button takes you back to source.
+      const backLabel = srcLang === "ko" ? "원문" : "ORIGINAL";
+      label.textContent = backLabel;
+      label.setAttribute("lang", srcLang === "ko" ? "ko" : "en");
     } else {
-      label.textContent = "번역";       // "translate" — go to KR
-      label.setAttribute("lang", "ko");
+      // Show "→ KO" / "→ EN" so the click direction is unambiguous.
+      label.textContent = tgt === "ko" ? "→ KO" : "→ EN";
+      label.setAttribute("lang", "en");
     }
   }
   btn.classList.toggle("active", READER_STATE.view === "translated");

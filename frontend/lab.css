@@ -441,6 +441,119 @@ body.lab {
   border-radius: 3px;
 }
 
+/* ── API usage / cost meter ─────────────────────────────────── */
+.usage-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.usage-tile {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.usage-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 1.4px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.usage-cost {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 48, "wdth" 92, "wght" 800;
+  font-size: 28px;
+  letter-spacing: -0.5px;
+  color: var(--neon-yellow);
+  text-shadow: 0 0 14px rgba(255,230,0,0.35);
+  font-variant-numeric: tabular-nums;
+}
+.usage-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+}
+.usage-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+.usage-section-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  font-weight: 800;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.usage-bars { display: flex; flex-direction: column; gap: 4px; }
+.usage-bar-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 60px 32px;
+  gap: 8px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.usage-bar-label {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-bar-track {
+  height: 6px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.usage-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--neon-yellow), var(--neon-orange));
+  border-radius: 3px;
+}
+.usage-bar-cost {
+  color: var(--neon-yellow);
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.usage-bar-calls {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.usage-recent summary {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 8px 0 4px;
+  border-top: 1px dashed var(--line);
+  margin-top: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.usage-recent summary:hover { color: var(--neon-cyan); }
+
+@media (max-width: 640px) {
+  .usage-row { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .usage-tile { padding: 8px 10px; }
+  .usage-cost { font-size: 20px; }
+  .usage-meta { font-size: 8.5px; }
+  .usage-split { grid-template-columns: 1fr; gap: 12px; }
+  .usage-bar-row { grid-template-columns: 100px 1fr 56px 28px; font-size: 10px; }
+}
+
 /* ── Ingestion monitor ──────────────────────────────────────── */
 .ingest-bar-wrap {
   display: flex;

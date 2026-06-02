@@ -63,6 +63,111 @@ async function tick() {
     const r5 = await fetch("/api/storage");
     if (r5.ok) paintStorage(await r5.json());
   } catch {}
+  try {
+    const r6 = await fetch("/api/usage");
+    if (r6.ok) paintUsage(await r6.json());
+  } catch {}
+}
+
+// Friendly explanations for the validator rejection slugs — surfaced
+// as title= tooltips on the lab pills so the user understands what
+// each one means without spelunking through the code.
+const REJECTION_HINTS = {
+  "extract-failed":       "Couldn't fetch the article body (paywall, JS-only page, dead URL).",
+  "too-few-paragraphs":   "Body has fewer than 2 paragraphs.",
+  "no-image-and-short":   "No usable image AND the body is too short to stand alone.",
+  "body-too-short":       "Body is shorter than 400 characters.",
+  "title-too-short":      "Headline is shorter than 10 characters.",
+  "title-echoed-in-body": "Body just repeats the title 2+ times — no real content.",
+  "mostly-copyright":     "Most of the body is copyright/disclaimer boilerplate.",
+  "paywall":              "Body looks like a paywall stub.",
+  "series-filler":        "Photo-only / video-only / gallery teaser.",
+  "no-body":              "Reader extraction returned nothing.",
+  "no-url":               "Article has no URL — can't fetch.",
+};
+
+function _fmtCost(n) {
+  if (!n) return "$0.00";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 1)    return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(2)}`;
+}
+function _fmtTokens(n) {
+  if (!n) return "0";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return String(n);
+}
+
+function paintUsage(d) {
+  const today = d.today || {};
+  const week  = d.week || {};
+  const total = d.total || {};
+  const set = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+
+  set("usage-summary",      `today: ${_fmtCost(today.cost || 0)}`);
+  set("usage-cost-today",   _fmtCost(today.cost || 0));
+  set("usage-cost-week",    _fmtCost(week.cost  || 0));
+  set("usage-cost-total",   _fmtCost(total.cost || 0));
+  set("usage-detail-today",
+    `${today.calls || 0} calls · ${_fmtTokens((today.in_tok || 0) + (today.out_tok || 0))} tok`);
+  set("usage-detail-week",
+    `${week.calls || 0} calls · ${_fmtTokens((week.in_tok || 0) + (week.out_tok || 0))} tok`);
+  set("usage-detail-total",
+    `${total.calls || 0} calls · ${_fmtTokens((total.in_tok || 0) + (total.out_tok || 0))} tok`);
+
+  const provEl = document.getElementById("usage-by-provider");
+  if (provEl) {
+    const rows = d.by_provider_today || [];
+    const max = Math.max(0.0001, ...rows.map((r) => r.cost || 0));
+    provEl.innerHTML = rows.length
+      ? rows.map((r) => `
+          <div class="usage-bar-row">
+            <span class="usage-bar-label" title="${r.provider}">${r.provider}</span>
+            <span class="usage-bar-track">
+              <span class="usage-bar-fill" style="width:${((r.cost || 0)/max*100).toFixed(1)}%"></span>
+            </span>
+            <span class="usage-bar-cost">${_fmtCost(r.cost || 0)}</span>
+            <span class="usage-bar-calls">${r.calls || 0}×</span>
+          </div>
+        `).join("")
+      : `<span class="ago">no calls today</span>`;
+  }
+
+  const purpEl = document.getElementById("usage-by-purpose");
+  if (purpEl) {
+    const rows = d.by_purpose_today || [];
+    const max = Math.max(0.0001, ...rows.map((r) => r.cost || 0));
+    purpEl.innerHTML = rows.length
+      ? rows.map((r) => `
+          <div class="usage-bar-row">
+            <span class="usage-bar-label" title="${r.purpose}">${r.purpose}</span>
+            <span class="usage-bar-track">
+              <span class="usage-bar-fill" style="width:${((r.cost || 0)/max*100).toFixed(1)}%"></span>
+            </span>
+            <span class="usage-bar-cost">${_fmtCost(r.cost || 0)}</span>
+            <span class="usage-bar-calls">${r.calls || 0}×</span>
+          </div>
+        `).join("")
+      : `<span class="ago">no calls today</span>`;
+  }
+
+  const recentBody = document.querySelector("#usage-recent-table tbody");
+  if (recentBody) {
+    const rows = d.recent || [];
+    recentBody.innerHTML = rows.length
+      ? rows.map((r) => `
+          <tr class="${r.success ? "" : "err"}">
+            <td class="ago">${fmtAgo(r.ts)}</td>
+            <td>${r.provider}</td>
+            <td>${r.purpose}</td>
+            <td class="num">${r.input_tokens || 0}</td>
+            <td class="num">${r.output_tokens || 0}</td>
+            <td class="num">${_fmtCost(r.cost_usd || 0)}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="6" class="ago">no recent calls</td></tr>`;
+  }
 }
 
 function paintIngest(d) {
@@ -82,13 +187,16 @@ function paintIngest(d) {
   if (elReasons) {
     const reasons = d.reasons || [];
     elReasons.innerHTML = reasons.length
-      ? `<span class="ingest-reasons-label">TOP REJECTION REASONS</span>` +
-        reasons.map((r) => `
-          <span class="ingest-reason-pill" title="${r.reason}">
-            <span class="ingest-reason-name">${r.reason || "—"}</span>
-            <span class="ingest-reason-n">${r.n}</span>
-          </span>
-        `).join("")
+      ? `<span class="ingest-reasons-label">TOP REJECTION REASONS (hover for detail)</span>` +
+        reasons.map((r) => {
+          const hint = REJECTION_HINTS[r.reason] || r.reason;
+          return `
+            <span class="ingest-reason-pill" title="${hint}">
+              <span class="ingest-reason-name">${r.reason || "—"}</span>
+              <span class="ingest-reason-n">${r.n}</span>
+            </span>
+          `;
+        }).join("")
       : "";
   }
 }

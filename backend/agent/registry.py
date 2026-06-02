@@ -76,16 +76,6 @@ AGENTS: list[dict] = [
         "always_on": True,
     },
     {
-        "key": "illustrator",
-        "name": "Illustrator",
-        "role": "AI image fallback",
-        "summary": "Generates an SDXL image when a story has no usable photo and no "
-                   "og:image. Off by default — opt-in via workflow.",
-        "lang": "py",
-        "file": "backend/agent/illustrator.py",
-        "always_on": False,
-    },
-    {
         "key": "summarizer",
         "name": "Headline writer",
         "role": "Top-of-day briefing",
@@ -138,11 +128,11 @@ WORKFLOWS: dict[str, dict] = {
         "agents": ["ingest", "sorter", "summarizer", "tickers"],
     },
     "deep": {
-        "label": "Deep dive (with illustrator)",
-        "description": "Everything turned on, including AI image generation "
-                       "for storyless cards. Slow + costs more.",
+        "label": "Deep dive",
+        "description": "Everything turned on — premium-weighted sorter, "
+                       "full LLM curator, headline, ticker enrichment.",
         "agents": ["ingest", "curator", "sorter", "summarizer",
-                   "tickers", "reader", "illustrator"],
+                   "tickers", "reader"],
     },
 }
 

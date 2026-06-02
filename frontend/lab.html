@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=43">
-  <link rel="stylesheet" href="/static/lab.css?v=43">
+  <link rel="stylesheet" href="/static/style.css?v=45">
+  <link rel="stylesheet" href="/static/lab.css?v=47">
 </head>
 <body class="lab">
   <header class="lab-mast">
@@ -86,16 +86,67 @@
       </div>
     </section>
 
-    <!-- CACHE INSPECTOR -->
+    <!-- CACHE INSPECTOR (debug; collapsed by default) -->
     <section class="card span-2">
-      <div class="card-head">CACHE INSPECTOR · KEYS BY PREFIX</div>
-      <div id="cache-bars" class="bars"></div>
+      <details>
+        <summary class="card-head" style="cursor: pointer;">
+          CACHE INSPECTOR · KEYS BY PREFIX  <span class="settings-hint">debug</span>
+        </summary>
+        <p class="hint" style="padding-top: 8px;">
+          In-memory cache used to avoid re-fetching RSS / reader-mode bodies on every request.
+          Each prefix is a different cache namespace (rss:, og_image:, brief:response, etc.).
+          Not user-relevant — only useful when diagnosing stale data.
+        </p>
+        <div id="cache-bars" class="bars"></div>
+      </details>
     </section>
 
     <!-- COUNTERS -->
     <section class="card">
       <div class="card-head">RAW COUNTERS</div>
       <div class="kpi-stack" id="counter-list"></div>
+    </section>
+
+    <!-- API USAGE / COST METER -->
+    <section class="card span-3">
+      <div class="card-head">
+        API USAGE · CLAUDE + GEMINI · COST METER
+        <span class="outlet-summary" id="usage-summary">today: $0.00</span>
+      </div>
+      <div class="usage-row">
+        <div class="usage-tile">
+          <span class="usage-label">TODAY</span>
+          <span class="usage-cost" id="usage-cost-today">$0.00</span>
+          <span class="usage-meta" id="usage-detail-today">— calls · — tokens</span>
+        </div>
+        <div class="usage-tile">
+          <span class="usage-label">7 DAYS</span>
+          <span class="usage-cost" id="usage-cost-week">$0.00</span>
+          <span class="usage-meta" id="usage-detail-week">— calls · — tokens</span>
+        </div>
+        <div class="usage-tile">
+          <span class="usage-label">TOTAL</span>
+          <span class="usage-cost" id="usage-cost-total">$0.00</span>
+          <span class="usage-meta" id="usage-detail-total">— calls · — tokens</span>
+        </div>
+      </div>
+      <div class="usage-split">
+        <div>
+          <div class="usage-section-label">BY PROVIDER (today)</div>
+          <div id="usage-by-provider" class="usage-bars"></div>
+        </div>
+        <div>
+          <div class="usage-section-label">BY PURPOSE (today)</div>
+          <div id="usage-by-purpose" class="usage-bars"></div>
+        </div>
+      </div>
+      <details class="usage-recent">
+        <summary>recent calls (last 20)</summary>
+        <table class="lab-table compact" id="usage-recent-table">
+          <thead><tr><th>WHEN</th><th>PROVIDER</th><th>PURPOSE</th><th class="num">IN</th><th class="num">OUT</th><th class="num">COST</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </details>
     </section>
 
     <!-- INGESTION MONITOR -->
@@ -159,10 +210,19 @@
       </div>
     </section>
 
-    <!-- AGENT ACTIVITY -->
+    <!-- AGENT ACTIVITY (debug; collapsed by default) -->
     <section class="card span-3">
-      <div class="card-head">AGENT ACTIVITY · LAST 50 RUNS</div>
-      <table class="lab-table compact" id="runs-table">
+      <details>
+        <summary class="card-head" style="cursor: pointer;">
+          AGENT ACTIVITY · LAST 50 RUNS  <span class="settings-hint">debug</span>
+        </summary>
+        <p class="hint" style="padding-top: 8px;">
+          Every background tick the agents run. <code>refresh</code> = the
+          hourly cache-bust that pulls fresh RSS. OK / FAIL tells you
+          whether the cycle finished. Only useful when investigating why
+          articles aren't updating.
+        </p>
+        <table class="lab-table compact" id="runs-table">
         <thead>
           <tr>
             <th>WHEN</th>
@@ -174,6 +234,7 @@
         </thead>
         <tbody></tbody>
       </table>
+      </details>
     </section>
 
   </main>
@@ -182,6 +243,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=46"></script>
+  <script src="/static/lab.js?v=47"></script>
 </body>
 </html>
