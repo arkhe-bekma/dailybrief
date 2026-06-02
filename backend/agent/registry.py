@@ -66,6 +66,19 @@ AGENTS: list[dict] = [
         "always_on": True,
     },
     {
+        "key": "resummary",
+        "name": "Dek Rewriter",
+        "role": "Real-body card description",
+        "summary": "Background worker that walks articles whose card description is shorter "
+                   "than what the extracted body would yield, and force-overwrites the dek "
+                   "with the first two real body paragraphs. No AI rewrites — only the "
+                   "publisher's own text. Makes English cards as content-rich as Korean "
+                   "ones (서울신문 / 일간스포츠) natively are.",
+        "lang": "py",
+        "file": "backend/main.py (_resummary_worker)",
+        "always_on": True,
+    },
+    {
         "key": "reader",
         "name": "Reader",
         "role": "Article body extractor",

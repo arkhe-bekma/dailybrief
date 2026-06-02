@@ -449,6 +449,49 @@ async def update_article_summary(url: str, summary: str) -> bool:
     return await asyncio.to_thread(_update_article_summary_sync, url, summary)
 
 
+def _force_update_summary_sync(url: str, summary: str) -> bool:
+    """Force-overwrite articles.summary regardless of existing length.
+    Used by the resummary worker when we KNOW the new text comes from
+    the extracted body — user wants the real body as the dek, not the
+    publisher's RSS one-liner."""
+    if not summary:
+        return False
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles SET summary = ? WHERE url = ?",
+            (summary, url),
+        )
+        return cur.rowcount > 0
+
+
+async def force_update_summary(url: str, summary: str) -> bool:
+    return await asyncio.to_thread(_force_update_summary_sync, url, summary)
+
+
+def _list_resummary_candidates_sync(limit: int) -> list[dict]:
+    """Articles where we have a reader_results body but the card
+    summary is still shorter than what the body would give us. These
+    are the rows the resummary worker should rewrite."""
+    with closing(_conn()) as c:
+        rows = c.execute(
+            """
+            SELECT a.url AS url, a.title AS title,
+                   COALESCE(LENGTH(a.summary), 0) AS summary_len
+            FROM articles a
+            INNER JOIN reader_results r ON r.url = a.url
+            WHERE COALESCE(LENGTH(a.summary), 0) < 350
+            ORDER BY a.fetched_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def list_resummary_candidates(limit: int = 12) -> list[dict]:
+    return await asyncio.to_thread(_list_resummary_candidates_sync, limit)
+
+
 def _update_article_image_sync(url: str, image: str) -> bool:
     """Stamp the article's image URL onto the articles row — only when
     there isn't one yet. Used by /api/article so a successful

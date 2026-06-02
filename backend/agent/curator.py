@@ -27,7 +27,7 @@ def _heuristic_rank(articles: list[Any], top_k: int) -> list[dict]:
         scored.append((score, a))
     scored.sort(key=lambda t: (t[0], t[1].published), reverse=True)
     return [
-        {**a.to_dict(), "score": s, "why": None}
+        {**a.to_dict(), "score": s}
         for s, a in scored[:top_k]
     ]
 
@@ -59,13 +59,9 @@ ARTICLES (JSON):
 Pick the {top_k} most relevant articles for this reader. For each, return:
   - i: original index
   - score: 0-100 (how well it matches the profile)
-  - why: one short sentence (<=18 words) explaining why this reader should care.
-         IMPORTANT: write `why` in the SAME language as the article (use the `lang`
-         field — "ko" → Korean, "en" → English, etc.).
 
 Return ONLY a JSON array, no prose. Example:
-[{{"i": 3, "score": 92, "why": "Direct read on Samsung HBM share vs SK hynix."}},
- {{"i": 7, "score": 88, "why": "삼성 HBM 점유율이 SK하이닉스 대비 직접적으로 영향."}}]
+[{{"i": 3, "score": 92}}, {{"i": 7, "score": 88}}]
 """
 
     resp = await client.messages.create(
@@ -110,7 +106,6 @@ Return ONLY a JSON array, no prose. Example:
         out.append({
             **a.to_dict(),
             "score": pick.get("score", 0),
-            "why": pick.get("why"),
         })
     return out
 

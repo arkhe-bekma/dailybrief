@@ -269,7 +269,11 @@ function newsBody(item, opts = {}) {
   ]);
   const head = el("h2", { class: "h", lang }, decodeEntities(titleText) || "");
   const dek = dekText ? el("p", { class: "dek", lang }, decodeEntities(dekText)) : null;
-  const why = item.why ? el("div", { class: "why", lang }, item.why) : null;
+  // .why was an AI-generated 1-line "why this matters" from the
+  // curator. User saw it as confusing AI-shortened content next to
+  // the dek. Removed from card layout — the actual extracted body
+  // is what appears under the title now, full stop. No AI rewrites.
+  const why = null;
   const sparks = item.sparks || {};
   const tickers = (item.tickers || []).filter((t) => sparks[t]);
   let sparkRow = null;

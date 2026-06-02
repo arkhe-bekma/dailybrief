@@ -85,6 +85,85 @@ async def _start():
         asyncio.create_task(_prune_worker())
     except Exception as exc:
         print(f"[startup] prune worker failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_resummary_worker())
+    except Exception as exc:
+        print(f"[startup] resummary worker failed to schedule: {exc!r}", flush=True)
+
+
+# ── Resummary worker ────────────────────────────────────────────────
+# Walks every article whose stored summary is shorter than what the
+# extracted body would yield, and force-overwrites the summary with
+# the real body's first 2 paragraphs. User explicitly: no AI rewrites,
+# no publisher one-liners — the dek under each title must be the
+# actual article content, just like 서울신문 / 일간스포츠 already show.
+def _compose_dek_from_body(paras: list[str], title: str = "") -> str:
+    """Pick the strongest first ~700 chars of real prose out of an
+    article body. Skips title-as-paragraph + very short header lines
+    (subtitles, captions, single-word breaks) that publishers often
+    place ahead of the actual lede. Critical for English outlets where
+    the trafilatura output is `[title repeated, subtitle, real lede,
+    rest of article]` — the naive "first 2 paragraphs" picked up the
+    junk lines and ignored the actual story.
+    """
+    t = (title or "").strip().lower()
+    picked: list[str] = []
+    total = 0
+    for raw in paras:
+        s = (raw or "").strip()
+        if not s:
+            continue
+        norm = s.lower()
+        # Skip title-as-paragraph (exact match or near-exact).
+        if t and (norm == t or (norm.startswith(t) and len(norm) <= len(t) + 4)):
+            continue
+        # Skip header/subtitle lines under 80 chars — too short to
+        # carry meaningful body text.
+        if len(s) < 80:
+            continue
+        picked.append(s)
+        total += len(s) + 1
+        if total >= 700 or len(picked) >= 2:
+            break
+    return (" ".join(picked))[:700]
+
+
+async def _resummary_worker():
+    await asyncio.sleep(45)   # let validator + ingest settle first
+    print("[resummary] worker armed", flush=True)
+    while True:
+        try:
+            batch = await db.list_resummary_candidates(limit=12)
+        except Exception as exc:
+            print(f"[resummary] queue read failed: {exc!r}", flush=True)
+            await asyncio.sleep(120)
+            continue
+        if not batch:
+            await asyncio.sleep(180)
+            continue
+        rewritten = 0
+        for row in batch:
+            url = row.get("url")
+            if not url:
+                continue
+            try:
+                payload = await db.get_reader(url)
+                if not payload:
+                    continue
+                paras = payload.get("paragraphs") or []
+                if not paras:
+                    continue
+                title = payload.get("title") or row.get("title") or ""
+                combined = _compose_dek_from_body(paras, title)
+                if not combined or len(combined) <= row.get("summary_len", 0):
+                    continue
+                await db.force_update_summary(url, combined)
+                rewritten += 1
+            except Exception as exc:
+                print(f"[resummary] {url[:60]} failed: {exc!r}", flush=True)
+        if rewritten:
+            print(f"[resummary] rewrote {rewritten}/{len(batch)} card deks", flush=True)
+        await asyncio.sleep(3)
 
 
 async def _prune_worker():
@@ -157,11 +236,12 @@ async def _validate_one(article: dict) -> tuple[int, str]:
     # 3. Run the validator.
     passed, reason = validator.validate(article, body_payload)
     if passed:
-        # Backfill the card dek with up to two paragraphs joined — gives
-        # every card the same rich preview density the KR outlets have
-        # natively from their RSS summaries.
-        paras = body_payload.get("paragraphs") or []
-        combined = " ".join(p.strip() for p in paras[:2] if p.strip())[:700]
+        # Backfill the card dek from the extracted body. Uses the
+        # smart composer that skips title-as-paragraph + subtitle
+        # stubs so EN cards match KR density.
+        combined = _compose_dek_from_body(
+            body_payload.get("paragraphs") or [], article.get("title") or "",
+        )
         if combined:
             try:
                 await db.update_article_summary(url, combined)
@@ -798,15 +878,14 @@ async def article(url: str):
     cache.set(full_key, result, 86400)
     # Persist so a restart doesn't drop the scraped body.
     await db.save_reader(url, result)
-    # Supervisor pass: enrich the card dek with up to two paragraphs
-    # of the extracted body. User asked for a meatier preview — KR
-    # outlets like 서울신문 ship long RSS summaries, EN outlets don't,
-    # and the cards looked inconsistent. Combining 2 paragraphs
-    # (capped at ~700 chars) so all cards have similar body density.
+    # Supervisor pass: enrich the card dek with prose from the
+    # extracted body. _compose_dek_from_body skips title-as-paragraph
+    # + subtitle stubs so EN cards get real body text, not header noise.
     try:
-        paras = result.get("paragraphs") or []
-        combined = " ".join(p.strip() for p in paras[:2] if p.strip())[:700]
-        if combined and len(combined) >= 60:
+        combined = _compose_dek_from_body(
+            result.get("paragraphs") or [], result.get("title") or "",
+        )
+        if combined and len(combined) >= 80:
             await db.update_article_summary(url, combined)
     except Exception as exc:
         print(f"[supervisor] dek backfill failed: {exc!r}", flush=True)
