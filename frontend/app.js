@@ -1300,27 +1300,26 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isAdmin) document.body.dataset.isAdmin = "1";
     else         delete document.body.dataset.isAdmin;
 
-    // Masthead chip — three states.
+    // Masthead account glyph — same 22×22 square as the ⚙. Single
+    // character inside, color/border tells the state.
+    //   anonymous → ◌ (dotted ring, suggests "no account yet")
+    //   user      → ◉ (filled bullseye — active account)
+    //   admin     → ◈ (lozenge — distinctly admin)
     const chip = document.getElementById("account-btn");
     if (!chip) return;
     chip.classList.remove("account-anon", "account-user", "account-admin");
-    chip.innerHTML = "";
     if (!loggedIn) {
       chip.classList.add("account-anon");
       chip.title = "Click to sign in";
-      chip.appendChild(el("span", { class: "acct-dot", "aria-hidden": "true" }, "●"));
-      chip.appendChild(el("span", { class: "acct-label" }, "Sign in"));
+      chip.textContent = "◌";
     } else if (isAdmin) {
       chip.classList.add("account-admin");
-      chip.title = `Logged in as ${user.username} (admin)`;
-      chip.appendChild(el("span", { class: "acct-dot", "aria-hidden": "true" }, "●"));
-      chip.appendChild(el("span", { class: "acct-label" }, user.username));
-      chip.appendChild(el("span", { class: "acct-pip" }, "ADMIN"));
+      chip.title = `${user.username} · admin`;
+      chip.textContent = "◈";
     } else {
       chip.classList.add("account-user");
-      chip.title = `Logged in as ${user.username}`;
-      chip.appendChild(el("span", { class: "acct-dot", "aria-hidden": "true" }, "●"));
-      chip.appendChild(el("span", { class: "acct-label" }, user.username));
+      chip.title = user.username;
+      chip.textContent = "◉";
     }
 
     // Change-pw modal sub-line shows who's logged in.

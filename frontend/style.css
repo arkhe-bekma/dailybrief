@@ -537,68 +537,56 @@ a { color: inherit; text-decoration: none; }
    as one combined chunk. */
 .actions .date { margin-left: 12px; }
 
-/* Account chip — sits between the date and the ⚙ in the masthead.
-   Three visual states:
-     .account-anon   → faint outline + "Sign in" label
-     .account-user   → cyan dot + username initial-circle + name
-     .account-admin  → amber dot + bold "ADMIN" pip + name
-   JS sets the right class after /api/auth/whoami resolves. */
+/* Account glyph — small square button that mirrors #settings-btn so
+   the header stays balanced. Same 22×22 square, same 5px corner radius,
+   same icon-button rhythm. Status is conveyed by the icon glyph + the
+   color tone of the button, not by chips or labels. */
 .account-chip {
+  width: 22px;
+  height: 22px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.18);
-  color: var(--text-2);
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.7px;
+  justify-content: center;
+  border-radius: 5px;
+  background: linear-gradient(135deg, rgba(0,225,255,0.10), rgba(122,162,255,0.05));
+  border: 1px solid rgba(0,225,255,0.35);
+  color: var(--neon-cyan);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(0,225,255,0.5);
   cursor: pointer;
-  transition: border-color 140ms, background 140ms, color 140ms, box-shadow 140ms;
+  transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s, background 0.15s, color 0.15s;
 }
 .account-chip:hover {
-  border-color: rgba(255,255,255,0.40);
-  background: rgba(255,255,255,0.06);
-  color: var(--text);
+  box-shadow: 0 0 16px rgba(0,225,255,0.45);
+  transform: translateY(-1px);
 }
-.account-chip .acct-dot {
-  font-size: 9px;
-  line-height: 1;
-  color: rgba(255,255,255,0.45);
+/* Anonymous: dim it down so the "active" account states pop visually. */
+.account-chip.account-anon {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.22);
+  color: var(--muted);
+  text-shadow: none;
 }
-.account-chip .acct-label { text-transform: uppercase; }
-.account-chip .acct-pip {
-  background: rgba(255,255,255,0.10);
-  color: var(--text);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1px;
-}
-.account-chip.account-user {
-  border-color: rgba(0,225,255,0.40);
-  background: rgba(0,225,255,0.08);
+.account-chip.account-anon:hover {
+  border-color: rgba(0,225,255,0.45);
   color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0,225,255,0.30);
 }
-.account-chip.account-user .acct-dot { color: var(--neon-cyan); text-shadow: 0 0 8px rgba(0,225,255,0.55); }
+/* Logged-in regular user: keep the cyan icon-button styling (matches ⚙). */
+.account-chip.account-user { /* uses the base styling */ }
+/* Admin: amber tone — clearly distinguishable from a plain user without
+   extra chrome. */
 .account-chip.account-admin {
+  background: linear-gradient(135deg, rgba(246,192,96,0.14), rgba(246,192,96,0.04));
   border-color: rgba(246,192,96,0.50);
-  background: rgba(246,192,96,0.10);
   color: #f6c060;
+  text-shadow: 0 0 8px rgba(246,192,96,0.50);
 }
-.account-chip.account-admin .acct-dot { color: #f6c060; text-shadow: 0 0 8px rgba(246,192,96,0.55); }
-.account-chip.account-admin .acct-pip {
-  background: rgba(246,192,96,0.20);
-  color: #ffe7b6;
-}
-@media (max-width: 600px) {
-  .account-chip { padding: 0 9px; height: 26px; font-size: 10px; }
-  .account-chip .acct-label { display: none; }   /* keep just dot + pip on phones */
+.account-chip.account-admin:hover {
+  box-shadow: 0 0 14px rgba(246,192,96,0.40);
 }
 .actions button {
   background: rgba(255,255,255,0.05);
