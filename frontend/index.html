@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=45" />
+  <link rel="stylesheet" href="/static/style.css?v=61" />
 </head>
 <body>
   <header class="masthead">
@@ -35,8 +35,38 @@
       </div>
     </div>
     <div class="settings-row">
-      <span class="settings-label">ADMIN</span>
-      <a class="settings-action" href="/lab">→ open lab dashboard</a>
+      <span class="settings-label">REFRESH</span>
+      <div class="settings-segs" id="refresh-segs">
+        <button class="seg" data-refresh="0">OFF</button>
+        <button class="seg" data-refresh="60">1m</button>
+        <button class="seg" data-refresh="120">2m</button>
+        <button class="seg active" data-refresh="300">5m</button>
+        <button class="seg" data-refresh="600">10m</button>
+      </div>
+    </div>
+    <div class="settings-row settings-row-col">
+      <span class="settings-label">INTERESTS — boost categories you care about most</span>
+      <div class="interest-grid" id="interest-grid">
+        <button class="interest" data-cat="world">◐ World</button>
+        <button class="interest" data-cat="econ">▲ Markets</button>
+        <button class="interest" data-cat="biz">■ Business</button>
+        <button class="interest" data-cat="tech">⌬ Tech</button>
+        <button class="interest" data-cat="ai">✦ AI</button>
+        <button class="interest" data-cat="crypto">₿ Crypto</button>
+        <button class="interest" data-cat="science">⚛ Science</button>
+        <button class="interest" data-cat="geo">◈ Geopolitics</button>
+        <button class="interest" data-cat="opinion">✎ Op-Ed</button>
+        <button class="interest" data-cat="korea">● Korea</button>
+        <button class="interest" data-cat="kent">★ K-Ent</button>
+      </div>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">ACCOUNT</span>
+      <span class="settings-account">
+        <a class="settings-action" href="/lab">→ lab dashboard</a>
+        <a class="settings-action" id="settings-login" href="/login">→ login</a>
+        <a class="settings-action" id="settings-logout" href="#" hidden>→ logout</a>
+      </span>
     </div>
   </div>
 
@@ -85,11 +115,53 @@
     <div class="reader-backdrop"></div>
     <div class="reader-card" role="dialog" aria-label="article reader">
       <button class="reader-close" aria-label="close">×</button>
-      <button class="reader-translate" id="reader-translate" type="button" aria-label="AI 번역" hidden>
-        <span class="rt-spark" aria-hidden="true">✦</span>
-        <span class="rt-label" lang="ko">번역</span>
-      </button>
       <div class="reader-content"></div>
+    </div>
+  </div>
+
+  <!-- Delete-with-reason modal — user clicks the × on a card and picks
+       why they want it gone; the article is permanently removed from
+       the DB and blocked from re-ingest. -->
+  <div id="delete-modal" class="reader hidden" aria-hidden="true">
+    <div class="reader-backdrop" data-close="delete"></div>
+    <div class="delete-card" role="dialog" aria-label="remove article">
+      <button class="reader-close" data-close="delete" aria-label="close">×</button>
+      <div class="delete-title">REMOVE ARTICLE</div>
+      <div class="delete-headline" id="delete-headline"></div>
+      <div class="delete-sub">Tell us why so the curator can stop suggesting articles like this:</div>
+      <div class="delete-reasons" id="delete-reasons">
+        <button class="del-reason" data-reason="quality" type="button">
+          <span class="dr-tag">QUALITY</span>
+          <span class="dr-text">Article quality is too poor</span>
+        </button>
+        <button class="del-reason" data-reason="irrelevant" type="button">
+          <span class="dr-tag">RELEVANCE</span>
+          <span class="dr-text">Not relevant to me</span>
+        </button>
+        <button class="del-reason" data-reason="incomplete" type="button">
+          <span class="dr-tag">INCOMPLETE</span>
+          <span class="dr-text">Body cut off / missing information</span>
+        </button>
+        <button class="del-reason" data-reason="broken" type="button">
+          <span class="dr-tag">RENDER</span>
+          <span class="dr-text">Image broken / rendering error</span>
+        </button>
+        <button class="del-reason" data-reason="duplicate" type="button">
+          <span class="dr-tag">DUPLICATE</span>
+          <span class="dr-text">Already covered / duplicate story</span>
+        </button>
+        <button class="del-reason" data-reason="misleading" type="button">
+          <span class="dr-tag">CLICKBAIT</span>
+          <span class="dr-text">Misleading title or clickbait</span>
+        </button>
+        <button class="del-reason" data-reason="other" type="button">
+          <span class="dr-tag">OTHER</span>
+          <span class="dr-text">Other — just remove it</span>
+        </button>
+      </div>
+      <div class="delete-actions">
+        <button class="del-cancel" type="button" data-close="delete">CANCEL</button>
+      </div>
     </div>
   </div>
 
@@ -103,6 +175,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=48"></script>
+  <script src="/static/app.js?v=61"></script>
 </body>
 </html>

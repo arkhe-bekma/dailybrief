@@ -81,6 +81,43 @@ _SERIES_FILLER_TITLE_RE = re.compile(
 )
 
 
+# Generic page-furniture labels trafilatura sometimes mistakes for the
+# article title (sidebar headings, "Editor's choice" widget labels,
+# section nav, error pages). Anything that ONLY matches one of these
+# gets rejected so the feed can never show a card with a meaningless
+# headline. Mirrors main._BAD_TITLE_RE but lives here too so the
+# validator stays self-contained.
+_BOILERPLATE_TITLE_RE = re.compile(
+    r"^\s*(?:"
+    r"editor[''’]?s?\s+choice"
+    r"|editor[''’]?s?\s+pick(?:s)?"
+    r"|latest\s+news"
+    r"|breaking\s+news"
+    r"|top\s+stor(?:y|ies)"
+    r"|most\s+(?:read|popular|viewed)"
+    r"|more\s+from\b.*"
+    r"|recommended\s+(?:reads?|for\s+you)"
+    r"|trending(?:\s+now)?"
+    r"|featured(?:\s+stor(?:y|ies))?"
+    r"|popular\s+(?:now|today|stories)"
+    r"|today[''’]?s?\s+(?:pick|top)\w*"
+    r"|news(?:letter)?$"
+    r"|home\s*$"
+    r"|404\b.*"
+    r"|page\s+not\s+found"
+    r"|access\s+denied"
+    r"|sign\s+in\b.*"
+    r"|log\s+in\b.*"
+    r"|편집자\s*추천"
+    r"|많이\s*본\s*뉴스"
+    r"|주요\s*뉴스"
+    r"|최신\s*뉴스"
+    r"|인기\s*기사"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
 def _is_mostly_copyright(body_text: str) -> bool:
     """True when ≥ 30% of the body text matches copyright/disclaimer
     boilerplate. Catches the 한경 "프리미엄9의 모든 콘텐츠는…" tail
@@ -142,9 +179,19 @@ def validate(
         return False, "title-too-short"
     if _SERIES_FILLER_TITLE_RE.match(title):
         return False, "series-filler"
+    if _BOILERPLATE_TITLE_RE.match(title):
+        return False, "boilerplate-title"
 
     if not body_payload:
         return False, "no-body"
+
+    # Trafilatura's extracted title — when it disagrees with the RSS
+    # title and matches a known sidebar label, the page handed us a
+    # widget header instead of the article. Reject so a user clicking
+    # the card never lands on a reader modal headlined "Editor's choice".
+    extracted_title = (body_payload.get("title") or "").strip()
+    if extracted_title and _BOILERPLATE_TITLE_RE.match(extracted_title):
+        return False, "boilerplate-title-extracted"
 
     raw_paras = [p.strip() for p in (body_payload.get("paragraphs") or []) if p and p.strip()]
 

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>login · dailybrief</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-1: #0b0d18; --bg-2: #11131f;
+      --text: #f3f5fb; --text-2: #c7cad6; --muted: #7a7f95;
+      --line: #1c1f2e; --line-2: #2a2e44;
+      --neon-mag: #ff2bd6; --neon-cyan: #00e1ff; --down: #ff4757;
+      --sans: 'Inter', sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+      --display: 'Bricolage Grotesque', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background:
+        radial-gradient(ellipse at top, rgba(0,225,255,0.06), transparent 50%),
+        radial-gradient(ellipse at bottom, rgba(255,43,214,0.05), transparent 50%),
+        var(--bg-1);
+      color: var(--text);
+      font-family: var(--sans);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--bg-2);
+      border: 1px solid var(--line-2);
+      border-radius: 16px;
+      padding: 32px 28px 26px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 4px;
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.6px;
+    }
+    .brand .logo { color: var(--neon-cyan); font-size: 18px; }
+    .tag {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      margin-bottom: 26px;
+    }
+    label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 1px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin: 14px 0 6px;
+    }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      background: var(--bg-1);
+      border: 1px solid var(--line-2);
+      border-radius: 9px;
+      padding: 11px 13px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      transition: border-color 120ms, box-shadow 120ms;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 0 2px rgba(0,225,255,0.18);
+    }
+    button.primary {
+      width: 100%;
+      margin-top: 22px;
+      background: linear-gradient(135deg, var(--neon-cyan), rgba(0,225,255,0.65));
+      color: #001017;
+      border: none;
+      border-radius: 9px;
+      padding: 12px;
+      font-family: var(--mono);
+      font-weight: 800;
+      font-size: 11.5px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: transform 80ms, box-shadow 120ms;
+    }
+    button.primary:hover { box-shadow: 0 0 18px rgba(0,225,255,0.4); }
+    button.primary:active { transform: scale(0.99); }
+    button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+    .hint {
+      margin-top: 16px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.6px;
+      text-align: center;
+    }
+    .err {
+      margin-top: 14px;
+      padding: 9px 12px;
+      background: rgba(255,71,87,0.08);
+      border: 1px solid var(--down);
+      border-radius: 8px;
+      color: var(--down);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.4px;
+      display: none;
+    }
+    .err.visible { display: block; }
+    a.back {
+      display: inline-block;
+      margin-top: 14px;
+      color: var(--muted);
+      text-decoration: none;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    a.back:hover { color: var(--neon-cyan); }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="brand"><span class="logo">▮</span><span>dailybrief</span></div>
+    <div class="tag">ADMIN LOGIN</div>
+
+    <form id="login-form" autocomplete="on">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required autofocus />
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+      <button class="primary" type="submit" id="submit-btn">SIGN IN</button>
+      <div class="err" id="err"></div>
+    </form>
+
+    <div class="hint">Default: admin / admin — change after first login.</div>
+    <a class="back" href="/">← back to feed</a>
+  </div>
+
+  <script>
+    const form = document.getElementById("login-form");
+    const submit = document.getElementById("submit-btn");
+    const errBox = document.getElementById("err");
+    const params = new URLSearchParams(location.search);
+    const next = params.get("next") || "/lab";
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errBox.classList.remove("visible");
+      submit.disabled = true;
+      submit.textContent = "SIGNING IN…";
+      try {
+        const r = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("username").value,
+            password: document.getElementById("password").value,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          errBox.textContent = d.detail || "login failed";
+          errBox.classList.add("visible");
+          submit.disabled = false;
+          submit.textContent = "SIGN IN";
+          return;
+        }
+        // Bounce to the requested next URL. /lab is admin-only;
+        // anonymous next= goes back to feed.
+        location.href = next;
+      } catch (err) {
+        errBox.textContent = err.message || "network error";
+        errBox.classList.add("visible");
+        submit.disabled = false;
+        submit.textContent = "SIGN IN";
+      }
+    });
+  </script>
+</body>
+</html>

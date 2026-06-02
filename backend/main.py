@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import cache, config, db, mixer, tickers
+from backend import auth, cache, config, db, mixer, tickers
 from backend.agent import (
     curator, dedup, illustrator, reader, registry, sorter, summary,
     translator, validator,
@@ -74,6 +74,10 @@ async def _start():
     except Exception as exc:
         print(f"[startup] db.init failed: {exc!r}", flush=True)
     try:
+        await auth.init()  # creates users/sessions tables + seeds admin/admin
+    except Exception as exc:
+        print(f"[startup] auth.init failed: {exc!r}", flush=True)
+    try:
         asyncio.create_task(_refresh_agent())
     except Exception as exc:
         print(f"[startup] refresh agent failed to schedule: {exc!r}", flush=True)
@@ -91,24 +95,103 @@ async def _start():
         print(f"[startup] resummary worker failed to schedule: {exc!r}", flush=True)
 
 
+# ── Bad-title detection ─────────────────────────────────────────────
+# trafilatura sometimes pulls a sidebar widget label as the page title
+# when the actual <title>/<h1> isn't where it expects. Common offenders:
+# "Editor's choice", "Latest News", "Top stories", "Most read", "More
+# from <outlet>", category-name-only labels, etc. When the extracted
+# title matches one of these, fall back to the RSS-supplied title.
+_BAD_TITLE_RE = re.compile(
+    r"^\s*(?:"
+    r"editor[''’]?s?\s+choice"
+    r"|editor[''’]?s?\s+pick(?:s)?"
+    r"|latest\s+news"
+    r"|breaking\s+news"
+    r"|top\s+stor(?:y|ies)"
+    r"|most\s+(?:read|popular|viewed)"
+    r"|more\s+from\b.*"
+    r"|recommended\s+(?:reads?|for\s+you)"
+    r"|trending(?:\s+now)?"
+    r"|featured(?:\s+stor(?:y|ies))?"
+    r"|popular\s+(?:now|today|stories)"
+    r"|today[''’]?s?\s+(?:pick|top)\w*"
+    r"|news(?:letter)?$"
+    r"|home\s*$"
+    r"|404\b.*"
+    r"|page\s+not\s+found"
+    r"|access\s+denied"
+    r"|sign\s+in\b.*"
+    r"|log\s+in\b.*"
+    # Korean common boilerplate labels
+    r"|편집자\s*추천"
+    r"|많이\s*본\s*뉴스"
+    r"|주요\s*뉴스"
+    r"|최신\s*뉴스"
+    r"|인기\s*기사"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_bad_title(title: str) -> bool:
+    """True if `title` looks like a generic page-furniture label rather
+    than a real article headline."""
+    if not title:
+        return True
+    t = title.strip()
+    if len(t) < 10:
+        return True
+    if _BAD_TITLE_RE.match(t):
+        return True
+    return False
+
+
+def _better_title(extracted: str, fallback: str) -> str:
+    """Choose the better headline. If trafilatura's extracted title is
+    generic boilerplate (sidebar widget label) but the RSS fallback is
+    real, use the fallback. Otherwise prefer the extracted one (which
+    is usually more canonical than the publisher's RSS title)."""
+    e = (extracted or "").strip()
+    f = (fallback or "").strip()
+    if not e and f:
+        return f
+    if e and _is_bad_title(e) and f and not _is_bad_title(f):
+        return f
+    return e or f
+
+
 # ── Resummary worker ────────────────────────────────────────────────
 # Walks every article whose stored summary is shorter than what the
 # extracted body would yield, and force-overwrites the summary with
 # the real body's first 2 paragraphs. User explicitly: no AI rewrites,
 # no publisher one-liners — the dek under each title must be the
 # actual article content, just like 서울신문 / 일간스포츠 already show.
-def _compose_dek_from_body(paras: list[str], title: str = "") -> str:
-    """Pick the strongest first ~700 chars of real prose out of an
-    article body. Skips title-as-paragraph + very short header lines
-    (subtitles, captions, single-word breaks) that publishers often
-    place ahead of the actual lede. Critical for English outlets where
-    the trafilatura output is `[title repeated, subtitle, real lede,
-    rest of article]` — the naive "first 2 paragraphs" picked up the
-    junk lines and ignored the actual story.
+def _dek_cap(lang: str | None) -> int:
+    """Per-language cap on the card dek length. Korean glyphs render
+    roughly 1.8× wider per character than Latin in Pretendard, so a
+    shorter character cap on Korean produces a visually-similar block
+    to a longer cap on English. Picked so a Korean dek and English dek
+    occupy comparable card heights — user complaint: 한글 기사가 한바가지,
+    영어 기사는 너무 짧다 → meet in the middle."""
+    return 240 if (lang or "en").lower().startswith("ko") else 440
+
+
+def _compose_dek_from_body(
+    paras: list[str], title: str = "", lang: str | None = None,
+) -> str:
+    """Pick the strongest first chunk of real prose out of an article
+    body, capped at a language-appropriate length so KO and EN cards
+    feel visually similar. Skips title-as-paragraph + very short header
+    lines (subtitles, captions) that publishers place ahead of the lede.
     """
+    cap = _dek_cap(lang)
     t = (title or "").strip().lower()
     picked: list[str] = []
     total = 0
+    # Korean publishers sometimes pack the whole lede into one dense
+    # paragraph — pulling 2 of those would blow well past the cap.
+    # English outlets need 1-2 paragraphs to reach a comparable dek.
+    max_paras = 1 if (lang or "en").lower().startswith("ko") else 2
     for raw in paras:
         s = (raw or "").strip()
         if not s:
@@ -127,9 +210,9 @@ def _compose_dek_from_body(paras: list[str], title: str = "") -> str:
             continue
         picked.append(s)
         total += len(s) + 1
-        if total >= 700 or len(picked) >= 2:
+        if total >= cap or len(picked) >= max_paras:
             break
-    return (" ".join(picked))[:700]
+    return (" ".join(picked))[:cap]
 
 
 async def _process_resummary_batch(limit: int) -> tuple[int, int]:
@@ -153,7 +236,8 @@ async def _process_resummary_batch(limit: int) -> tuple[int, int]:
             if not paras:
                 continue
             title = payload.get("title") or row.get("title") or ""
-            combined = _compose_dek_from_body(paras, title)
+            lang = row.get("lang") or payload.get("lang")
+            combined = _compose_dek_from_body(paras, title, lang)
             if not combined or len(combined) <= row.get("summary_len", 0):
                 continue
             await db.force_update_summary(url, combined)
@@ -270,7 +354,9 @@ async def _validate_one(article: dict) -> tuple[int, str]:
         # smart composer that skips title-as-paragraph + subtitle
         # stubs so EN cards match KR density.
         combined = _compose_dek_from_body(
-            body_payload.get("paragraphs") or [], article.get("title") or "",
+            body_payload.get("paragraphs") or [],
+            article.get("title") or "",
+            article.get("lang") or body_payload.get("lang"),
         )
         if combined:
             try:
@@ -363,26 +449,27 @@ async def api_translate(url: str, lang: str = "ko"):
 
 
 @app.post("/api/ingest/resummary")
-async def trigger_resummary(limit: int = 200):
+async def trigger_resummary(request: Request, limit: int = 200):
     """Force-rerun the dek rewriter on `limit` short-summary articles
     right now. Useful for clearing a freshly-noticed backlog without
-    waiting for the worker's pace. Returns counts."""
+    waiting for the worker's pace. Returns counts. Admin-only."""
+    await _require_admin(request)
     rewritten, total = await _process_resummary_batch(limit=max(1, min(limit, 500)))
     return {"rewritten": rewritten, "examined": total}
 
 
 @app.get("/api/usage")
-async def api_usage():
-    """LLM cost telemetry. Returns today / week / total token counts +
-    cost, plus a breakdown by provider and purpose. Lab Usage card
-    polls this every 4s alongside ingest status."""
+async def api_usage(request: Request):
+    """LLM cost telemetry. Admin-only — exposes ${} cost per provider."""
+    await _require_admin(request)
     return await db.api_usage()
 
 
 @app.get("/api/ingest/status")
-async def ingest_status():
+async def ingest_status(request: Request):
     """Live progress for the lab INGESTION MONITOR card. Cheap query —
-    safe to poll every few seconds."""
+    safe to poll every few seconds. Admin-only."""
+    await _require_admin(request)
     stats = await db.validation_stats()
     total = stats["pending"] + stats["validated"] + stats["failed"]
     done = stats["validated"] + stats["failed"]
@@ -396,11 +483,14 @@ async def ingest_status():
 
 
 @app.get("/api/storage")
-async def api_storage():
+async def api_storage(request: Request):
     """Disk + memory snapshot for the lab dashboard. Uses only stdlib
-    so this works on the minimal Lightsail Python."""
+    so this works on the minimal Lightsail Python. Admin-only."""
+    await _require_admin(request)
     import os as _os
+    import platform as _platform
     import resource as _resource
+    import socket as _socket
     db_path = db.DB_PATH
     db_bytes = db_path.stat().st_size if db_path.exists() else 0
     # Disk space (Unix). Falls back to 0/0 on weird filesystems.
@@ -420,11 +510,47 @@ async def api_storage():
         rss_bytes = rss_kb if rss_kb > 4 * 1024 * 1024 else rss_kb * 1024
     except Exception:
         rss_bytes = 0
+    # Mountpoint walk — climb up from the DB file until os.path.ismount
+    # returns true. Tells the operator whether the DB sits on the root
+    # volume or a separate data mount (matters on Lightsail).
+    mountpoint = "/"
+    try:
+        p = db_path.parent.resolve()
+        for _ in range(20):
+            if _os.path.ismount(str(p)):
+                mountpoint = str(p)
+                break
+            if str(p) in ("/", "//"):
+                break
+            p = p.parent
+    except Exception:
+        pass
+    # Filesystem type — only available on Linux via /proc/mounts. macOS
+    # falls back to a "n/a" string so the lab UI just hides the row.
+    fs_type = "n/a"
+    try:
+        with open("/proc/mounts", "r") as f:
+            best_match_len = -1
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3 and mountpoint.startswith(parts[1]):
+                    if len(parts[1]) > best_match_len:
+                        best_match_len = len(parts[1])
+                        fs_type = parts[2]
+    except Exception:
+        pass
     # Cache footprint (number of keys + rough byte size).
     cache_keys = len(cache._store)
     last_prune = await db.get_setting("last_prune", None)
     return {
         "db_bytes": db_bytes,
+        "db_path": str(db_path),
+        "data_dir": str(db_path.parent),
+        "mountpoint": mountpoint,
+        "fs_type": fs_type,
+        "hostname": _socket.gethostname(),
+        "platform": _platform.platform(),
+        "pid": _os.getpid(),
         "disk_free": disk_free,
         "disk_total": disk_total,
         "disk_used_pct": (
@@ -438,12 +564,105 @@ async def api_storage():
 
 
 @app.post("/api/storage/prune")
-async def storage_prune_now():
+async def storage_prune_now(request: Request):
     """Manual prune trigger — useful from the lab when the user
-    wants to reclaim space without waiting for the daily cycle."""
+    wants to reclaim space without waiting for the daily cycle.
+    Admin-only."""
+    await _require_admin(request)
     result = await db.prune_once()
     await db.set_setting("last_prune", result)
     return result
+
+
+# ── Auth endpoints + admin gate ───────────────────────────────────
+# Default credentials: admin / admin (seeded on first boot). Change
+# the password right after first login via POST /api/auth/change-password.
+async def _require_admin(request: Request) -> dict:
+    """Raise 401 if the request isn't from a logged-in admin. Used by
+    every /api/lab/* route + the /lab HTML page itself."""
+    user = await auth.current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="login required")
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="admin only")
+    return user
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: dict, response: Response):
+    """Username + password → sets the db_session cookie. Returns the
+    user payload (sans hash) so the front-end can flip into admin UI
+    right away without a follow-up /whoami round-trip."""
+    username = (body or {}).get("username") or ""
+    password = (body or {}).get("password") or ""
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username + password required")
+    record = await asyncio.to_thread(auth._get_user_by_username_sync, username)
+    if not record:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if not auth._verify_password(password, record["password_hash"]):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    token = await auth.create_session(record["id"])
+    auth.set_session_cookie(response, token)
+    return {
+        "ok": True,
+        "user": {
+            "username": record["username"],
+            "is_admin": bool(record["is_admin"]),
+            "subscription": bool(record["subscription"]),
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get(auth.COOKIE_NAME)
+    if token:
+        await auth.delete_session(token)
+    auth.clear_session_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/whoami")
+async def auth_whoami(request: Request):
+    user = await auth.current_user(request)
+    if not user:
+        return {"user": None}
+    return {
+        "user": {
+            "username": user["username"],
+            "is_admin": bool(user.get("is_admin")),
+            "subscription": bool(user.get("subscription")),
+        },
+    }
+
+
+@app.post("/api/auth/change-password")
+async def auth_change_password(body: dict, request: Request):
+    """Logged-in user changes their own password. Requires the old
+    password as a confirmation step (so a stolen cookie can't lock
+    the real owner out)."""
+    user = await auth.current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="login required")
+    old_pw = (body or {}).get("old_password") or ""
+    new_pw = (body or {}).get("new_password") or ""
+    if len(new_pw) < 4:
+        raise HTTPException(status_code=400, detail="new password too short")
+    rec = await asyncio.to_thread(auth._get_user_by_username_sync, user["username"])
+    if not rec or not auth._verify_password(old_pw, rec["password_hash"]):
+        raise HTTPException(status_code=401, detail="old password incorrect")
+    new_hash = auth._hash_password(new_pw)
+    def _go():
+        from backend.db import _conn as _c
+        from contextlib import closing as _cl
+        with _cl(_c()) as c:
+            c.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (new_hash, rec["id"]),
+            )
+    await asyncio.to_thread(_go)
+    return {"ok": True}
 
 
 @app.get("/api/health")
@@ -452,6 +671,84 @@ async def health():
     uptime checks can poke this without triggering the expensive
     /api/brief path."""
     return {"ok": True}
+
+
+@app.post("/api/admin/rebuild")
+async def admin_rebuild(request: Request, purge_now: int = 0):
+    await _require_admin(request)
+    """One-shot admin maintenance:
+      1. Drop reader_results entries whose stored title is generic
+         boilerplate (Editor's choice, Latest News, etc.) — forces a
+         fresh trafilatura pass that has a chance to pick the real
+         headline via the RSS-title fallback.
+      2. Reset every article back to validated=0 so the validation
+         worker re-runs the newest heuristics across the full archive.
+      3. If `purge_now=1`, immediately delete any article + reader row
+         already marked validated=-1. (You can also wait for the worker
+         to chew through the queue and call this endpoint again later.)
+    Returns counts so the caller can confirm the work landed."""
+    needles = [
+        "editor's choice", "editor’s choice", "editors choice",
+        "editor's pick", "editor’s pick", "editors pick",
+        "latest news", "breaking news", "top stories",
+        "most read", "most popular", "trending",
+        "page not found", "404",
+        "편집자 추천", "많이 본 뉴스", "주요 뉴스", "최신 뉴스", "인기 기사",
+    ]
+    cleared_readers = await db.purge_bad_title_readers(needles)
+    reset_rows = await db.reset_validation()
+    # Also drop the in-memory caches so the next /api/brief regenerates.
+    cache.clear()
+    purged = 0
+    if int(purge_now or 0):
+        purged = await db.purge_failed_articles()
+    return {
+        "cleared_bad_title_readers": cleared_readers,
+        "reset_to_pending": reset_rows,
+        "purged_failed_articles": purged,
+    }
+
+
+@app.post("/api/article/delete")
+async def delete_article_by_user(body: dict):
+    """User-driven article removal. Body: {url, reason, note?}.
+
+    The article row + cached reader body are deleted permanently, and
+    the URL is added to `blocked_urls` so the RSS fetcher can never
+    bring the same story back via a future poll. `reason` is one of
+    the short slugs from the front-end picker (quality / irrelevant /
+    incomplete / broken / duplicate / misleading / other); `note` is
+    optional free-text the user typed.
+    """
+    url = (body or {}).get("url") or ""
+    reason = (body or {}).get("reason") or "other"
+    note = (body or {}).get("note") or ""
+    if not url.startswith(("http://", "https://")):
+        return {"error": "invalid url"}
+    valid_reasons = {
+        "quality", "irrelevant", "incomplete", "broken",
+        "duplicate", "misleading", "other",
+    }
+    if reason not in valid_reasons:
+        reason = "other"
+    result = await db.delete_article_by_user(url, reason, note or None)
+    # Drop in-memory caches so the next /api/brief reflects the removal
+    # without waiting for the 2-minute TTL.
+    cache.clear()
+    await db.bump_counter(f"user_delete_{reason}")
+    return {"ok": True, **result}
+
+
+@app.post("/api/admin/purge-failed")
+async def admin_purge_failed(request: Request):
+    """Drop every article currently marked validated=-1 along with
+    its cached reader body. Call this after the validation worker has
+    re-chewed the archive — anything still failing then is permanently
+    unrecoverable and should not stay in the DB. Admin-only."""
+    await _require_admin(request)
+    purged = await db.purge_failed_articles()
+    cache.clear()
+    return {"purged": purged}
 
 
 @app.get("/api/brief")
@@ -470,6 +767,17 @@ async def brief():
         youtube.fetch(),
         prices.fetch_tape(),
     )
+
+    # Drop anything the user has explicitly removed via the ×-on-card
+    # flow. blocked_urls is consulted once per /api/brief — cheap query
+    # (PK lookup, table is tiny) and ensures the deletion is visible
+    # right away even if the in-memory `rss:all` cache still has the URL.
+    try:
+        blocked = await db.blocked_url_set()
+        if blocked:
+            articles = [a for a in articles if a.url not in blocked]
+    except Exception as exc:
+        print(f"[brief] blocked-url lookup failed: {exc!r}", flush=True)
 
     # ── Stage A: persist EVERY fetched article first. ───────────────
     # Before this fix the curator picked top 250 and only those got
@@ -649,7 +957,10 @@ async def brief():
 
 
 @app.post("/api/refresh")
-async def refresh():
+async def refresh(request: Request):
+    """Admin-only — drop every in-memory cache key so the next /api/brief
+    pulls a fresh RSS sweep + re-runs the curator."""
+    await _require_admin(request)
     cache.clear()
     return {"status": "ok"}
 
@@ -769,12 +1080,12 @@ def _looks_like_related_link(line: str) -> bool:
     return False
 
 
-# Adaptive ceiling on what the reader modal shows. Short articles render
-# every paragraph; long ones get clipped where the reader almost certainly
-# stops scrolling. Picked from feel — covers ~95% of real articles without
-# truncation, keeps the modal from becoming a wall of text.
-_PARA_CHAR_BUDGET = 3500   # ≈ 700-800 words of body
-_PARA_HARD_MAX = 14        # never more than this many paragraphs
+# Safety cap on what the reader modal shows. User explicitly asked for
+# the FULL article body — no mid-article cutoff. These ceilings now sit
+# well above any real article and only guard against trafilatura
+# pathological output (runaway loops over hundreds of empty <p> tags).
+_PARA_CHAR_BUDGET = 60_000   # ≈ 12k words — longer than any feature
+_PARA_HARD_MAX = 200         # essentially unbounded for real articles
 
 
 def _scrub_html_artifacts(line: str) -> str:
@@ -916,11 +1227,20 @@ async def article(url: str):
     if not url.startswith(("http://", "https://")):
         return {"error": "invalid url"}
 
+    # Look up the article row up-front so the RSS-supplied headline is
+    # available as a fallback for any path that lands on a generic
+    # trafilatura title like "Editor's choice".
+    article_row = await db.get_article(url) if hasattr(db, "get_article") else None
+    fallback_title = (article_row or {}).get("title") if article_row else None
+
     full_key = f"article_reader:{url}"
     cached = cache.get(full_key)
     if cached is not None:
         await db.bump_counter("reader_cache_hits_mem")
-        return _scrub_cached_paragraphs(cached)
+        cached = _scrub_cached_paragraphs(cached)
+        if fallback_title and _is_bad_title(cached.get("title") or ""):
+            cached = {**cached, "title": fallback_title}
+        return cached
 
     # SQLite second-level cache — survives restart. Keeps trafilatura
     # work that's already been paid for.
@@ -930,6 +1250,8 @@ async def article(url: str):
         # paragraphs from before a filter improvement get cleaned up on
         # the fly without forcing a re-extract.
         saved = _scrub_cached_paragraphs(saved)
+        if fallback_title and _is_bad_title(saved.get("title") or ""):
+            saved = {**saved, "title": fallback_title}
         cache.set(full_key, saved, 86400)
         await db.bump_counter("reader_cache_hits_disk")
         return saved
@@ -942,7 +1264,8 @@ async def article(url: str):
     # of emojis / section headers / photo credits / mojibake. Cheaper,
     # faster, and the user explicitly asked for the original article
     # ("괜히 에이아이로 돌리지말고 그냥 바로 기사 보여줘").
-    clean_title = html.unescape(reading.title or "")
+    raw_title = html.unescape(reading.title or "")
+    clean_title = _better_title(raw_title, fallback_title or "")
     paragraphs = _dedup_with_title(_split_paragraphs(reading.text), clean_title)
     result = {
         "url": url,
@@ -962,7 +1285,9 @@ async def article(url: str):
     # + subtitle stubs so EN cards get real body text, not header noise.
     try:
         combined = _compose_dek_from_body(
-            result.get("paragraphs") or [], result.get("title") or "",
+            result.get("paragraphs") or [],
+            result.get("title") or "",
+            result.get("lang"),
         )
         if combined and len(combined) >= 80:
             await db.update_article_summary(url, combined)
@@ -983,9 +1308,10 @@ async def article(url: str):
 
 # ── /api/lab — dashboard data ────────────────────────────────────────
 @app.get("/api/lab")
-async def lab_overview():
+async def lab_overview(request: Request):
     """Snapshot for the /lab dashboard: cache footprint, config, DB
-    counters, outlet roster. Polled every few seconds."""
+    counters, outlet roster. Polled every few seconds. Admin-only."""
+    await _require_admin(request)
     store = cache._store
     by_prefix: dict[str, int] = {}
     for k in store.keys():
@@ -1013,12 +1339,14 @@ async def lab_overview():
 
 
 @app.get("/api/lab/agent-runs")
-async def lab_agent_runs(limit: int = 50):
+async def lab_agent_runs(request: Request, limit: int = 50):
+    await _require_admin(request)
     return {"runs": await db.recent_agent_runs(limit=min(max(limit, 1), 200))}
 
 
 @app.get("/api/lab/settings")
-async def lab_settings_get():
+async def lab_settings_get(request: Request):
+    await _require_admin(request)
     return {
         "agent_interval_seconds": await db.get_setting(
             "agent_interval_seconds", AGENT_INTERVAL_SECONDS
@@ -1028,7 +1356,8 @@ async def lab_settings_get():
 
 
 @app.post("/api/lab/settings")
-async def lab_settings_set(body: dict):
+async def lab_settings_set(body: dict, request: Request):
+    await _require_admin(request)
     """Persist user-tunable knobs. The refresh agent reads these on
     each tick so changes apply within one cycle."""
     out: dict = {}
@@ -1046,8 +1375,9 @@ async def lab_settings_set(body: dict):
 
 
 @app.get("/api/lab/agents")
-async def lab_agents():
-    """Agent + workflow metadata for the lab dashboard."""
+async def lab_agents(request: Request):
+    """Agent + workflow metadata for the lab dashboard. Admin-only."""
+    await _require_admin(request)
     return {
         "agents": registry.agents_list(),
         "workflows": registry.workflow_list(),
@@ -1056,8 +1386,22 @@ async def lab_agents():
 
 
 @app.get("/lab")
-async def lab_page():
-    return FileResponse(FRONTEND_DIR / "lab.html")
+async def lab_page(request: Request):
+    """Lab HTML page — admin-only. Anonymous / non-admin visitors are
+    bounced to /login (which renders the login form on top of the lab
+    panel skeleton). We do NOT 401 here because that would render a
+    raw browser error; instead we redirect, much nicer UX."""
+    user = await auth.current_user(request)
+    if not user or not user.get("is_admin"):
+        return RedirectResponse(url="/login?next=/lab", status_code=302)
+    return FileResponse(FRONTEND_DIR / "lab.html", headers=_NO_STORE_HEADERS)
+
+
+@app.get("/login")
+async def login_page():
+    """Tiny login page. Standalone HTML so we don't have to inline a
+    form into the main feed UI."""
+    return FileResponse(FRONTEND_DIR / "login.html", headers=_NO_STORE_HEADERS)
 
 
 @app.get("/api/page")
@@ -1181,6 +1525,18 @@ async def user_prefs_set(body: dict):
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
+# Anti-stale-bundle headers on the entry HTML. Without these the browser
+# happily serves index.html from cache, which means the user keeps loading
+# old `app.js?v=49` even after we ship `?v=51` — and the translate-button
+# fix never lands. Static assets under /static keep their long-lived
+# default caching since the `?v=` query string changes per release.
+_NO_STORE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 @app.get("/")
 async def index():
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_STORE_HEADERS)

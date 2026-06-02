@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=45">
-  <link rel="stylesheet" href="/static/lab.css?v=47">
+  <link rel="stylesheet" href="/static/style.css?v=49">
+  <link rel="stylesheet" href="/static/lab.css?v=48">
 </head>
 <body class="lab">
   <header class="lab-mast">
@@ -186,12 +186,67 @@
         <div class="kpi"><span class="kpi-label">PROCESS MEMORY</span>     <span class="kpi-v" id="kpi-rss">—</span></div>
         <div class="kpi"><span class="kpi-label">CACHE KEYS LIVE</span>    <span class="kpi-v" id="kpi-cache2">—</span></div>
       </div>
+
+      <!-- Where on the filesystem the DB and data actually live, plus
+           which mount, plus full process pid. The user explicitly
+           asked: "where is the storage located". -->
+      <div class="storage-paths" id="storage-paths">
+        <div class="sp-row"><span class="sp-key">DB FILE</span>      <code class="sp-val" id="sp-db-path">—</code></div>
+        <div class="sp-row"><span class="sp-key">DATA DIR</span>     <code class="sp-val" id="sp-data-dir">—</code></div>
+        <div class="sp-row"><span class="sp-key">MOUNTPOINT</span>   <code class="sp-val" id="sp-mount">—</code></div>
+        <div class="sp-row"><span class="sp-key">FILESYSTEM</span>   <code class="sp-val" id="sp-fs">—</code></div>
+        <div class="sp-row"><span class="sp-key">HOST</span>         <code class="sp-val" id="sp-host">—</code></div>
+        <div class="sp-row"><span class="sp-key">PID</span>          <code class="sp-val" id="sp-pid">—</code></div>
+      </div>
+
       <div class="settings-row">
         <div class="settings-label">DAILY PRUNE</div>
         <span class="hint" id="prune-summary">—</span>
-        <button id="prune-now" class="btn">PRUNE NOW</button>
+        <details class="prune-explain">
+          <summary>what does prune do?</summary>
+          <ul>
+            <li>Deletes every article older than <b>60 days</b> from <code>articles</code> + its cached body in <code>reader_results</code>.</li>
+            <li>Caps the <code>reader_results</code> table at <b>6,000 most-recently-used rows</b> — older bodies fall off.</li>
+            <li>Runs <code>VACUUM</code> on the SQLite file so the freed pages actually return to the filesystem (otherwise the file just keeps growing).</li>
+            <li>Runs automatically once every 24 hours. Manual button below if you want to reclaim space right now.</li>
+          </ul>
+        </details>
+        <div class="prune-row">
+          <button id="prune-now" class="btn">PRUNE NOW</button>
+          <span class="prune-result" id="prune-result"></span>
+        </div>
       </div>
+
       <div id="storage-alert" class="storage-alert" hidden></div>
+    </section>
+
+    <!-- ACTIONS · admin-only maintenance buttons -->
+    <section class="card span-2">
+      <div class="card-head">ACTIONS · MAINTENANCE</div>
+      <p class="hint">
+        Each button runs a single admin task right now. Safe to click —
+        they only touch caches and validation flags, never your
+        un-removed articles. Watch the toast at the bottom for results.
+      </p>
+      <div class="action-grid">
+        <button class="action-btn" id="act-refresh">
+          <span class="ab-title">FORCE REFRESH</span>
+          <span class="ab-desc">Clear the in-memory feed/article cache so the next /api/brief pulls fresh RSS and re-runs the curator.</span>
+        </button>
+        <button class="action-btn" id="act-rebuild">
+          <span class="ab-title">REBUILD VALIDATIONS</span>
+          <span class="ab-desc">Reset every article back to <code>validated = 0</code> so the validator agent re-chews the archive with the latest heuristics.</span>
+        </button>
+        <button class="action-btn" id="act-resummary">
+          <span class="ab-title">RE-SUMMARIZE</span>
+          <span class="ab-desc">Walk the last 500 articles with stored bodies and rewrite their card deks from the extracted prose (lang-aware length cap).</span>
+        </button>
+        <button class="action-btn act-danger" id="act-purge">
+          <span class="ab-title">PURGE FAILED</span>
+          <span class="ab-desc">Permanently drop every article currently marked <code>validated = -1</code> along with its cached body. <b>Cannot be undone.</b></span>
+        </button>
+      </div>
+      <div class="action-result" id="action-result"></div>
     </section>
 
     <!-- WORKFLOW PICKER -->
@@ -243,6 +298,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=47"></script>
+  <script src="/static/lab.js?v=48"></script>
 </body>
 </html>

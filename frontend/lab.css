@@ -658,6 +658,163 @@ body.lab {
   font-weight: 700;
 }
 
+/* Storage path block — DB path, mountpoint, hostname, pid. Mono so
+   paths line up; word-break so a deep nested path doesn't blow the
+   card width on phones. */
+.storage-paths {
+  margin: 12px 0 6px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.sp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  min-height: 16px;
+}
+.sp-key {
+  flex: 0 0 90px;
+  color: var(--muted);
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.sp-val {
+  flex: 1;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  word-break: break-all;
+  background: transparent;
+  padding: 0;
+}
+
+/* "What does prune do?" disclosure under the storage card. */
+.prune-explain {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.prune-explain > summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--muted);
+  text-transform: uppercase;
+  list-style: none;
+}
+.prune-explain > summary::before {
+  content: "▸ ";
+  color: var(--neon-yellow, #ffd400);
+}
+.prune-explain[open] > summary::before { content: "▾ "; }
+.prune-explain ul {
+  margin: 8px 0 2px 0;
+  padding-left: 18px;
+}
+.prune-explain li { margin-bottom: 5px; line-height: 1.45; }
+.prune-explain code {
+  background: rgba(0,225,255,0.10);
+  color: var(--neon-cyan);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.prune-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.prune-result {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.prune-result.ok  { color: var(--up, #4ade80); }
+.prune-result.err { color: var(--down); }
+
+/* ── Maintenance action buttons ─────────────────────────────────── */
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 8px;
+}
+@media (max-width: 720px) { .action-grid { grid-template-columns: 1fr; } }
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--sans);
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
+}
+.action-btn:hover {
+  border-color: var(--neon-cyan);
+  background: rgba(0,225,255,0.05);
+  box-shadow: 0 0 14px rgba(0,225,255,0.18);
+}
+.action-btn .ab-title {
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 11.5px;
+  letter-spacing: 1.2px;
+  color: var(--neon-cyan);
+}
+.action-btn .ab-desc {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.action-btn .ab-desc code {
+  background: rgba(255,255,255,0.06);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10.5px;
+}
+.action-btn.act-danger { border-color: rgba(255,71,87,0.45); }
+.action-btn.act-danger .ab-title { color: var(--down); }
+.action-btn.act-danger:hover {
+  border-color: var(--down);
+  background: rgba(255,71,87,0.07);
+  box-shadow: 0 0 14px rgba(255,71,87,0.30);
+}
+.action-result {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  min-height: 16px;
+  color: var(--muted);
+  word-break: break-word;
+}
+.action-result.ok    { color: var(--up, #4ade80); }
+.action-result.err   { color: var(--down); }
+.action-result.busy  { color: var(--neon-cyan); }
+
 /* Storage alert (RAM / disk warning). Hidden by default. */
 .storage-alert {
   margin-top: 12px;

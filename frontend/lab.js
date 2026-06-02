@@ -212,6 +212,18 @@ function paintStorage(d) {
   set("kpi-rss",       fmtBytes(d.rss_bytes));
   set("kpi-cache2",    fmt(d.cache_keys || 0));
 
+  // Storage paths block — surfaces WHERE the data actually lives so
+  // the operator can pop a shell open at the right path without
+  // hunting through config.
+  set("sp-db-path",  d.db_path     || "—");
+  set("sp-data-dir", d.data_dir    || "—");
+  set("sp-mount",    d.mountpoint  || "—");
+  set("sp-fs",       d.fs_type && d.fs_type !== "n/a"
+                       ? d.fs_type
+                       : (d.platform || "—"));
+  set("sp-host",     d.hostname    || "—");
+  set("sp-pid",      d.pid != null ? String(d.pid) : "—");
+
   // Last prune summary line
   const pruneEl = document.getElementById("prune-summary");
   if (pruneEl) {
@@ -382,14 +394,63 @@ function paintRuns(runs) {
 // then tick() refreshes the storage card so the user sees the result.
 document.getElementById("prune-now")?.addEventListener("click", async (e) => {
   const btn = e.currentTarget;
+  const res = document.getElementById("prune-result");
   btn.disabled = true;
   btn.textContent = "PRUNING…";
+  if (res) { res.textContent = ""; res.classList.remove("err", "ok"); }
   try {
-    await fetch("/api/storage/prune", { method: "POST" });
+    const r = await fetch("/api/storage/prune", { method: "POST" });
+    const d = await r.json();
+    if (res) {
+      const removed = (d.removed_articles || 0) + (d.removed_reader || 0);
+      const mb = (d.db_bytes_after || 0) / 1e6;
+      res.textContent = `removed ${removed} rows · db now ${mb.toFixed(1)} MB`;
+      res.classList.add("ok");
+    }
     await tick();
-  } catch {}
+  } catch (err) {
+    if (res) { res.textContent = `failed: ${err.message}`; res.classList.add("err"); }
+  }
   btn.disabled = false;
   btn.textContent = "PRUNE NOW";
+});
+
+// ── Action buttons (force refresh, rebuild, resummary, purge failed)
+function setActionResult(text, kind = "ok") {
+  const r = document.getElementById("action-result");
+  if (!r) return;
+  r.textContent = text;
+  r.classList.remove("ok", "err", "busy");
+  r.classList.add(kind);
+}
+async function runAction(label, url, opts) {
+  setActionResult(`${label}…`, "busy");
+  try {
+    const r = await fetch(url, opts);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      setActionResult(d.detail || `${label} failed (HTTP ${r.status})`, "err");
+      return;
+    }
+    setActionResult(`${label} ok: ${JSON.stringify(d)}`, "ok");
+    await tick();
+  } catch (err) {
+    setActionResult(`${label} failed: ${err.message}`, "err");
+  }
+}
+document.getElementById("act-refresh")?.addEventListener("click", () =>
+  runAction("FORCE REFRESH", "/api/refresh", { method: "POST" })
+);
+document.getElementById("act-rebuild")?.addEventListener("click", () => {
+  if (!confirm("Reset every article to unvalidated and re-run the validator? Safe — does not delete anything.")) return;
+  runAction("REBUILD VALIDATIONS", "/api/admin/rebuild?purge_now=0", { method: "POST" });
+});
+document.getElementById("act-resummary")?.addEventListener("click", () =>
+  runAction("RE-SUMMARIZE 500", "/api/ingest/resummary?limit=500", { method: "POST" })
+);
+document.getElementById("act-purge")?.addEventListener("click", () => {
+  if (!confirm("Permanently DELETE every article currently failing validation? This cannot be undone.")) return;
+  runAction("PURGE FAILED", "/api/admin/purge-failed", { method: "POST" });
 });
 
 $("#interval-save").addEventListener("click", async () => {

@@ -253,13 +253,9 @@ function renderVideosStrip(items) {
 
 // ── News card body ─────────────────────────────────────────────
 function newsBody(item, opts = {}) {
-  // When the card is in its "translated view" we swap title + dek for
-  // the saved Korean versions and re-tag the meta line as KO so
-  // Pretendard kicks in for the headline.
-  const koView = !!opts.koView && !!item.title_ko;
-  const lang = koView ? "ko" : (item.lang || "en");
-  const titleText = koView && item.title_ko ? item.title_ko : (item.title || "");
-  const dekText   = koView && item.dek_ko   ? item.dek_ko   : (item.dek || "");
+  const lang = item.lang || "en";
+  const titleText = item.title || "";
+  const dekText = item.dek || "";
   const meta = el("div", { class: "meta" }, [
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
@@ -293,75 +289,11 @@ function newsBody(item, opts = {}) {
   return { meta, head, dek, why, sparkRow };
 }
 
-// Set of article URLs currently rendered in their Korean-translated
-// view. Survives only the browser tab; persisted to localStorage so
-// pagination + chip clicks keep the toggle state.
-const CARD_KO_KEY = "dailybrief.cardKo.v1";
-let CARD_KO_URLS = new Set();
-try {
-  const raw = localStorage.getItem(CARD_KO_KEY);
-  if (raw) CARD_KO_URLS = new Set(JSON.parse(raw));
-} catch {}
-function _persistCardKo() {
-  try { localStorage.setItem(CARD_KO_KEY, JSON.stringify([...CARD_KO_URLS])); } catch {}
-}
-
-// Mark a single item in every in-memory list (wire payload + DB-served
-// page override) as freshly translated. Used right after a successful
-// reader-modal /api/translate response so the main-feed card gains
-// the ✦한 badge + neon border without waiting for the next refresh.
-function markItemTranslated(url, td) {
-  if (!url || !td) return;
-  const dek = (td.paragraphs && td.paragraphs[0]) || "";
-  const title_ko = td.title || "";
-  const translated_at = Math.floor(Date.now() / 1000);
-  const apply = (list) => {
-    if (!Array.isArray(list)) return;
-    for (const m of list) {
-      if (m && m.url === url) {
-        m.title_ko = title_ko;
-        m.dek_ko = dek.slice(0, 280);
-        m.translated_at = translated_at;
-      }
-    }
-  };
-  apply(STATE.mixed);
-  apply(PAGE_OVERRIDE);
-}
-
-// Surgical re-render: swap a single .art element in place, preserving
-// its scroll position + leaving every other card untouched. Replaces
-// the old "paint(false) → rebuild everything" path that flashed the
-// whole page when toggling one card's translation.
-function rerenderCard(url) {
-  if (!url) return false;
-  const oldNode = [...document.querySelectorAll(".art")]
-    .find((n) => n.getAttribute("data-url") === url);
-  if (!oldNode) return false;
-  const item =
-    (STATE.mixed || []).find((m) => m.url === url) ||
-    (PAGE_OVERRIDE || []).find((m) => m.url === url);
-  if (!item) return false;
-  // Preserve whatever tier the card is currently in.
-  const tierMatch = oldNode.className.match(/\btier-(\w+)\b/);
-  const tier = tierMatch ? tierMatch[1] : "small";
-  const fresh = renderNewsCard(item, tier);
-  // Suppress the fade-in animation on a re-render — fade is meant
-  // for first paint, not for in-place edits.
-  fresh.classList.add("no-fade");
-  oldNode.replaceWith(fresh);
-  return true;
-}
-
 function renderNewsCard(item, tier) {
-  const inKo = !!item.title_ko && CARD_KO_URLS.has(item.url);
-  const parts = newsBody(item, { koView: inKo });
+  const parts = newsBody(item);
   const cat = item.category || "world";
-  const klass = [`art`, `tier-${tier}`, `cat-${cat}`];
-  if (item.title_ko) klass.push("has-ko");
-  if (inKo) klass.push("ko-on");
   const node = el("a", {
-    class: klass.join(" "),
+    class: `art tier-${tier} cat-${cat}`,
     href: item.url || "#",
     target: "_blank",
     rel: "noopener",
@@ -370,27 +302,22 @@ function renderNewsCard(item, tier) {
 
   const wantsImage = ["hero", "feature", "large", "medium", "small"].includes(tier);
   const imgUrl = wantsImage ? pickImage(item) : null;
-  // ✦한 / ✦EN badge floats over the image. Only rendered if a
-  // translation exists for this URL.
-  let koBadge = null;
-  if (item.title_ko) {
-    koBadge = el("button", {
-      class: "ko-badge",
-      type: "button",
-      "data-ko-toggle": "1",
-      title: "AI 번역 보기 / 원문 보기",
-      "aria-label": "translate toggle",
-    }, [
-      el("span", { class: "ko-spark", "aria-hidden": "true" }, "✦"),
-      el("span", { class: "ko-text", lang: "ko" }, inKo ? "원문" : "한"),
-    ]);
-  }
+
+  // × delete button — present on every card. Click stops propagation
+  // so it doesn't open the reader; it opens the reason picker instead.
+  const delBtn = el("button", {
+    class: "card-delete",
+    type: "button",
+    "data-delete": "1",
+    title: "remove this article",
+    "aria-label": "remove article",
+  }, "×");
 
   if (imgUrl) {
     const imgWrap = el("div", { class: "img-wrap" });
     const imgEl = el("div", { class: "img", style: `background-image:url('${imgUrl}')` });
     imgWrap.appendChild(imgEl);
-    if (koBadge) imgWrap.appendChild(koBadge);
+    imgWrap.appendChild(delBtn);
     if (tier === "hero") {
       node.appendChild(imgWrap);
       node.appendChild(el("div", { class: "body" }, [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow]));
@@ -400,11 +327,9 @@ function renderNewsCard(item, tier) {
     }
   } else {
     [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
-    // No image? Put the badge inline with the meta line.
-    if (koBadge) {
-      koBadge.classList.add("ko-badge-inline");
-      parts.meta.appendChild(koBadge);
-    }
+    // No image? Pin the × delete to the card's top-right corner via CSS.
+    delBtn.classList.add("card-delete-inline");
+    node.appendChild(delBtn);
   }
   return node;
 }
@@ -447,12 +372,38 @@ let PENDING_REFRESH = false;  // set true when silentRefresh is deferred
 const PAGE_SIZE = 31;
 const AUTO_REFRESH_MS = 2 * 60 * 1000;  // 2 minutes — near-real-time
 
+// User-tunable interests — categories the user wants boosted in the
+// "all" view. Stored as a Set in localStorage. When non-empty, items
+// in those categories sort to the top of the all-feed; the per-item
+// curator score still determines order WITHIN each bucket.
+const INTERESTS_KEY = "dailybrief.interests.v1";
+let INTERESTS = new Set();
+try {
+  const raw = localStorage.getItem(INTERESTS_KEY);
+  if (raw) INTERESTS = new Set(JSON.parse(raw));
+} catch {}
+function _persistInterests() {
+  try { localStorage.setItem(INTERESTS_KEY, JSON.stringify([...INTERESTS])); } catch {}
+}
+
 function filteredNews() {
-  return STATE.mixed.filter((it) => {
+  const items = STATE.mixed.filter((it) => {
     if (it.kind !== "news") return false;
     if (CAT !== "all" && it.category !== CAT) return false;
     return true;
   });
+  // No interests configured, or a specific category is selected → leave
+  // the curator's ordering alone.
+  if (CAT !== "all" || INTERESTS.size === 0) return items;
+  // Stable two-bucket sort: interested categories first (preserving
+  // curator score within), everyone else after.
+  const liked = [];
+  const rest = [];
+  for (const it of items) {
+    if (INTERESTS.has(it.category)) liked.push(it);
+    else rest.push(it);
+  }
+  return [...liked, ...rest];
 }
 
 // Lazy DB-backed pagination: page 1 comes from the in-memory feed
@@ -548,26 +499,60 @@ function renderPager(totalPages) {
     await fetchPage(PAGE);
     paint();
   };
-  // Minimal pager — was a 104-button avalanche. Now: « PREV |
-  // page N of T | NEXT ». Scroll-back via PREV, forward via NEXT,
-  // and a current-page indicator in the middle. The clickable current
-  // chip lets the user jump straight back to page 1 from anywhere
-  // by tapping it (acts as "home" on long sessions).
+  // Page numbers are shown in WINDOWS of 5. Current page anchors the
+  // window — windowStart = floor((PAGE - 1) / 5) * 5 + 1. PREV / NEXT
+  // step ONE page at a time (so the window slides naturally as the
+  // user clicks). The 5 numeric buttons let the user jump within the
+  // current window directly. « FIRST and LAST » bookends give quick
+  // access to the archive boundaries.
+  const WINDOW = 5;
+  const windowStart = Math.floor((PAGE - 1) / WINDOW) * WINDOW + 1;
+  const windowEnd = Math.min(windowStart + WINDOW - 1, totalPages);
+
+  // « FIRST — only show when we're past the first window.
+  if (windowStart > 1) {
+    const first = el("button", { type: "button", class: "pg-arrow", title: "first page" }, "« 1");
+    first.onclick = () => go(1);
+    p.appendChild(first);
+  }
+
+  // ‹ PREV — step back one page (window slides automatically when
+  // PAGE drops below windowStart).
   const prev = el("button", { type: "button", class: "pg-arrow" }, "‹ PREV");
   prev.disabled = PAGE === 1;
   prev.onclick = () => go(PAGE - 1);
   p.appendChild(prev);
 
-  const indicator = el("button",
-    { type: "button", class: "pg-current", title: "tap to jump to page 1" },
-    `${PAGE} / ${totalPages}`);
-  indicator.onclick = () => go(1);
-  p.appendChild(indicator);
+  // Numeric buttons for the current window of 5.
+  for (let n = windowStart; n <= windowEnd; n++) {
+    const btn = el("button", {
+      type: "button",
+      class: "pg-num" + (n === PAGE ? " pg-active" : ""),
+    }, String(n));
+    btn.onclick = () => go(n);
+    p.appendChild(btn);
+  }
 
+  // Ellipsis when there are more windows ahead.
+  if (windowEnd < totalPages) {
+    const dots = el("span", { class: "pg-dots" }, "…");
+    p.appendChild(dots);
+  }
+
+  // NEXT › — step forward one page.
   const next = el("button", { type: "button", class: "pg-arrow" }, "NEXT ›");
   next.disabled = PAGE === totalPages;
   next.onclick = () => go(PAGE + 1);
   p.appendChild(next);
+
+  // LAST » — quick jump to the final page.
+  if (windowEnd < totalPages) {
+    const last = el("button",
+      { type: "button", class: "pg-arrow", title: "last page" },
+      `${totalPages} »`);
+    last.onclick = () => go(totalPages);
+    p.appendChild(last);
+  }
 }
 
 // ── Preset cache (localStorage) ────────────────────────────────
@@ -709,18 +694,13 @@ async function silentRefresh() {
 }
 
 // ── Reader modal ───────────────────────────────────────────────
-// State the translate button consults: which article is currently
-// open, its original payload, its translated payload (if any), and
-// which view is showing.
-let READER_STATE = {
-  url: null,
-  item: null,
-  original: null,
-  translated: null,
-  view: "original",   // "original" | "translated"
-};
+// Minimal state: just what's currently open. The in-modal translation
+// flow was removed — articles render in their original language only.
+// Card-level KO toggle (✦한 badge) still works for preview swap, but
+// nothing in the modal touches it.
+let READER_STATE = { url: null, item: null };
 
-async function openReader(url, item, opts = {}) {
+async function openReader(url, item) {
   const modal = document.getElementById("reader");
   if (!modal) return;
   modal.classList.remove("hidden");
@@ -730,11 +710,7 @@ async function openReader(url, item, opts = {}) {
   lockBodyScroll();
   const content = modal.querySelector(".reader-content");
   content.innerHTML = `<div class="reader-loading">📖 READING…</div>`;
-  READER_STATE = {
-    url, item: item || {}, original: null, translated: null,
-    view: opts.initialKo ? "translated" : "original",
-  };
-  updateTranslateButton();
+  READER_STATE = { url, item: item || {} };
 
   try {
     const r = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
@@ -745,134 +721,12 @@ async function openReader(url, item, opts = {}) {
         `<a class="reader-original" href="${url}" target="_blank" rel="noopener">open original ↗</a></div>`;
       return;
     }
-    READER_STATE.original = data;
-    // If the card was in KO state when clicked, jump straight to the
-    // translated view. The translation is usually already cached in
-    // SQLite (since the card badge only appears when a translation
-    // exists), so this is a near-instant DB lookup.
-    if (opts.initialKo) {
-      try {
-        const tr = await fetch(
-          `/api/translate?url=${encodeURIComponent(url)}&lang=ko`,
-        );
-        const td = await tr.json();
-        if (!td.error && td.paragraphs) {
-          READER_STATE.translated = td;
-          READER_STATE.view = "translated";
-          updateTranslateButton();
-          renderReader(content, td, item || {});
-          return;
-        }
-      } catch {}
-      // Translation fetch failed — fall through to showing the original.
-    }
-    updateTranslateButton();
     renderReader(content, data, item || {});
   } catch (e) {
     content.innerHTML = `<div class="reader-loading">error: ${e.message}</div>`;
   }
 }
 
-// Decide the target language: if the article is English, go to KR.
-// If Korean, go to EN. Otherwise, default to KR.
-function targetLangFor(srcLang) {
-  if (srcLang === "ko") return "en";
-  return "ko";
-}
-
-function relocateTranslateButton(metaEl) {
-  // The button lives in the static index.html under .reader-card so
-  // there's only ever one of them. After the meta line renders we
-  // pluck it out and re-append into the meta strip — that way it
-  // shows up next to WORDS / DATE instead of floating on the photo.
-  const btn = document.getElementById("reader-translate");
-  if (!btn || !metaEl) return;
-  metaEl.appendChild(btn);
-}
-
-function updateTranslateButton() {
-  const btn = document.getElementById("reader-translate");
-  if (!btn) return;
-  const data = READER_STATE.original;
-  const label = btn.querySelector(".rt-label");
-
-  // Show on EVERY article, regardless of source language. EN articles
-  // translate to KO; KO articles translate to EN. The label tells the
-  // user what direction the click will take them.
-  if (!data) {
-    btn.hidden = true;
-    btn.classList.remove("active", "loading");
-    return;
-  }
-  btn.hidden = false;
-  const srcLang = (data.lang || "en").toLowerCase();
-  const tgt = targetLangFor(srcLang);
-  if (label) {
-    if (READER_STATE.view === "translated") {
-      // Currently showing the translation → button takes you back to source.
-      const backLabel = srcLang === "ko" ? "원문" : "ORIGINAL";
-      label.textContent = backLabel;
-      label.setAttribute("lang", srcLang === "ko" ? "ko" : "en");
-    } else {
-      // Show "→ KO" / "→ EN" so the click direction is unambiguous.
-      label.textContent = tgt === "ko" ? "→ KO" : "→ EN";
-      label.setAttribute("lang", "en");
-    }
-  }
-  btn.classList.toggle("active", READER_STATE.view === "translated");
-}
-
-async function toggleTranslation() {
-  const btn = document.getElementById("reader-translate");
-  if (!btn || !READER_STATE.original) return;
-  const content = document.querySelector("#reader .reader-content");
-  // If we already have a translation, just flip the view.
-  if (READER_STATE.translated && READER_STATE.view === "original") {
-    READER_STATE.view = "translated";
-    renderReader(content, READER_STATE.translated, READER_STATE.item);
-    updateTranslateButton();
-    return;
-  }
-  if (READER_STATE.view === "translated") {
-    READER_STATE.view = "original";
-    renderReader(content, READER_STATE.original, READER_STATE.item);
-    updateTranslateButton();
-    return;
-  }
-  // First-time translate: fire the API.
-  btn.classList.add("loading");
-  try {
-    const tgt = targetLangFor(READER_STATE.original.lang || "en");
-    const r = await fetch(
-      `/api/translate?url=${encodeURIComponent(READER_STATE.url)}&lang=${tgt}`,
-    );
-    const data = await r.json();
-    if (data.error || !data.paragraphs) {
-      btn.classList.remove("loading");
-      btn.title = data.error || "translation failed";
-      // Briefly flash the button red — no toast framework here.
-      btn.style.borderColor = "var(--down)";
-      setTimeout(() => { btn.style.borderColor = ""; }, 1500);
-      return;
-    }
-    READER_STATE.translated = data;
-    READER_STATE.view = "translated";
-    renderReader(content, data, READER_STATE.item);
-    updateTranslateButton();
-    // Live-update the underlying feed card so the ✦한 badge + neon
-    // border show up the instant the translation lands — no /api/brief
-    // refresh needed. Persist the toggle state too so closing the
-    // reader leaves the card in its Korean view.
-    markItemTranslated(READER_STATE.url, data);
-    CARD_KO_URLS.add(READER_STATE.url);
-    _persistCardKo();
-    rerenderCard(READER_STATE.url);
-  } catch (e) {
-    console.warn("translate failed:", e);
-  } finally {
-    btn.classList.remove("loading");
-  }
-}
 
 function renderReader(content, data, item) {
   const lang = data.lang || item.lang || "en";
@@ -889,20 +743,21 @@ function renderReader(content, data, item) {
 
   // Build the meta strip. Word-count + formal date inherit the same
   // mono-uppercase 10.5px / 0.8px letter-spacing from .reader-meta.
-  // The ✦번역 translate pill (was floating on the photo) gets moved
-  // INTO the meta line by JS — see relocateTranslateButton().
   const dateLabel = fmtFormal(item.ts);
+  const srcLang = (data.lang || lang || "en").toLowerCase();
+  const langPip = el("span", {
+    class: `reader-lang lang-${srcLang}`,
+    title: "Article language",
+  }, srcLang.toUpperCase());
   const metaEl = el("div", { class: "reader-meta" }, [
     item.outlet ? el("span", { class: "src" }, item.outlet) : null,
     item.category ? el("span", { class: "tag" }, item.category.toUpperCase()) : null,
+    langPip,
     data.byline ? el("span", {}, data.byline) : null,
     data.word_count ? el("span", { class: "reader-stats" }, `${data.word_count} WORDS`) : null,
     dateLabel ? el("span", { class: "reader-stats" }, dateLabel) : null,
   ]);
   content.appendChild(metaEl);
-  // Pull the translate button out of the modal card root and append
-  // it to the meta line. updateTranslateButton() decides hidden/shown.
-  relocateTranslateButton(metaEl);
 
   content.appendChild(el("h1", { class: "reader-title", lang },
     data.title || item.title || "(no title)"));
@@ -922,6 +777,26 @@ function renderReader(content, data, item) {
     content.appendChild(body);
   }
 
+  // In-reader delete button — uses the same reason-picker modal +
+  // /api/article/delete endpoint as the × on the card. The article
+  // gets permanently dropped from `articles` + `reader_results` and
+  // its URL is added to `blocked_urls` so RSS re-ingest can't bring
+  // it back. Close the reader first, then open the picker so the two
+  // modals don't fight over body-scroll lock.
+  const articleUrl = data.url || item.url || READER_STATE.url;
+  const articleTitle = data.title || item.title || "";
+  const delBtn = el("button", {
+    class: "reader-delete",
+    type: "button",
+    title: "permanently remove this article from the feed",
+  }, "× DELETE ARTICLE");
+  delBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!articleUrl) return;
+    closeReader();
+    setTimeout(() => openDeleteModal(articleUrl, articleTitle), 100);
+  });
+
   content.appendChild(el("div", { class: "reader-footer" }, [
     el("span", { class: "badge" }, "✦ dailybrief reader"),
     el("a", {
@@ -930,19 +805,14 @@ function renderReader(content, data, item) {
       rel: "noopener",
       class: "reader-original",
     }, "open original ↗"),
+    delBtn,
   ]));
 }
 
 function closeReader() {
   document.getElementById("reader").classList.add("hidden");
   unlockBodyScroll();
-  // Reset translation state so the next article starts fresh.
-  READER_STATE = { url: null, item: null, original: null, translated: null, view: "original" };
-  const btn = document.getElementById("reader-translate");
-  if (btn) {
-    btn.classList.remove("active", "loading");
-    btn.style.borderColor = "";
-  }
+  READER_STATE = { url: null, item: null };
   // If a refresh was deferred while we were reading, run it now —
   // background articles update without jolting the user's scroll
   // position during their read.
@@ -1198,6 +1068,63 @@ function attachSwipeToClose(modalSelector, closeFn) {
   });
 }
 
+// ── Delete-with-reason modal ───────────────────────────────────
+// Tracks which URL the open modal is acting on; reset on close.
+let DELETE_TARGET = { url: null, title: null };
+
+function openDeleteModal(url, title) {
+  const modal = document.getElementById("delete-modal");
+  if (!modal) return;
+  DELETE_TARGET = { url, title: title || "" };
+  const headline = document.getElementById("delete-headline");
+  if (headline) headline.textContent = title || url;
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  lockBodyScroll();
+}
+
+function closeDeleteModal() {
+  const modal = document.getElementById("delete-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  DELETE_TARGET = { url: null, title: null };
+  unlockBodyScroll();
+}
+
+// Removes the card from every in-memory list + drops the DOM node
+// with a quick fade. Used after a successful /api/article/delete.
+function purgeUrlLocally(url) {
+  if (!url) return;
+  if (STATE.mixed)     STATE.mixed = STATE.mixed.filter((m) => m.url !== url);
+  if (PAGE_OVERRIDE)   PAGE_OVERRIDE = PAGE_OVERRIDE.filter((m) => m.url !== url);
+  document.querySelectorAll(`.art[data-url="${CSS.escape(url)}"]`).forEach((n) => {
+    n.classList.add("art-vanish");
+    setTimeout(() => n.remove(), 280);
+  });
+}
+
+async function confirmDelete(reason) {
+  const url = DELETE_TARGET.url;
+  if (!url) { closeDeleteModal(); return; }
+  // Close immediately for snappy UX; the fade-out happens in parallel
+  // with the network call.
+  closeDeleteModal();
+  purgeUrlLocally(url);
+  try {
+    const r = await fetch("/api/article/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, reason }),
+    });
+    if (!r.ok) {
+      console.warn("delete failed:", r.status);
+    }
+  } catch (e) {
+    console.warn("delete error:", e);
+  }
+}
+
 // ── Settings popover ───────────────────────────────────────────
 // Tiny menu hung off the ⚙ gear next to the date. Two practical
 // knobs only: text-size (S/M/L/XL) and a manual refresh trigger.
@@ -1243,6 +1170,59 @@ document.addEventListener("DOMContentLoaded", () => {
     const seg = e.target.closest(".seg");
     if (!seg) return;
     applyTextScale(parseFloat(seg.dataset.scale));
+  });
+
+  // Refresh-rate segmented control — set localStorage; the smartCheck
+  // tick reads on each probe so the change applies immediately.
+  function applyRefreshSeg(seconds) {
+    try { localStorage.setItem("dailybrief.refreshSeconds", String(seconds)); } catch {}
+    document.querySelectorAll("#refresh-segs .seg").forEach((b) => {
+      b.classList.toggle("active", parseInt(b.dataset.refresh, 10) === seconds);
+    });
+  }
+  let savedRefresh = 300;
+  try {
+    const v = parseInt(localStorage.getItem("dailybrief.refreshSeconds") || "300", 10);
+    if (!isNaN(v) && v >= 0) savedRefresh = v;
+  } catch {}
+  applyRefreshSeg(savedRefresh);
+  $("#refresh-segs")?.addEventListener("click", (e) => {
+    const seg = e.target.closest(".seg");
+    if (!seg) return;
+    applyRefreshSeg(parseInt(seg.dataset.refresh, 10));
+  });
+
+  // Interest categories — toggleable chips. Clicking persists +
+  // re-paints the feed so the change is visible right away.
+  function paintInterests() {
+    document.querySelectorAll("#interest-grid .interest").forEach((b) => {
+      b.classList.toggle("active", INTERESTS.has(b.dataset.cat));
+    });
+  }
+  paintInterests();
+  $("#interest-grid")?.addEventListener("click", (e) => {
+    const b = e.target.closest(".interest");
+    if (!b) return;
+    const cat = b.dataset.cat;
+    if (INTERESTS.has(cat)) INTERESTS.delete(cat);
+    else INTERESTS.add(cat);
+    _persistInterests();
+    paintInterests();
+    paint(false);
+  });
+
+  // Account row — flip login/logout visibility based on /whoami.
+  fetch("/api/auth/whoami").then((r) => r.json()).then((d) => {
+    const loggedIn = !!(d && d.user);
+    const loginA  = document.getElementById("settings-login");
+    const logoutA = document.getElementById("settings-logout");
+    if (loginA)  loginA.hidden  = loggedIn;
+    if (logoutA) logoutA.hidden = !loggedIn;
+  }).catch(() => {});
+  document.getElementById("settings-logout")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    try { await fetch("/api/auth/logout", { method: "POST" }); } catch {}
+    location.reload();
   });
   // Click outside / Escape closes the popover
   document.addEventListener("click", (e) => {
@@ -1305,23 +1285,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Intercept article-card clicks → open the reader modal.
   // ⌘/Ctrl/Shift/middle-click keeps the default behaviour (new tab).
   document.addEventListener("click", (e) => {
-    // Card-level KO toggle has priority — clicking the badge must not
-    // also open the reader.
-    const koBtn = e.target.closest("[data-ko-toggle]");
-    if (koBtn) {
+    // × delete button on a card has priority. Must run BEFORE any
+    // other handler so the click can never bubble up to the parent
+    // anchor.
+    const delBtn = e.target.closest("[data-delete]");
+    if (delBtn) {
       e.preventDefault();
       e.stopPropagation();
-      const art = koBtn.closest(".art");
+      const art = delBtn.closest(".art");
       const url = art?.getAttribute("data-url") || art?.getAttribute("href");
-      if (!url) return;
-      if (CARD_KO_URLS.has(url)) CARD_KO_URLS.delete(url);
-      else CARD_KO_URLS.add(url);
-      _persistCardKo();
-      // Surgical swap — only this one card re-renders, no page-wide flash.
-      if (!rerenderCard(url)) {
-        // Fallback if the card couldn't be located (rare).
-        paint(false);
-      }
+      const titleNode = art?.querySelector(".h");
+      const title = titleNode ? titleNode.textContent : "";
+      if (url) openDeleteModal(url, title);
       return;
     }
     const art = e.target.closest("#paper .art, #paper-noimg .art");
@@ -1330,23 +1305,25 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     const url = art.getAttribute("href");
     const item = STATE.mixed.find((m) => m.url === url) || {};
-    // If the card is currently in its translated view, open the reader
-    // with the translated body already showing.
-    const openInKo = CARD_KO_URLS.has(url) && !!item.title_ko;
-    openReader(url, item, { initialKo: openInKo });
+    openReader(url, item);
   });
 
   // Close-on-button + backdrop + Escape for both modals. The static
   // ×/backdrop in index.html are each wired ONCE here.
   document.querySelector("#reader .reader-close")?.addEventListener("click", closeReader);
   document.querySelector("#reader .reader-backdrop")?.addEventListener("click", closeReader);
-  // Translation toggle (local-only feature) — single click, switches
-  // the article body between original and AI-translated views.
-  document.getElementById("reader-translate")?.addEventListener("click", toggleTranslation);
   document.querySelectorAll('#flow [data-close="flow"]').forEach((n) =>
     n.addEventListener("click", closeFlow));
+  // Delete modal — close, reason picker, and ESC.
+  document.querySelectorAll('#delete-modal [data-close="delete"]').forEach((n) =>
+    n.addEventListener("click", closeDeleteModal));
+  document.getElementById("delete-reasons")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".del-reason");
+    if (!btn) return;
+    confirmDelete(btn.dataset.reason || "other");
+  });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { closeReader(); closeFlow(); }
+    if (e.key === "Escape") { closeReader(); closeFlow(); closeDeleteModal(); }
   });
 
   // Strip clicks → flow modal. data-kind + data-index are stamped onto
@@ -1362,25 +1339,37 @@ document.addEventListener("DOMContentLoaded", () => {
   load();
 
   // ── Smart refresh ──────────────────────────────────────────────
-  // No user toggle, no fixed timer. Rules:
+  // Rules:
   //   - Only refresh while the tab is visible.
-  //   - When the tab returns to visible and it's been > 3 min since
-  //     the last successful refresh, pull immediately.
-  //   - While visible, top up every 5 minutes (matches the backend
-  //     brief-cache TTL ≫ 2 min so we don't pay for repeated LLM
-  //     curation cycles).
-  const VISIBLE_INTERVAL_MS = 5 * 60 * 1000;
-  const VISIBILITY_STALE_MS = 3 * 60 * 1000;
+  //   - The interval is user-tunable from the settings popover —
+  //     0 (OFF), 60 s, 120 s, 300 s (default), 600 s. Stored under
+  //     dailybrief.refreshSeconds, read fresh on every probe so the
+  //     setting takes effect immediately, no page reload needed.
+  //   - When the tab returns to visible after being hidden longer than
+  //     the configured interval, pull immediately.
+  function refreshIntervalSeconds() {
+    try {
+      const v = parseInt(
+        localStorage.getItem("dailybrief.refreshSeconds") || "300", 10,
+      );
+      if (isNaN(v) || v < 0) return 300;
+      return v;
+    } catch { return 300; }
+  }
   function smartCheck() {
+    const interval = refreshIntervalSeconds();
+    if (interval === 0) return;          // user disabled auto-refresh
     if (document.hidden) return;
     if (!LAST_LOAD) return;
-    if (Date.now() - LAST_LOAD < VISIBLE_INTERVAL_MS) return;
+    if (Date.now() - LAST_LOAD < interval * 1000) return;
     silentRefresh();
   }
-  setInterval(smartCheck, 60 * 1000);  // probe every 60 s, cheap noop
+  setInterval(smartCheck, 30 * 1000);  // probe every 30 s, cheap noop
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
-    if (!LAST_LOAD || Date.now() - LAST_LOAD > VISIBILITY_STALE_MS) {
+    const interval = refreshIntervalSeconds();
+    if (interval === 0) return;
+    if (!LAST_LOAD || Date.now() - LAST_LOAD > interval * 1000) {
       silentRefresh();
     }
   });

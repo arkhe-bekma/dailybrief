@@ -445,6 +445,53 @@ a { color: inherit; text-decoration: none; }
   color: var(--neon-yellow);
   box-shadow: var(--glow-yellow);
 }
+.settings-account {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* Refresh-rate row uses 5 segments instead of the default 4. */
+#refresh-segs { grid-template-columns: repeat(5, 1fr); }
+
+/* Interest row needs more vertical room — switch to a column layout. */
+.settings-row.settings-row-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.interest-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.interest {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-align: left;
+  transition: border-color 120ms, color 120ms, background 120ms, box-shadow 120ms;
+}
+.interest:hover {
+  border-color: var(--neon-mag);
+  color: var(--neon-mag);
+}
+.interest.active {
+  background: linear-gradient(135deg, rgba(255,43,214,0.18), rgba(255,43,214,0.06));
+  border-color: var(--neon-mag);
+  color: var(--text);
+  box-shadow: 0 0 12px rgba(255,43,214,0.30);
+}
+.interest.active::after { content: " ✓"; color: var(--neon-mag); }
+@media (max-width: 480px) {
+  .interest-grid { grid-template-columns: repeat(2, 1fr); }
+}
 .brand .logo {
   color: var(--neon-yellow);
   font-size: 24px;
@@ -992,27 +1039,28 @@ a { color: inherit; text-decoration: none; }
 /* User wants ONLY the photo zoom on hover/tap — no card lift, no
    highlight overlay, no accent-bar growth. */
 
-/* ── Translated-article affordance ───────────────────────────
-   Cards whose body has been AI-translated and saved to the DB get a
-   subtle neon-mag border + soft glow so the user can spot them at a
-   glance. Click the ✦한 badge on the image to flip title + dek into
-   Korean inline; click the card while flipped to open the reader
-   already in translated view. */
-.art.has-ko {
-  border-color: rgba(255,43,214,0.42);
+/* ── Card border + soft glow ────────────────────────────────────
+   Every card gets a gentle magenta-tinted boundary + outer glow.
+   The user said it's "soothing" — gives the wall a consistent
+   premium feel without screaming. Applied universally now that the
+   translated-only affordance is gone. */
+.art {
+  border-color: rgba(255,43,214,0.32);
   box-shadow:
-    0 0 0 1px rgba(255,43,214,0.18),
-    0 0 22px rgba(255,43,214,0.18);
+    0 0 0 1px rgba(255,43,214,0.12),
+    0 0 18px rgba(255,43,214,0.12);
 }
-.art.has-ko.ko-on {
-  border-color: rgba(255,43,214,0.65);
+.art:hover {
+  border-color: rgba(255,43,214,0.55);
   box-shadow:
-    0 0 0 1px rgba(255,43,214,0.30),
-    0 0 28px rgba(255,43,214,0.35);
+    0 0 0 1px rgba(255,43,214,0.22),
+    0 0 26px rgba(255,43,214,0.22);
 }
-/* Image wrapper — gives us a positioning context for the floating
-   badge. Inherits sizing from the inner .img so existing tier rules
-   (.tier-hero .img { aspect-ratio: 21/9 ... }) still drive the layout. */
+
+/* Image wrapper — positioning context for the × delete button.
+   Inherits sizing from the inner .img so existing tier rules
+   (.tier-hero .img { aspect-ratio: 21/9 ... }) still drive the
+   layout. */
 .art .img-wrap {
   position: relative;
   display: block;
@@ -1021,62 +1069,197 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 
-/* ✦한 toggle that sits on the image's top-right corner. */
-.ko-badge {
+/* × delete button on every card — sits at the top-left of the image
+   wrap (opposite corner from the ✦한 badge so they never collide). On
+   text-only cards (.card-delete-inline) it pins to the card's top-right
+   corner instead. Faint at rest, pops on hover so the affordance is
+   discoverable but doesn't compete with the headline for attention. */
+.card-delete {
   position: absolute;
   top: 8px;
-  right: 8px;
-  z-index: 4;
+  left: 8px;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  height: 22px;
-  background: rgba(11,13,24,0.78);
-  border: 1px solid rgba(255,43,214,0.55);
-  border-radius: 11px;
-  color: var(--text);
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: 9.5px;
-  letter-spacing: 0.6px;
+  justify-content: center;
+  padding: 0;
+  background: rgba(11,13,24,0.62);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 50%;
+  color: rgba(255,255,255,0.72);
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
   backdrop-filter: blur(6px);
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    border-color 120ms,
+    color 120ms,
+    background 120ms,
+    box-shadow 120ms;
+}
+.art:hover .card-delete,
+.card-delete:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+.card-delete:hover {
+  background: rgba(80,8,22,0.85);
+  border-color: var(--down);
+  color: var(--down);
+  box-shadow: 0 0 14px rgba(255,71,87,0.45);
+}
+.card-delete:active { transform: scale(0.92); }
+.card-delete.card-delete-inline {
+  top: 6px;
+  right: 6px;
+  left: auto;
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+}
+/* Mobile / touch: always show — no :hover, finger needs an obvious target. */
+@media (hover: none), (max-width: 768px) {
+  .card-delete { opacity: 0.85; transform: scale(1); }
+}
+
+/* Vanish animation when a card is removed via the delete flow. */
+.art.art-vanish {
+  pointer-events: none;
+  transition: opacity 260ms ease, transform 260ms ease, max-height 260ms ease;
+  opacity: 0;
+  transform: scale(0.96);
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* ── Delete-with-reason modal ────────────────────────────────────
+   Reuses the .reader / .reader-backdrop scaffolding from the reader
+   modal so the open/close behavior is identical (Esc, backdrop tap),
+   but the inner card has its own footprint — smaller, centered,
+   reason-list-shaped. */
+#delete-modal .delete-card {
+  position: relative;
+  margin: auto;
+  max-width: 460px;
+  width: calc(100% - 24px);
+  background: var(--bg-2, #11131f);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,43,214,0.18) inset;
+  color: var(--text);
+  font-family: var(--sans);
+}
+#delete-modal .reader-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+#delete-modal .delete-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  font-weight: 800;
   text-transform: uppercase;
-  transition: border-color 120ms, box-shadow 120ms, transform 60ms;
+  color: var(--down);
+  margin-bottom: 6px;
 }
-.ko-badge .ko-spark {
-  color: var(--neon-mag);
-  font-size: 10px;
-  text-shadow: 0 0 8px rgba(255,43,214,0.55);
+#delete-modal .delete-headline {
+  font-family: var(--display);
+  font-size: 17px;
+  line-height: 1.28;
+  font-weight: 700;
+  color: var(--text);
+  margin: 2px 0 14px;
+  /* clamp to two lines so a huge headline can't push the picker
+     below the fold on phones */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.ko-badge .ko-text[lang="ko"] {
-  font-family: var(--kr);
-  letter-spacing: 0.2px;
+#delete-modal .delete-headline[lang="ko"],
+#delete-modal .delete-headline:lang(ko) { font-family: var(--kr); }
+#delete-modal .delete-sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 12px;
 }
-.ko-badge:hover {
-  border-color: var(--neon-mag);
-  box-shadow: 0 0 14px rgba(255,43,214,0.40);
+#delete-modal .delete-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.ko-badge:active { transform: scale(0.94); }
-.art.ko-on .ko-badge {
-  background: var(--neon-mag);
-  border-color: var(--neon-mag);
-  color: #1a0014;
+#delete-modal .del-reason {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--sans);
+  transition: background 120ms, border-color 120ms, transform 60ms;
 }
-.art.ko-on .ko-badge .ko-spark {
-  color: #1a0014;
-  text-shadow: none;
+#delete-modal .del-reason:hover {
+  background: rgba(255,71,87,0.10);
+  border-color: var(--down);
 }
-/* When the card has no image (text-only tier), the badge falls back
-   into the meta line via .ko-badge-inline. */
-.ko-badge.ko-badge-inline {
-  position: static;
-  margin-left: 4px;
-  height: 18px;
-  padding: 2px 7px;
-  font-size: 8.5px;
+#delete-modal .del-reason:active { transform: scale(0.99); }
+#delete-modal .dr-tag {
+  flex: 0 0 92px;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 9.5px;
+  letter-spacing: 1.0px;
+  color: var(--down);
+  text-transform: uppercase;
+}
+#delete-modal .dr-text {
+  flex: 1;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: var(--text);
+}
+#delete-modal .delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+#delete-modal .del-cancel {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--muted);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+#delete-modal .del-cancel:hover {
+  color: var(--text);
+  border-color: rgba(255,255,255,0.32);
+}
+@media (max-width: 500px) {
+  #delete-modal .dr-tag { flex-basis: 76px; font-size: 9px; }
+  #delete-modal .dr-text { font-size: 13px; }
 }
 
 /* category accent bar (static — no grow on hover) */
@@ -1709,20 +1892,33 @@ a { color: inherit; text-decoration: none; }
   transition: all 0.12s;
 }
 .pager button:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); box-shadow: var(--glow-cyan); }
-.pager button.current,
-.pager .pg-current {
+/* Numeric page buttons — 5-window slider. The active page lights up in
+   amber so the user can spot their place inside the window at a glance. */
+.pager .pg-num {
+  min-width: 38px;
+  font-variant-numeric: tabular-nums;
+}
+.pager .pg-num.pg-active {
   background: var(--neon-yellow);
   border-color: var(--neon-yellow);
   color: #1a1305;
   box-shadow: var(--glow-yellow);
-  /* Slightly wider than the arrows so the "5 / 104" indicator reads
-     cleanly without crowding. */
-  min-width: 80px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
+  cursor: default;
 }
-.pager .pg-current:hover { filter: brightness(1.05); }
+.pager .pg-num.pg-active:hover {
+  filter: brightness(1.05);
+  color: #1a1305;
+}
 .pager .pg-arrow { letter-spacing: 0.6px; }
+.pager .pg-dots {
+  align-self: center;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 0 4px;
+  user-select: none;
+}
 .pager button:disabled { opacity: 0.3; cursor: default; box-shadow: none; }
 .pager .label { color: var(--muted); font-family: var(--mono); font-size: 12px; align-self: center; margin: 0 6px; }
 
@@ -1810,71 +2006,32 @@ footer {
 }
 .reader-close:active { transform: scale(0.94); }
 
-/* Translate pill — slim, sits INLINE inside the reader meta strip
-   next to WORDS / DATE rather than overlaid on the photo. Same
-   neon-mag spark + label, just half the visual weight in its old
-   floating position. JS appends it to the meta strip dynamically. */
-.reader-translate {
+/* Language pip inside the reader meta strip. Shows the article's
+   source language (EN / KO) so the user knows what they're reading. */
+.reader-lang {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   padding: 2px 8px;
-  height: 20px;
-  background: rgba(255,43,214,0.10);
-  color: var(--text);
-  border: 1px solid rgba(255,43,214,0.40);
-  border-radius: 10px;
-  cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 4px;
   font-family: var(--mono);
   font-weight: 800;
-  font-size: 9.5px;
-  letter-spacing: 0.9px;
-  line-height: 1;
-  text-transform: uppercase;
-  transition: border-color 120ms, color 120ms, box-shadow 120ms, transform 60ms;
-  user-select: none;
-  vertical-align: middle;
-}
-.reader-translate[hidden] { display: none; }
-.reader-translate .rt-spark {
-  color: var(--neon-mag);
   font-size: 10px;
-  line-height: 1;
-  text-shadow: 0 0 8px rgba(255,43,214,0.55);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.78);
 }
-.reader-translate .rt-label[lang="ko"] {
-  font-family: var(--kr);
-  letter-spacing: 0.2px;
+.reader-lang.lang-ko {
+  background: rgba(0,225,255,0.10);
+  border-color: rgba(0,225,255,0.40);
+  color: var(--neon-cyan);
 }
-.reader-translate:hover {
-  border-color: var(--neon-mag);
-  color: var(--neon-mag);
-  box-shadow: 0 0 14px rgba(255,43,214,0.35);
+.reader-lang.lang-en {
+  background: rgba(246,192,96,0.10);
+  border-color: rgba(246,192,96,0.40);
+  color: #f6c060;
 }
-.reader-translate:active {
-  transform: scale(0.96);
-}
-.reader-translate.active {
-  background:
-    linear-gradient(135deg, var(--neon-mag), rgba(255,43,214,0.65));
-  border-color: var(--neon-mag);
-  color: #1a0014;
-  box-shadow: 0 0 18px rgba(255,43,214,0.5);
-}
-.reader-translate.active .rt-spark { color: #1a0014; text-shadow: none; }
-.reader-translate.loading { pointer-events: none; opacity: 0.85; }
-.reader-translate.loading .rt-label,
-.reader-translate.loading .rt-spark { visibility: hidden; }
-.reader-translate.loading::after {
-  content: "";
-  position: absolute;
-  width: 11px; height: 11px;
-  border: 2px solid var(--neon-mag);
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: rt-spin 0.6s linear infinite;
-}
-@keyframes rt-spin { to { transform: rotate(360deg); } }
 
 /* Tiny translator's note rendered below the title when the model
    compresses or adds context. */
@@ -2070,3 +2227,34 @@ footer {
   font-weight: 700;
 }
 .reader-original:hover { text-shadow: var(--glow-cyan); }
+
+/* Permanent-delete button in the reader footer. Subtle red outline at
+   rest so it doesn't compete with the body; warms up on hover so the
+   destructive nature is unmistakable when the user is actually about
+   to commit. Click opens the same reason-picker modal as the × on
+   the card. */
+.reader-delete {
+  background: transparent;
+  border: 1px solid rgba(255,71,87,0.45);
+  color: var(--down);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms, color 140ms,
+              box-shadow 140ms, transform 80ms;
+}
+.reader-delete:hover {
+  background: rgba(255,71,87,0.12);
+  border-color: var(--down);
+  color: #ffd5da;
+  box-shadow: 0 0 16px rgba(255,71,87,0.35);
+}
+.reader-delete:active { transform: scale(0.97); }
+@media (max-width: 500px) {
+  .reader-delete { padding: 6px 12px; font-size: 10px; }
+}

@@ -98,6 +98,20 @@ def _init_sync() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_api_calls_ts ON api_calls(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_api_calls_provider ON api_calls(provider, ts DESC);
+
+            -- User-driven removals. When the user clicks × on a card
+            -- and picks a reason, the URL lands here so RSS re-ingest
+            -- can never bring it back. Reason is a short slug
+            -- (quality / irrelevant / incomplete / broken / duplicate
+            -- / misleading / other) for later analysis.
+            CREATE TABLE IF NOT EXISTS blocked_urls (
+                url        TEXT PRIMARY KEY,
+                reason     TEXT,
+                blocked_at INTEGER NOT NULL,
+                title      TEXT,
+                outlet     TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_blocked_at ON blocked_urls(blocked_at DESC);
         """)
 
         # Phase 2: migrations. Each ALTER is idempotent — ignore the
@@ -283,6 +297,15 @@ def _upsert_articles_batch_sync(rows: list[dict]) -> int:
         return 0
     now = int(time.time())
     with closing(_conn()) as c:
+        # Drop anything the user has explicitly blocked. Each blocked
+        # URL lives in `blocked_urls`; filter the incoming batch in
+        # one cheap pass so re-ingest can never resurrect a removed
+        # article on the next RSS sweep.
+        blocked = {r["url"] for r in c.execute("SELECT url FROM blocked_urls").fetchall()}
+        if blocked:
+            rows = [r for r in rows if r.get("url") not in blocked]
+            if not rows:
+                return 0
         # Explicit BEGIN/COMMIT around the batch. isolation_level=None
         # on the connection means autocommit; wrap manually to batch.
         c.execute("BEGIN")
@@ -475,11 +498,11 @@ def _list_resummary_candidates_sync(limit: int) -> list[dict]:
     with closing(_conn()) as c:
         rows = c.execute(
             """
-            SELECT a.url AS url, a.title AS title,
+            SELECT a.url AS url, a.title AS title, a.lang AS lang,
                    COALESCE(LENGTH(a.summary), 0) AS summary_len
             FROM articles a
             INNER JOIN reader_results r ON r.url = a.url
-            WHERE COALESCE(LENGTH(a.summary), 0) < 350
+            WHERE COALESCE(LENGTH(a.summary), 0) < 240
             ORDER BY a.fetched_at DESC
             LIMIT ?
             """,
@@ -490,6 +513,141 @@ def _list_resummary_candidates_sync(limit: int) -> list[dict]:
 
 async def list_resummary_candidates(limit: int = 12) -> list[dict]:
     return await asyncio.to_thread(_list_resummary_candidates_sync, limit)
+
+
+def _get_article_sync(url: str) -> dict | None:
+    """Single-row lookup so the reader endpoint can grab the RSS
+    headline as a fallback when trafilatura returns a sidebar label."""
+    with closing(_conn()) as c:
+        row = c.execute(
+            "SELECT url, title, image, outlet, category, lang, summary "
+            "FROM articles WHERE url = ?",
+            (url,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+async def get_article(url: str) -> dict | None:
+    return await asyncio.to_thread(_get_article_sync, url)
+
+
+def _reset_validation_sync() -> int:
+    """Bulk-reset every article back to `pending` so the validation
+    worker re-runs the latest heuristics against the entire archive.
+    Returns the row count touched."""
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles "
+            "SET validated = 0, validation_reason = NULL, validated_at = NULL"
+        )
+        return cur.rowcount
+
+
+async def reset_validation() -> int:
+    return await asyncio.to_thread(_reset_validation_sync)
+
+
+def _purge_failed_articles_sync() -> int:
+    """Drop every article currently marked validated = -1 along with
+    its cached reader_results body. Used by the admin rebuild endpoint
+    after the validator passes over the archive with new heuristics."""
+    with closing(_conn()) as c:
+        dead = [r["url"] for r in c.execute(
+            "SELECT url FROM articles WHERE validated = -1"
+        ).fetchall()]
+        if not dead:
+            return 0
+        c.executemany("DELETE FROM articles WHERE url = ?", [(u,) for u in dead])
+        c.executemany("DELETE FROM reader_results WHERE url = ?", [(u,) for u in dead])
+        return len(dead)
+
+
+async def purge_failed_articles() -> int:
+    return await asyncio.to_thread(_purge_failed_articles_sync)
+
+
+def _delete_article_by_user_sync(
+    url: str, reason: str, note: str | None = None,
+) -> dict:
+    """User pressed × on a card. Drop the article row + cached reader
+    body, then add the URL to blocked_urls so a future RSS sweep
+    can't pull the same story back. Returns counts."""
+    now = int(time.time())
+    with closing(_conn()) as c:
+        meta = c.execute(
+            "SELECT title, outlet FROM articles WHERE url = ?", (url,)
+        ).fetchone()
+        title = meta["title"] if meta else None
+        outlet = meta["outlet"] if meta else None
+        a = c.execute("DELETE FROM articles WHERE url = ?", (url,)).rowcount
+        r = c.execute("DELETE FROM reader_results WHERE url = ?", (url,)).rowcount
+        c.execute(
+            "INSERT INTO blocked_urls (url, reason, blocked_at, title, outlet) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(url) DO UPDATE SET "
+            "  reason=excluded.reason, blocked_at=excluded.blocked_at",
+            (url, (reason or "")[:32] + (f"|{note[:200]}" if note else ""),
+             now, title, outlet),
+        )
+    return {"articles_deleted": a, "readers_deleted": r, "blocked": 1}
+
+
+async def delete_article_by_user(
+    url: str, reason: str, note: str | None = None,
+) -> dict:
+    return await asyncio.to_thread(_delete_article_by_user_sync, url, reason, note)
+
+
+def _is_blocked_sync(url: str) -> bool:
+    if not url:
+        return False
+    with closing(_conn()) as c:
+        row = c.execute(
+            "SELECT 1 FROM blocked_urls WHERE url = ?", (url,)
+        ).fetchone()
+        return bool(row)
+
+
+async def is_blocked(url: str) -> bool:
+    return await asyncio.to_thread(_is_blocked_sync, url)
+
+
+def _blocked_url_set_sync() -> set[str]:
+    """Bulk read of every blocked URL. Cheap — the table is rarely
+    bigger than a few hundred entries. Used by upsert_articles to
+    filter incoming RSS before write, and by /api/brief to drop any
+    already-cached items that the user has since blocked."""
+    with closing(_conn()) as c:
+        rows = c.execute("SELECT url FROM blocked_urls").fetchall()
+        return {r["url"] for r in rows}
+
+
+async def blocked_url_set() -> set[str]:
+    return await asyncio.to_thread(_blocked_url_set_sync)
+
+
+def _purge_bad_title_readers_sync(needles: list[str]) -> int:
+    """Drop reader_results entries whose stored title matches one of
+    the generic boilerplate labels. Forces a fresh trafilatura pass
+    the next time the article is opened so the title-fallback logic
+    has a chance to run."""
+    if not needles:
+        return 0
+    deleted = 0
+    with closing(_conn()) as c:
+        for needle in needles:
+            cur = c.execute(
+                "DELETE FROM reader_results "
+                "WHERE LOWER(json_extract(payload_json, '$.title')) "
+                "      LIKE LOWER(?)",
+                (f"%{needle}%",),
+            )
+            deleted += cur.rowcount
+    return deleted
+
+
+async def purge_bad_title_readers(needles: list[str]) -> int:
+    return await asyncio.to_thread(_purge_bad_title_readers_sync, needles)
 
 
 def _update_article_image_sync(url: str, image: str) -> bool:

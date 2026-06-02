@@ -526,7 +526,12 @@ def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
         # Strip image-markdown / brackets / bylines that publishers
         # frequently leak into RSS <description> (HuggingFace blog
         # author avatars, [속보] tags, Reuters dateline, etc.).
-        cleaned_summary = _scrub_dek_line(raw_summary)[:400]
+        # Cap is language-aware: Korean is denser per character so a
+        # shorter cap produces a comparable visual block to the longer
+        # English cap. User specifically asked to even out the two.
+        outlet_lang = (outlet.get("lang") or "en").lower()
+        summary_cap = 240 if outlet_lang.startswith("ko") else 400
+        cleaned_summary = _scrub_dek_line(raw_summary)[:summary_cap]
         items.append(Article(
             title=cleaned_title,
             url=entry.get("link", ""),
@@ -686,13 +691,22 @@ async def _backfill_bodies(items: list[dict]) -> int:
         async with sem:
             url = item["url"]
             title = item.get("title") or ""
+            lang = (item.get("lang") or "en").lower()
+            # Match the per-language cap used by main._dek_cap so the
+            # backfill never produces a longer dek than the resummary
+            # worker would. Keeps EN ↔ KO cards visually balanced.
+            dek_cap = 240 if lang.startswith("ko") else 440
+            # Korean publishers often pack the whole lede into one
+            # dense paragraph — joining two would blow past the cap.
+            max_paras_for_lang = 1 if lang.startswith("ko") else 2
             # Skip if we already have a stored reader payload — use it.
             stored = await db.get_reader(url)
             if stored:
                 paras = stored.get("paragraphs") or []
                 if paras:
-                    # Combine first 2 paragraphs for a meatier preview.
-                    cleaned = " ".join(p.strip() for p in paras[:2] if p.strip())[:700]
+                    cleaned = " ".join(
+                        p.strip() for p in paras[:max_paras_for_lang] if p.strip()
+                    )[:dek_cap]
                     if cleaned:
                         item["summary"] = cleaned
                         filled += 1
@@ -700,7 +714,7 @@ async def _backfill_bodies(items: list[dict]) -> int:
             reading = await reader_agent.extract(url)
             if not reading or not (reading.text or reading.excerpt):
                 return
-            # Walk the body for the first 2 prose paragraphs, joined.
+            # Walk the body for the first prose paragraph(s), joined.
             text = reading.text or ""
             picks: list[str] = []
             seen = 0
@@ -709,10 +723,10 @@ async def _backfill_bodies(items: list[dict]) -> int:
                 if line and len(line) >= 25:
                     picks.append(line)
                     seen += 1
-                    if seen >= 2:
+                    if seen >= max_paras_for_lang:
                         break
             dek_src = " ".join(picks) if picks else _scrub_dek_line(reading.excerpt or "")
-            dek = dek_src[:700]
+            dek = dek_src[:dek_cap]
             if not dek:
                 return
             item["summary"] = dek
