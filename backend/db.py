@@ -732,3 +732,56 @@ def _stats_sync() -> dict:
 
 async def stats() -> dict:
     return await asyncio.to_thread(_stats_sync)
+
+
+# ── Maintenance ────────────────────────────────────────────────────
+# Pruning + VACUUM keeps the DB bounded without us hand-holding it.
+# Lab "STORAGE & MEMORY" card surfaces whatever we trimmed so the user
+# can see the agent doing its job.
+ARTICLE_RETENTION_DAYS = 60       # articles older than this get dropped
+READER_CACHE_LIMIT = 6000         # keep newest N reader_results rows
+AGENT_RUNS_LIMIT = 500            # already trimmed inside log_agent_run
+
+
+def _prune_sync() -> dict:
+    """One-shot prune. Returns counts of what was removed + final size."""
+    now = int(time.time())
+    cutoff = now - ARTICLE_RETENTION_DAYS * 86_400
+    removed_articles = 0
+    removed_reader = 0
+    with closing(_conn()) as c:
+        # 1. Drop articles older than retention. Keep any that are
+        #    referenced by a recent reader_results last_used_at — if a
+        #    user opened it recently we keep the metadata around.
+        cur = c.execute(
+            "DELETE FROM articles WHERE fetched_at < ? AND "
+            "url NOT IN (SELECT url FROM reader_results WHERE last_used_at > ?)",
+            (cutoff, cutoff),
+        )
+        removed_articles = cur.rowcount or 0
+        # 2. Cap reader_results at READER_CACHE_LIMIT, keeping the most
+        #    recently USED rows (cross-user popularity wins).
+        total = c.execute("SELECT COUNT(*) AS n FROM reader_results").fetchone()["n"]
+        if total > READER_CACHE_LIMIT:
+            excess = total - READER_CACHE_LIMIT
+            cur = c.execute(
+                "DELETE FROM reader_results WHERE url IN ("
+                "  SELECT url FROM reader_results ORDER BY last_used_at ASC LIMIT ?"
+                ")",
+                (excess,),
+            )
+            removed_reader = cur.rowcount or 0
+        # 3. VACUUM reclaims pages from deletes — actually shrinks the
+        #    file on disk. Cheap on a 20-200MB DB; takes a few seconds.
+        c.execute("VACUUM")
+    db_bytes = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    return {
+        "removed_articles": removed_articles,
+        "removed_reader": removed_reader,
+        "db_bytes_after": db_bytes,
+        "ran_at": now,
+    }
+
+
+async def prune_once() -> dict:
+    return await asyncio.to_thread(_prune_sync)

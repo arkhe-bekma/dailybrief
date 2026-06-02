@@ -20,12 +20,13 @@ import re
 
 # ── Heuristics ─────────────────────────────────────────────────────
 MIN_PARAGRAPHS = 2
-MIN_BODY_CHARS = 350        # ≈ 70 English words / 120 Korean chars —
-                            # tightened from 220 after the 한경 premium-9
-                            # boilerplate (105 words including a copyright
-                            # block) was sneaking through.
+MIN_BODY_CHARS = 400        # ≈ 80 English words / 130 Korean chars —
+                            # tightened from 350 after the Al Jazeera
+                            # 67-word "title repeated 3x + 1 short
+                            # paragraph" pattern leaked through.
 MIN_TITLE_CHARS = 10
 MAX_PAYWALL_SCAN = 600
+MAX_TITLE_REPEATS_IN_BODY = 1   # >1 means the body just echoes the title
 
 
 # Paywall / consent-wall / interstitial signals.
@@ -145,7 +146,29 @@ def validate(
     if not body_payload:
         return False, "no-body"
 
-    paras = [p.strip() for p in (body_payload.get("paragraphs") or []) if p and p.strip()]
+    raw_paras = [p.strip() for p in (body_payload.get("paragraphs") or []) if p and p.strip()]
+
+    # Dedup paragraphs (case-insensitive). Some publishers / trafilatura
+    # extracts repeat the same line — Al Jazeera's 67-word example had
+    # the title literally 3 times as separate paragraphs.
+    seen: set[str] = set()
+    paras: list[str] = []
+    title_norm = title.lower().strip()
+    title_repeats = 0
+    for p in raw_paras:
+        norm = p.lower().strip()
+        # Drop body paragraphs that ARE the article title.
+        if title_norm and (norm == title_norm or norm.startswith(title_norm) and len(norm) <= len(title_norm) + 4):
+            title_repeats += 1
+            continue
+        if norm in seen:
+            continue
+        seen.add(norm)
+        paras.append(p)
+
+    if title_repeats > MAX_TITLE_REPEATS_IN_BODY:
+        return False, "title-echoed-in-body"
+
     body_text = "\n".join(paras)
 
     if len(paras) < MIN_PARAGRAPHS:

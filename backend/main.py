@@ -81,6 +81,32 @@ async def _start():
         asyncio.create_task(_validation_worker())
     except Exception as exc:
         print(f"[startup] validation worker failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_prune_worker())
+    except Exception as exc:
+        print(f"[startup] prune worker failed to schedule: {exc!r}", flush=True)
+
+
+async def _prune_worker():
+    """Daily maintenance: drops articles older than 60 days, caps the
+    reader_results cache at 6000 rows, VACUUMs the file to actually
+    reclaim disk. Survives forever — sleeps 24h between runs."""
+    await asyncio.sleep(120)  # let the rest of startup settle
+    while True:
+        try:
+            result = await db.prune_once()
+            await db.set_setting("last_prune", result)
+            removed = result["removed_articles"] + result["removed_reader"]
+            mb = result["db_bytes_after"] / 1e6
+            print(
+                f"[prune] removed {removed} rows, DB now {mb:.1f}MB "
+                f"({result['removed_articles']} articles + "
+                f"{result['removed_reader']} reader bodies)",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"[prune] failed: {exc!r}", flush=True)
+        await asyncio.sleep(24 * 3600)
 
 
 # ── Validation worker ────────────────────────────────────────────────
@@ -267,6 +293,7 @@ async def api_storage():
         rss_bytes = 0
     # Cache footprint (number of keys + rough byte size).
     cache_keys = len(cache._store)
+    last_prune = await db.get_setting("last_prune", None)
     return {
         "db_bytes": db_bytes,
         "disk_free": disk_free,
@@ -277,7 +304,17 @@ async def api_storage():
         ),
         "rss_bytes": rss_bytes,
         "cache_keys": cache_keys,
+        "last_prune": last_prune,
     }
+
+
+@app.post("/api/storage/prune")
+async def storage_prune_now():
+    """Manual prune trigger — useful from the lab when the user
+    wants to reclaim space without waiting for the daily cycle."""
+    result = await db.prune_once()
+    await db.set_setting("last_prune", result)
+    return result
 
 
 @app.get("/api/health")
@@ -595,6 +632,26 @@ def _scrub_html_artifacts(line: str) -> str:
     return s
 
 
+def _dedup_with_title(paras: list[str], title: str) -> list[str]:
+    """Drop paragraphs that are just a repeat of the article title +
+    dedup case-insensitive. Al Jazeera and a few publishers ship the
+    title literally as the first paragraph (sometimes 2-3 times)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    t = (title or "").strip().lower()
+    for p in paras:
+        p_norm = p.strip().lower()
+        if not p_norm:
+            continue
+        if t and (p_norm == t or (p_norm.startswith(t) and len(p_norm) <= len(t) + 4)):
+            continue
+        if p_norm in seen:
+            continue
+        seen.add(p_norm)
+        out.append(p)
+    return out
+
+
 def _scrub_paragraph(p: str) -> str:
     """Run the paragraph-scrub steps that _split_paragraphs would have
     applied at fetch time — but on a single string. Used to clean
@@ -622,14 +679,15 @@ def _scrub_paragraph(p: str) -> str:
 
 
 def _scrub_cached_paragraphs(payload: dict) -> dict:
-    """Defensive: re-run paragraph filters on a cached reader payload
-    before returning. No-op for fresh paragraphs."""
+    """Defensive: re-run paragraph filters AND title-repeat dedup on a
+    cached reader payload before returning. No-op for fresh paragraphs."""
     paras = payload.get("paragraphs") or []
     cleaned: list[str] = []
     for p in paras:
         s = _scrub_paragraph(p)
         if s and len(s) >= 30:
             cleaned.append(s)
+    cleaned = _dedup_with_title(cleaned, payload.get("title") or "")
     if cleaned != paras:
         payload = {**payload, "paragraphs": cleaned}
     return payload
@@ -715,15 +773,17 @@ async def article(url: str):
     # of emojis / section headers / photo credits / mojibake. Cheaper,
     # faster, and the user explicitly asked for the original article
     # ("괜히 에이아이로 돌리지말고 그냥 바로 기사 보여줘").
+    clean_title = html.unescape(reading.title or "")
+    paragraphs = _dedup_with_title(_split_paragraphs(reading.text), clean_title)
     result = {
         "url": url,
-        "title": html.unescape(reading.title or ""),
+        "title": clean_title,
         "image": reading.image,
         "byline": reading.byline,
         "excerpt": html.unescape(reading.excerpt or ""),
-        "lang": _detect_lang(reading.title or ""),
+        "lang": _detect_lang(clean_title),
         "word_count": len(reading.text.split()),
-        "paragraphs": _split_paragraphs(reading.text),
+        "paragraphs": paragraphs,
     }
     cache.set(full_key, result, 86400)
     # Persist so a restart doesn't drop the scraped body.

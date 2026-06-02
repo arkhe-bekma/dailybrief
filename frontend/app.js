@@ -681,7 +681,23 @@ async function silentRefresh() {
     renderWhalesStrip(STATE.whales || []);
     renderTradesStrip(STATE.trades || []);
     renderVideosStrip(STATE.youtube || []);
-    paint(false);  // preserve page + scroll
+    // ░ Intentionally do NOT paint() the article grid here. The user
+    // explicitly asked for "기사 보다가 닫으면 맨위로 가지 말고 그 자리"
+    // — repainting the grid even with scrollTop=false can reshuffle
+    // article cards under the user (different curator ranking,
+    // dedup pulls, etc.) so what they were looking at moves to a
+    // different visual position. Tape + headline + strips update so
+    // fresh prices and breaking news show, but the article grid stays
+    // exactly where they left it until they actively navigate (chip
+    // click / pager / explicit refresh).
+    const status = $("#status");
+    if (status) {
+      const outlets = STATE.outlets_count
+        || Object.keys(STATE.by_outlet || {}).length || 0;
+      const totalMixed = STATE.total_mixed || (STATE.mixed || []).length;
+      status.textContent =
+        `${totalMixed} news · ${outlets} sources · updated ${fmtAge(LAST_LOAD)}`;
+    }
     savePreset(STATE);
   } catch (e) {
     console.warn("auto-refresh failed:", e);
@@ -954,6 +970,9 @@ function lockBodyScroll() {
 function unlockBodyScroll() {
   if (document.body.dataset.scrollLocked !== "1") return;
   const y = parseInt(document.body.dataset.scrollY || "0", 10);
+  // Order matters on iOS Safari: tear down position:fixed FIRST, then
+  // scroll in the next animation frame so the layout has been
+  // recomputed and scrollTo isn't fighting the fixed-body teardown.
   document.body.style.overflow = "";
   document.body.style.position = "";
   document.body.style.top = "";
@@ -961,8 +980,19 @@ function unlockBodyScroll() {
   document.body.style.right = "";
   document.body.style.width = "";
   delete document.body.dataset.scrollLocked;
-  // Restore the scroll position immediately, before the next paint.
-  window.scrollTo(0, y);
+  // Triple-pronged restore — covers Safari, Chrome, older browsers.
+  // `behavior: instant` skips smooth-scroll animation; we want to
+  // teleport back to the exact pre-lock pixel.
+  const restore = () => {
+    try { window.scrollTo({ top: y, left: 0, behavior: "instant" }); }
+    catch { window.scrollTo(0, y); }
+    document.documentElement.scrollTop = y;
+    document.body.scrollTop = y;          // legacy Safari
+  };
+  restore();
+  // Some browsers commit the position:fixed teardown async; restore
+  // again on the next frame to catch them.
+  requestAnimationFrame(restore);
 }
 function openFlow(kind, index) {
   const modal = document.getElementById("flow");

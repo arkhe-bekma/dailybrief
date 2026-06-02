@@ -104,6 +104,18 @@ function paintStorage(d) {
   set("kpi-rss",       fmtBytes(d.rss_bytes));
   set("kpi-cache2",    fmt(d.cache_keys || 0));
 
+  // Last prune summary line
+  const pruneEl = document.getElementById("prune-summary");
+  if (pruneEl) {
+    const lp = d.last_prune;
+    if (lp && lp.ran_at) {
+      const removed = (lp.removed_articles || 0) + (lp.removed_reader || 0);
+      pruneEl.textContent = `last ${fmtAgo(lp.ran_at)} · removed ${removed} rows`;
+    } else {
+      pruneEl.textContent = "never run yet — auto-runs daily";
+    }
+  }
+
   // Alert when storage is tight
   const alert = document.getElementById("storage-alert");
   if (alert) {
@@ -257,6 +269,20 @@ function paintRuns(runs) {
     </tr>`;
   }).join("") || `<tr><td colspan="5" class="ago">no agent runs logged yet</td></tr>`;
 }
+
+// Manual prune button — fires the same prune the daily worker runs,
+// then tick() refreshes the storage card so the user sees the result.
+document.getElementById("prune-now")?.addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "PRUNING…";
+  try {
+    await fetch("/api/storage/prune", { method: "POST" });
+    await tick();
+  } catch {}
+  btn.disabled = false;
+  btn.textContent = "PRUNE NOW";
+});
 
 $("#interval-save").addEventListener("click", async () => {
   const v = parseInt($("#interval-input").value, 10);
