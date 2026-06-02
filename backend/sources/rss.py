@@ -515,6 +515,13 @@ def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
         # _extract_image searches every common RSS slot. Anything still
         # missing gets resolved later via og:image scrape + AI fallback.
         cleaned_title = _clean_summary(title)[:300] or title
+        cleaned_title = _polish_title(cleaned_title)
+        # Drop photo-series / video-only entries entirely. They show up
+        # as cards with one image and no real news ([포토] / [영상] /
+        # [사진] / [Gallery] / "Photos:" / etc.) and the user explicitly
+        # asked to cut them.
+        if _is_series_filler(cleaned_title):
+            continue
         raw_summary = _clean_summary(entry.get("summary", "") or "")
         # Strip image-markdown / brackets / bylines that publishers
         # frequently leak into RSS <description> (HuggingFace blog
@@ -531,6 +538,53 @@ def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
             image=_extract_image(entry),
         ))
     return items
+
+
+# ── Title polish + photo-series filter ─────────────────────────────
+# Outlet self-attribution that Google News + some KR outlets append:
+#   "Real Title - 매일경제 영문뉴스 펄스(Pulse)"
+#   "Real Title — 매일경제"
+#   "Real Title | Chosun Biz"
+# We don't want that suffix on the card. The dedup module already
+# strips a similar pattern for signature comparison; this version
+# runs at ingest time so the saved title is clean for everyone.
+_TITLE_OUTLET_TAIL_RE = re.compile(
+    r"\s*[-—–·|]\s+(?:[A-Z가-힣][\w&'.()가-힣]*\s*){1,6}$"
+)
+# Standalone-leading "[속보]" / "[BREAKING]" / "[단독]" are signal
+# words — leave them. But "[포토]" / "[영상]" / "[사진]" / "[Photos]"
+# / "[Gallery]" / "Photos:" / "PHOTOS:" mark image-only cards we want
+# to drop.
+_SERIES_FILLER_RE = re.compile(
+    r"^\s*(?:"
+    r"\[(?:포토|영상|사진|화보|갤러리|Photos?|Gallery|Slideshow|Watch|Video)[^\]]*\]"
+    r"|(?:Photos?|Gallery|Watch|Video|Slideshow)\s*:"
+    r")\s*",
+    re.IGNORECASE,
+)
+
+
+def _polish_title(title: str) -> str:
+    """Light title cleanup applied at ingest. Drops trailing outlet
+    self-attribution + collapses whitespace."""
+    if not title:
+        return ""
+    # Strip outlet tail repeatedly so "headline - Site - Network"
+    # collapses cleanly.
+    prev = None
+    while prev != title:
+        prev = title
+        title = _TITLE_OUTLET_TAIL_RE.sub("", title).strip()
+    # Collapse runs of whitespace.
+    title = _WS_RE.sub(" ", title).strip()
+    return title
+
+
+def _is_series_filler(title: str) -> bool:
+    """True for photo / video / gallery teasers we drop on ingest."""
+    if not title:
+        return True
+    return bool(_SERIES_FILLER_RE.match(title))
 
 
 async def _fetch_one(client: httpx.AsyncClient, outlet: dict) -> list[Article]:

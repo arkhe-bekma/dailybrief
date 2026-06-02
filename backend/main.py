@@ -489,13 +489,23 @@ async def refresh():
 
 
 def _detect_lang(text: str) -> str:
-    """Crude lang detect — Hangul block check is enough for our two langs."""
+    """Majority-rules language detect for our two languages.
+    Mixed-language titles (e.g. an English headline that ends with
+    Korean publisher attribution) used to be flagged 'ko' on the
+    first Hangul char and lose their translate button. Count Korean
+    vs Latin chars and pick the dominant side. Tie → default English."""
     if not text:
         return "en"
+    ko = 0
+    en = 0
     for c in text:
         if "가" <= c <= "힣":
-            return "ko"
-    return "en"
+            ko += 1
+        elif "a" <= c.lower() <= "z":
+            en += 1
+    if ko == 0 and en == 0:
+        return "en"
+    return "ko" if ko > en else "en"
 
 
 # Lines we don't want polluting reader paragraphs: image markdown that

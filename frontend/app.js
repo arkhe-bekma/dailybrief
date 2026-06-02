@@ -437,6 +437,7 @@ let STATE = { mixed: [], tape: [], whales: [], trades: [], youtube: [] };
 let CAT = "all";
 let PAGE = 1;
 let LAST_LOAD = null;
+let PENDING_REFRESH = false;  // set true when silentRefresh is deferred
 // Odd page size so HERO (always 1) + the rest is even, which packs
 // cleanly into the 2-per-row tiers below the hero.
 const PAGE_SIZE = 31;
@@ -540,38 +541,26 @@ function renderPager(totalPages) {
   if (totalPages <= 1) return;
   const go = async (n) => {
     PAGE = Math.max(1, Math.min(totalPages, n));
-    // Fetch the page from the archive if it's beyond the in-memory
-    // window. fetchPage clears the override for page 1 so the fast
-    // path keeps working.
     await fetchPage(PAGE);
     paint();
   };
-  const prev = el("button", { type: "button" }, "‹ PREV");
+  // Minimal pager — was a 104-button avalanche. Now: « PREV |
+  // page N of T | NEXT ». Scroll-back via PREV, forward via NEXT,
+  // and a current-page indicator in the middle. The clickable current
+  // chip lets the user jump straight back to page 1 from anywhere
+  // by tapping it (acts as "home" on long sessions).
+  const prev = el("button", { type: "button", class: "pg-arrow" }, "‹ PREV");
   prev.disabled = PAGE === 1;
   prev.onclick = () => go(PAGE - 1);
   p.appendChild(prev);
-  const radius = 3;
-  const lo = Math.max(1, PAGE - radius);
-  const hi = Math.min(totalPages, PAGE + radius);
-  if (lo > 1) {
-    const b = el("button", { type: "button" }, "1");
-    b.onclick = () => go(1);
-    p.appendChild(b);
-    if (lo > 2) p.appendChild(el("span", { class: "label" }, "…"));
-  }
-  for (let i = lo; i <= hi; i++) {
-    const b = el("button", { type: "button" }, String(i));
-    if (i === PAGE) b.classList.add("current");
-    b.onclick = () => go(i);
-    p.appendChild(b);
-  }
-  if (hi < totalPages) {
-    if (hi < totalPages - 1) p.appendChild(el("span", { class: "label" }, "…"));
-    const b = el("button", { type: "button" }, String(totalPages));
-    b.onclick = () => go(totalPages);
-    p.appendChild(b);
-  }
-  const next = el("button", { type: "button" }, "NEXT ›");
+
+  const indicator = el("button",
+    { type: "button", class: "pg-current", title: "tap to jump to page 1" },
+    `${PAGE} / ${totalPages}`);
+  indicator.onclick = () => go(1);
+  p.appendChild(indicator);
+
+  const next = el("button", { type: "button", class: "pg-arrow" }, "NEXT ›");
   next.disabled = PAGE === totalPages;
   next.onclick = () => go(PAGE + 1);
   p.appendChild(next);
@@ -662,6 +651,17 @@ async function load() {
 // Silent auto-refresh: pull /api/brief, swap data, redraw current page
 // without resetting pagination or scrolling. Triggered on a timer.
 async function silentRefresh() {
+  // Never reshuffle the grid while the user is reading. Without this
+  // guard, the article they're currently on could vanish from the
+  // feed during refresh, and closing the modal would land them at a
+  // visually-unrelated scroll position. Deferred refresh fires the
+  // moment the modal closes via the "pendingRefresh" flag below.
+  const readerOpen = !document.getElementById("reader")?.classList.contains("hidden");
+  const flowOpen = !document.getElementById("flow")?.classList.contains("hidden");
+  if (readerOpen || flowOpen) {
+    PENDING_REFRESH = true;
+    return;
+  }
   try {
     const r = await fetch("/api/brief");
     if (!r.ok) return;
@@ -758,6 +758,16 @@ async function openReader(url, item, opts = {}) {
 function targetLangFor(srcLang) {
   if (srcLang === "ko") return "en";
   return "ko";
+}
+
+function relocateTranslateButton(metaEl) {
+  // The button lives in the static index.html under .reader-card so
+  // there's only ever one of them. After the meta line renders we
+  // pluck it out and re-append into the meta strip — that way it
+  // shows up next to WORDS / DATE instead of floating on the photo.
+  const btn = document.getElementById("reader-translate");
+  if (!btn || !metaEl) return;
+  metaEl.appendChild(btn);
 }
 
 function updateTranslateButton() {
@@ -858,18 +868,22 @@ function renderReader(content, data, item) {
     }));
   }
 
-  // Build the meta strip. Word-count and formal date sit as separate
-  // spans so they inherit the same mono-uppercase style from
-  // .reader-meta and the natural gap keeps them visually paired.
-  // Format: "562 WORDS    14 MAY 2026 7:13 PM"
+  // Build the meta strip. Word-count + formal date inherit the same
+  // mono-uppercase 10.5px / 0.8px letter-spacing from .reader-meta.
+  // The ✦번역 translate pill (was floating on the photo) gets moved
+  // INTO the meta line by JS — see relocateTranslateButton().
   const dateLabel = fmtFormal(item.ts);
-  content.appendChild(el("div", { class: "reader-meta" }, [
+  const metaEl = el("div", { class: "reader-meta" }, [
     item.outlet ? el("span", { class: "src" }, item.outlet) : null,
     item.category ? el("span", { class: "tag" }, item.category.toUpperCase()) : null,
     data.byline ? el("span", {}, data.byline) : null,
     data.word_count ? el("span", { class: "reader-stats" }, `${data.word_count} WORDS`) : null,
     dateLabel ? el("span", { class: "reader-stats" }, dateLabel) : null,
-  ]));
+  ]);
+  content.appendChild(metaEl);
+  // Pull the translate button out of the modal card root and append
+  // it to the meta line. updateTranslateButton() decides hidden/shown.
+  relocateTranslateButton(metaEl);
 
   content.appendChild(el("h1", { class: "reader-title", lang },
     data.title || item.title || "(no title)"));
@@ -909,6 +923,13 @@ function closeReader() {
   if (btn) {
     btn.classList.remove("active", "loading");
     btn.style.borderColor = "";
+  }
+  // If a refresh was deferred while we were reading, run it now —
+  // background articles update without jolting the user's scroll
+  // position during their read.
+  if (PENDING_REFRESH) {
+    PENDING_REFRESH = false;
+    setTimeout(silentRefresh, 250);
   }
 }
 
@@ -1026,6 +1047,10 @@ function closeFlow() {
   modal.classList.add("hidden");
   modal.setAttribute("aria-hidden", "true");
   unlockBodyScroll();
+  if (PENDING_REFRESH) {
+    PENDING_REFRESH = false;
+    setTimeout(silentRefresh, 250);
+  }
 }
 
 // ── Swipe-to-close (iOS-style sheet) ──────────────────────────

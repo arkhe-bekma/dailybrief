@@ -1709,12 +1709,20 @@ a { color: inherit; text-decoration: none; }
   transition: all 0.12s;
 }
 .pager button:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); box-shadow: var(--glow-cyan); }
-.pager button.current {
+.pager button.current,
+.pager .pg-current {
   background: var(--neon-yellow);
   border-color: var(--neon-yellow);
   color: #1a1305;
   box-shadow: var(--glow-yellow);
+  /* Slightly wider than the arrows so the "5 / 104" indicator reads
+     cleanly without crowding. */
+  min-width: 80px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
+.pager .pg-current:hover { filter: brightness(1.05); }
+.pager .pg-arrow { letter-spacing: 0.6px; }
 .pager button:disabled { opacity: 0.3; cursor: default; box-shadow: none; }
 .pager .label { color: var(--muted); font-family: var(--mono); font-size: 12px; align-self: center; margin: 0 6px; }
 
@@ -1775,62 +1783,62 @@ footer {
 .reader-card::-webkit-scrollbar { width: 6px; }
 .reader-card::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 .reader-close {
-  /* Pinned to a fixed slot inside .reader-card. Replaces the old
-     sticky+float combo which let multiple sibling × buttons stack at
-     the same anchor when JS accidentally appended duplicates. */
+  /* Pinned to a fixed slot inside .reader-card. Brighter now —
+     previously rendered grey/muted because the .reader-card
+     gradient + the muted base color combined to wash it out. */
   position: absolute;
   top: 14px;
   right: 14px;
-  background: rgba(11,13,24,0.85);
-  color: var(--text);
-  border: 1px solid var(--line);
+  background: rgba(11,13,24,0.92);
+  color: #ffffff;
+  border: 1.5px solid rgba(255,255,255,0.45);
   width: 34px;
   height: 34px;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
+  font-weight: 600;
   font-family: var(--sans);
   z-index: 5;
+  transition: border-color 120ms, color 120ms, box-shadow 120ms;
 }
-.reader-close:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); }
+.reader-close:hover {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 16px rgba(0,225,255,0.45);
+}
+.reader-close:active { transform: scale(0.94); }
 
-/* Translate pill — small, button-shaped, subtle AI accent. Pinned
-   next to the × close button. Hidden via [hidden] until the reader
-   payload arrives and we know the source is non-Korean. */
+/* Translate pill — slim, sits INLINE inside the reader meta strip
+   next to WORDS / DATE rather than overlaid on the photo. Same
+   neon-mag spark + label, just half the visual weight in its old
+   floating position. JS appends it to the meta strip dynamically. */
 .reader-translate {
-  position: absolute;
-  /* Vertical center alignment with the × close button:
-     close: top 14px + height 34px → center @ 31px
-     pill : top ?  + height 26px → center @ 31px ⇒ top = 18px */
-  top: 18px;
-  right: 56px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px 4px 8px;
-  height: 26px;
-  background:
-    linear-gradient(135deg, rgba(255,43,214,0.10), rgba(0,225,255,0.06)),
-    rgba(11,13,24,0.85);
+  gap: 4px;
+  padding: 2px 8px;
+  height: 20px;
+  background: rgba(255,43,214,0.10);
   color: var(--text);
   border: 1px solid rgba(255,43,214,0.40);
-  border-radius: 13px;
+  border-radius: 10px;
   cursor: pointer;
   font-family: var(--mono);
   font-weight: 800;
-  font-size: 10.5px;
+  font-size: 9.5px;
   letter-spacing: 0.9px;
   line-height: 1;
-  z-index: 5;
   text-transform: uppercase;
   transition: border-color 120ms, color 120ms, box-shadow 120ms, transform 60ms;
   user-select: none;
+  vertical-align: middle;
 }
 .reader-translate[hidden] { display: none; }
 .reader-translate .rt-spark {
   color: var(--neon-mag);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
   text-shadow: 0 0 8px rgba(255,43,214,0.55);
 }
@@ -1908,13 +1916,14 @@ footer {
   display: flex;
   gap: 10px;
   align-items: center;
+  justify-content: center;     /* centered to match the title below */
   flex-wrap: wrap;
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  margin-bottom: 14px;
+  margin: 4px 0 18px;
 }
 .reader-meta .src { color: var(--text-2); font-weight: 700; }
 .reader-meta .tag {
@@ -1929,17 +1938,26 @@ footer {
   font-family: var(--display);
   font-weight: 800;
   font-variation-settings: "opsz" 88, "wdth" 92;
-  font-size: calc(clamp(26px, 3vw, 40px) * var(--text-scale, 1));
-  line-height: 1.05;
-  letter-spacing: -1.2px;
-  margin: 0 0 22px;
+  font-size: calc(clamp(24px, 2.8vw, 36px) * var(--text-scale, 1));
+  line-height: 1.08;
+  letter-spacing: -1px;
+  /* Centered + tight side margins. Old layout had a giant gap to the
+     left of the title; centering with text-wrap: balance distributes
+     the words evenly across the available width. */
+  text-align: center;
+  text-wrap: balance;
+  margin: 4px auto 22px;
+  max-width: 720px;
   color: var(--text);
 }
 .reader-title[lang="ko"] {
   font-family: var(--kr);
   font-variation-settings: normal;
-  letter-spacing: -1.2px;
-  line-height: 1.18;
+  letter-spacing: -0.6px;
+  line-height: 1.22;
+  font-weight: 800;
+  /* keep_all so Korean particles don't dangle alone on a new line */
+  word-break: keep-all;
 }
 
 .reader-tldr {
@@ -2008,13 +2026,24 @@ footer {
   font-family: var(--mono);
 }
 
-.reader-body p {
-  font-size: 14.5px;
-  line-height: 1.7;
-  margin: 0 0 14px;
-  color: var(--text-2);
+.reader-body {
+  max-width: 720px;
+  margin: 0 auto;
 }
-.reader-body p[lang="ko"] { font-family: var(--kr); line-height: 1.65; }
+.reader-body p {
+  font-size: 15px;
+  line-height: 1.75;
+  margin: 0 0 16px;
+  color: var(--text-2);
+  letter-spacing: -0.1px;
+}
+.reader-body p[lang="ko"] {
+  font-family: var(--kr);
+  font-size: 15.5px;
+  line-height: 1.72;
+  letter-spacing: -0.3px;
+  word-break: keep-all;
+}
 
 .reader-footer {
   margin-top: 26px;

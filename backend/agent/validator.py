@@ -20,14 +20,15 @@ import re
 
 # ── Heuristics ─────────────────────────────────────────────────────
 MIN_PARAGRAPHS = 2
-MIN_BODY_CHARS = 220        # ≈ 50 English words, ~80 Korean chars
+MIN_BODY_CHARS = 350        # ≈ 70 English words / 120 Korean chars —
+                            # tightened from 220 after the 한경 premium-9
+                            # boilerplate (105 words including a copyright
+                            # block) was sneaking through.
 MIN_TITLE_CHARS = 10
-MAX_PAYWALL_SCAN = 600      # chars at the start of body to scan for stub markers
+MAX_PAYWALL_SCAN = 600
 
 
-# Paywall / consent-wall / interstitial signals. Conservative — false
-# positives cost us a card but false negatives leak paywall ghosts onto
-# the feed which is worse for "premium feel".
+# Paywall / consent-wall / interstitial signals.
 _PAYWALL_PATTERNS = (
     "subscribe to continue",
     "sign in to continue",
@@ -51,6 +52,55 @@ _PAYWALL_PATTERNS = (
     "please enable cookies",
     "checking your browser",
 )
+
+
+# Copyright / "you may not redistribute" blocks publishers append to
+# short articles. When the body is mostly THIS, it's not really news.
+_COPYRIGHT_PATTERNS = (
+    "all rights reserved",
+    "저작권법의 보호",
+    "무단 전재",
+    "무단 복제",
+    "ai 학습 활용",
+    "민형사상 법적 책임",
+    "사전 허가 없는",
+    "재배포 금지",
+    "Copyright ©",
+    "저작권자",
+)
+
+
+# Series-filler markers (already filtered at the rss layer, but the
+# validator catches anything that leaked through with a different
+# trafilatura title than the RSS one).
+_SERIES_FILLER_TITLE_RE = re.compile(
+    r"^\s*(?:\[(?:포토|영상|사진|화보|갤러리|Photos?|Gallery|Slideshow|Watch|Video)[^\]]*\]"
+    r"|(?:Photos?|Gallery|Watch|Video|Slideshow)\s*:)",
+    re.IGNORECASE,
+)
+
+
+def _is_mostly_copyright(body_text: str) -> bool:
+    """True when ≥ 30% of the body text matches copyright/disclaimer
+    boilerplate. Catches the 한경 "프리미엄9의 모든 콘텐츠는…" tail
+    that was making 100-word stubs look like full articles."""
+    if not body_text:
+        return False
+    total = len(body_text)
+    if total < 200:
+        return False
+    matched = 0
+    lower = body_text.lower()
+    for needle in _COPYRIGHT_PATTERNS:
+        n = needle.lower()
+        idx = 0
+        while True:
+            i = lower.find(n, idx)
+            if i < 0:
+                break
+            matched += len(needle)
+            idx = i + len(needle)
+    return matched > 0 and (matched / total) >= 0.25
 
 
 _LOGO_HINT_RE = re.compile(
@@ -89,6 +139,8 @@ def validate(
     title = (article.get("title") or "").strip()
     if len(title) < MIN_TITLE_CHARS:
         return False, "title-too-short"
+    if _SERIES_FILLER_TITLE_RE.match(title):
+        return False, "series-filler"
 
     if not body_payload:
         return False, "no-body"
@@ -102,6 +154,8 @@ def validate(
         return False, "body-too-short"
     if _is_paywall_stub(body_text):
         return False, "paywall"
+    if _is_mostly_copyright(body_text):
+        return False, "mostly-copyright"
 
     # Image rule: either the article has a usable image, OR the body
     # is long enough that the card can stand on its own as a text card.
