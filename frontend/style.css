@@ -1976,19 +1976,29 @@ footer {
   position: relative;
   width: min(820px, calc(100vw - 32px));
   /* Was 92vh — left only ~4vh top breathing room which made the
-     close + translate buttons feel pinned to the viewport edge.
-     86vh keeps content full-height while pushing the card ~7vh
-     below the top with the same 'place-items: center' parent. */
+     close button feel pinned to the viewport edge. 86vh keeps content
+     full-height while pushing the card ~7vh below the top with the
+     same 'place-items: center' parent. */
   max-height: 86vh;
   background:
+    /* Inner magenta wash at the rim — gives the body a soft glow that
+       fades into the dark center, matching the card border style. */
+    radial-gradient(120% 80% at 50% 0%, rgba(255,43,214,0.08), transparent 60%),
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent),
     var(--bg-1);
-  border: 1px solid var(--line);
+  /* Matches the .art card border treatment (rgba 0.32 magenta) so the
+     reader feels like an enlarged card, not a separate UI surface. */
+  border: 1px solid rgba(255,43,214,0.38);
   border-radius: 18px;
   overflow: auto;
   padding: 30px 36px 36px;
-  box-shadow: 0 30px 100px rgba(0,0,0,0.5),
-              0 0 60px rgba(0,225,255,0.08);
+  box-shadow:
+    /* Outer drop for depth */
+    0 30px 100px rgba(0,0,0,0.55),
+    /* Magenta glow layers, two-step so it fades naturally */
+    0 0 0 1px rgba(255,43,214,0.18),
+    0 0 32px rgba(255,43,214,0.22),
+    0 0 70px rgba(255,43,214,0.10);
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
 }
