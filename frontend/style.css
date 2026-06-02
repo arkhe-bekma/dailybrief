@@ -391,6 +391,32 @@ a { color: inherit; text-decoration: none; }
 .src-item.lang-ko .src-name { font-family: var(--kr); }
 .src-item.disabled .src-name { color: var(--dim); text-decoration: line-through; }
 .settings-pop.hidden { display: none; }
+
+/* Section wrapper — groups related rows under a small title with a
+   hairline divider above. Three sections: Display, Feed, Account. */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.settings-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+.settings-section-title {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 24, "wdth" 95;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
 .settings-row {
   display: flex;
   flex-direction: column;
@@ -398,10 +424,18 @@ a { color: inherit; text-decoration: none; }
 }
 .settings-label {
   font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 1.6px;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--text-2);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.settings-hint {
+  font-family: var(--sans);
+  font-size: 11.5px;
+  line-height: 1.4;
   color: var(--muted);
-  font-weight: 700;
+  margin-bottom: 2px;
 }
 .settings-segs {
   display: grid;
@@ -448,9 +482,10 @@ a { color: inherit; text-decoration: none; }
 .settings-account {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
-/* Refresh-rate row uses 5 segments instead of the default 4. */
+/* 5-segment rows (refresh rate uses this). */
+.settings-segs.settings-segs-5,
 #refresh-segs { grid-template-columns: repeat(5, 1fr); }
 
 /* Interest row needs more vertical room — switch to a column layout. */
@@ -1109,16 +1144,95 @@ a { color: inherit; text-decoration: none; }
     0 0 26px rgba(255,43,214,0.22);
 }
 
-/* Image wrapper — positioning context for the × delete button.
-   Inherits sizing from the inner .img so existing tier rules
-   (.tier-hero .img { aspect-ratio: 21/9 ... }) still drive the
-   layout. */
+/* Image wrapper — positioning context for the × delete button + the
+   ✦한 toggle badge. Inherits sizing from the inner .img so existing
+   tier rules (.tier-hero .img { aspect-ratio: 21/9 ... }) still drive
+   the layout. */
 .art .img-wrap {
   position: relative;
   display: block;
   width: 100%;
   border-radius: inherit;
   overflow: hidden;
+}
+
+/* Cards with a stored Korean translation get a richer border + a
+   stronger inner glow so they pop slightly from the rest of the
+   wall. When .ko-on is also set (user toggled to KR view), the glow
+   intensifies further as live feedback. */
+.art.has-ko {
+  border-color: rgba(255,43,214,0.62);
+  box-shadow:
+    0 0 0 1px rgba(255,43,214,0.30),
+    0 0 26px rgba(255,43,214,0.28);
+}
+.art.has-ko:hover {
+  border-color: rgba(255,43,214,0.85);
+  box-shadow:
+    0 0 0 1px rgba(255,43,214,0.42),
+    0 0 32px rgba(255,43,214,0.38);
+}
+.art.has-ko.ko-on {
+  border-color: var(--neon-mag);
+  box-shadow:
+    0 0 0 1px rgba(255,43,214,0.50),
+    0 0 36px rgba(255,43,214,0.45);
+}
+
+/* ✦한 toggle badge — tiny pill on the image's top-right corner.
+   Subtle at rest, lights up when active. Click flips the card
+   preview between source and translation inline (no modal). */
+.ko-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
+  background: rgba(11,13,24,0.78);
+  border: 1px solid rgba(255,43,214,0.55);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 9.5px;
+  letter-spacing: 0.8px;
+  line-height: 1;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  text-transform: uppercase;
+  transition: background 120ms, border-color 120ms, box-shadow 120ms, transform 60ms;
+}
+.ko-badge:hover {
+  border-color: var(--neon-mag);
+  box-shadow: 0 0 12px rgba(255,43,214,0.40);
+}
+.ko-badge:active { transform: scale(0.94); }
+.ko-badge .kb-glyph {
+  color: var(--neon-mag);
+  font-size: 10px;
+  text-shadow: 0 0 8px rgba(255,43,214,0.55);
+}
+.ko-badge .kb-text[lang="ko"] { font-family: var(--kr); }
+/* Active (showing KR) — filled magenta. */
+.art.ko-on .ko-badge {
+  background: var(--neon-mag);
+  border-color: var(--neon-mag);
+  color: #1a0014;
+}
+.art.ko-on .ko-badge .kb-glyph { color: #1a0014; text-shadow: none; }
+/* When the card has no image (text-only tier) the badge falls back
+   into the meta line via .ko-badge-inline. */
+.ko-badge.ko-badge-inline {
+  position: static;
+  margin-left: 4px;
+  height: 18px;
+  padding: 2px 7px;
+  font-size: 8.5px;
 }
 
 /* Delete affordances are admin-only. Hidden by default — JS adds

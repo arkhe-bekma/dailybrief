@@ -253,9 +253,12 @@ function renderVideosStrip(items) {
 
 // ── News card body ─────────────────────────────────────────────
 function newsBody(item, opts = {}) {
-  const lang = item.lang || "en";
-  const titleText = item.title || "";
-  const dekText = item.dek || "";
+  // When the card has a stored translation and the user has toggled
+  // it on (CARD_KO_URLS), swap title + dek for the Korean version.
+  const koView = !!opts.koView && !!item.title_ko;
+  const lang = koView ? "ko" : (item.lang || "en");
+  const titleText = koView && item.title_ko ? item.title_ko : (item.title || "");
+  const dekText   = koView && item.dek_ko   ? item.dek_ko   : (item.dek || "");
   const meta = el("div", { class: "meta" }, [
     el("span", { class: "tag" }, (item.category || "news").toUpperCase()),
     el("span", { class: "src" }, item.outlet || ""),
@@ -289,11 +292,47 @@ function newsBody(item, opts = {}) {
   return { meta, head, dek, why, sparkRow };
 }
 
+// Tracks which article cards are currently rendered in their Korean
+// translated view. Persisted to localStorage so chip nav / pagination
+// preserve the toggle across re-paints.
+const CARD_KO_KEY = "dailybrief.cardKo.v1";
+let CARD_KO_URLS = new Set();
+try {
+  const raw = localStorage.getItem(CARD_KO_KEY);
+  if (raw) CARD_KO_URLS = new Set(JSON.parse(raw));
+} catch {}
+function _persistCardKo() {
+  try { localStorage.setItem(CARD_KO_KEY, JSON.stringify([...CARD_KO_URLS])); } catch {}
+}
+
+// In-place swap of a single card node. Beats a full paint() because
+// only one card flickers; pagination + scroll stay put.
+function rerenderCard(url) {
+  if (!url) return false;
+  const oldNode = [...document.querySelectorAll(".art")]
+    .find((n) => n.getAttribute("data-url") === url);
+  if (!oldNode) return false;
+  const item =
+    (STATE.mixed || []).find((m) => m.url === url) ||
+    (PAGE_OVERRIDE || []).find((m) => m.url === url);
+  if (!item) return false;
+  const tierMatch = oldNode.className.match(/\btier-(\w+)\b/);
+  const tier = tierMatch ? tierMatch[1] : "small";
+  const fresh = renderNewsCard(item, tier);
+  fresh.classList.add("no-fade");
+  oldNode.replaceWith(fresh);
+  return true;
+}
+
 function renderNewsCard(item, tier) {
-  const parts = newsBody(item);
+  const inKo = !!item.title_ko && CARD_KO_URLS.has(item.url);
+  const parts = newsBody(item, { koView: inKo });
   const cat = item.category || "world";
+  const klass = [`art`, `tier-${tier}`, `cat-${cat}`];
+  if (item.title_ko) klass.push("has-ko");
+  if (inKo) klass.push("ko-on");
   const node = el("a", {
-    class: `art tier-${tier} cat-${cat}`,
+    class: klass.join(" "),
     href: item.url || "#",
     target: "_blank",
     rel: "noopener",
@@ -303,8 +342,25 @@ function renderNewsCard(item, tier) {
   const wantsImage = ["hero", "feature", "large", "medium", "small"].includes(tier);
   const imgUrl = wantsImage ? pickImage(item) : null;
 
-  // × delete button — present on every card. Click stops propagation
-  // so it doesn't open the reader; it opens the reason picker instead.
+  // ✦한 / 원문 toggle badge on the image — appears only when a stored
+  // translation exists for this URL. Click swaps the card preview
+  // between English (source) and Korean inline without opening the
+  // modal. Persists per-URL in CARD_KO_URLS.
+  let koBadge = null;
+  if (item.title_ko) {
+    koBadge = el("button", {
+      class: "ko-badge",
+      type: "button",
+      "data-ko-toggle": "1",
+      title: inKo ? "원문 보기" : "한국어 미리보기",
+      "aria-label": "translation toggle",
+    }, [
+      el("span", { class: "kb-glyph", "aria-hidden": "true" }, "✦"),
+      el("span", { class: "kb-text", lang: inKo ? "en" : "ko" }, inKo ? "EN" : "한"),
+    ]);
+  }
+
+  // × delete button — admin-only (CSS hides for non-admins).
   const delBtn = el("button", {
     class: "card-delete",
     type: "button",
@@ -317,6 +373,7 @@ function renderNewsCard(item, tier) {
     const imgWrap = el("div", { class: "img-wrap" });
     const imgEl = el("div", { class: "img", style: `background-image:url('${imgUrl}')` });
     imgWrap.appendChild(imgEl);
+    if (koBadge) imgWrap.appendChild(koBadge);
     imgWrap.appendChild(delBtn);
     if (tier === "hero") {
       node.appendChild(imgWrap);
@@ -327,7 +384,12 @@ function renderNewsCard(item, tier) {
     }
   } else {
     [parts.meta, parts.head, parts.dek, parts.why, parts.sparkRow].forEach((p) => p && node.appendChild(p));
-    // No image? Pin the × delete to the card's top-right corner via CSS.
+    // No image? Drop the toggle badge into the meta line so it's still
+    // accessible on text-only cards.
+    if (koBadge) {
+      koBadge.classList.add("ko-badge-inline");
+      parts.meta.appendChild(koBadge);
+    }
     delBtn.classList.add("card-delete-inline");
     node.appendChild(delBtn);
   }
@@ -787,9 +849,30 @@ async function toggleTranslation() {
     }
     READER_STATE.translated = data;
     READER_STATE.view = "translated";
-    // renderReader rebuilds the button with the "原文 / Original" label
+    // renderReader rebuilds the button with the "원문 / Original" label
     // and clears any loading state.
     renderReader(content, data, READER_STATE.item);
+    // If we just translated an English article INTO Korean, stamp the
+    // feed-card data so the ✦한 badge appears on the wall without
+    // waiting for the next /api/brief tick. KO→EN doesn't touch the
+    // card affordance (card already in Korean for Korean readers).
+    const tgtLang = _targetLang(READER_STATE.original.lang);
+    if (tgtLang === "ko" && data.title && data.paragraphs && data.paragraphs.length) {
+      const url = READER_STATE.url;
+      const stamp = (list) => {
+        if (!Array.isArray(list)) return;
+        for (const m of list) {
+          if (m && m.url === url) {
+            m.title_ko = data.title;
+            m.dek_ko   = (data.paragraphs[0] || "").slice(0, 280);
+            m.translated_at = Math.floor(Date.now() / 1000);
+          }
+        }
+      };
+      stamp(STATE.mixed);
+      stamp(PAGE_OVERRIDE);
+      rerenderCard(url);
+    }
   } catch (e) {
     console.warn("translate failed:", e);
     if (btn) { btn.classList.remove("loading"); btn.disabled = false; }
@@ -1355,9 +1438,9 @@ document.addEventListener("DOMContentLoaded", () => {
       b.classList.toggle("active", parseInt(b.dataset.refresh, 10) === seconds);
     });
   }
-  let savedRefresh = 300;
+  let savedRefresh = 1800;
   try {
-    const v = parseInt(localStorage.getItem("dailybrief.refreshSeconds") || "300", 10);
+    const v = parseInt(localStorage.getItem("dailybrief.refreshSeconds") || "1800", 10);
     if (!isNaN(v) && v >= 0) savedRefresh = v;
   } catch {}
   applyRefreshSeg(savedRefresh);
@@ -1544,6 +1627,21 @@ document.addEventListener("DOMContentLoaded", () => {
       if (url) openDeleteModal(url, title);
       return;
     }
+    // ✦한 translation toggle — flip the card's preview between
+    // English source and Korean translation. Never opens the reader.
+    const koBtn = e.target.closest("[data-ko-toggle]");
+    if (koBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const art = koBtn.closest(".art");
+      const url = art?.getAttribute("data-url") || art?.getAttribute("href");
+      if (!url) return;
+      if (CARD_KO_URLS.has(url)) CARD_KO_URLS.delete(url);
+      else CARD_KO_URLS.add(url);
+      _persistCardKo();
+      if (!rerenderCard(url)) paint(false);
+      return;
+    }
     const art = e.target.closest("#paper .art, #paper-noimg .art");
     if (!art) return;
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -1595,7 +1693,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function refreshIntervalSeconds() {
     try {
       const v = parseInt(
-        localStorage.getItem("dailybrief.refreshSeconds") || "300", 10,
+        localStorage.getItem("dailybrief.refreshSeconds") || "1800", 10,
       );
       if (isNaN(v) || v < 0) return 300;
       return v;
