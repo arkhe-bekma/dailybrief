@@ -1069,6 +1069,16 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 
+/* Delete affordances are admin-only. Hidden by default — JS adds
+   body[data-is-admin="1"] after /api/auth/whoami confirms the user.
+   The backend /api/article/delete also requires admin, so even if
+   someone removes this CSS rule the destructive action won't fire
+   for non-admins. */
+body:not([data-is-admin="1"]) .card-delete,
+body:not([data-is-admin="1"]) .reader-delete {
+  display: none !important;
+}
+
 /* × delete button on every card — sits at the top-left of the image
    wrap (opposite corner from the ✦한 badge so they never collide). On
    text-only cards (.card-delete-inline) it pins to the card's top-right

@@ -710,16 +710,18 @@ async def admin_rebuild(request: Request, purge_now: int = 0):
 
 
 @app.post("/api/article/delete")
-async def delete_article_by_user(body: dict):
-    """User-driven article removal. Body: {url, reason, note?}.
+async def delete_article_by_user(body: dict, request: Request):
+    """Admin-only article removal. Body: {url, reason, note?}.
 
     The article row + cached reader body are deleted permanently, and
     the URL is added to `blocked_urls` so the RSS fetcher can never
     bring the same story back via a future poll. `reason` is one of
-    the short slugs from the front-end picker (quality / irrelevant /
-    incomplete / broken / duplicate / misleading / other); `note` is
-    optional free-text the user typed.
+    the short slugs from the front-end picker; `note` is optional
+    free-text. Gated to admin because deletion is destructive and
+    can't be undone — anonymous visitors browsing the feed can't take
+    articles off it for everyone else.
     """
+    await _require_admin(request)
     url = (body or {}).get("url") or ""
     reason = (body or {}).get("reason") or "other"
     note = (body or {}).get("note") or ""

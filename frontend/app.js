@@ -1211,13 +1211,21 @@ document.addEventListener("DOMContentLoaded", () => {
     paint(false);
   });
 
-  // Account row — flip login/logout visibility based on /whoami.
+  // Account row + admin gate. /whoami returns {user: {username, is_admin,
+  // subscription}} when logged in, {user: null} otherwise. We mirror
+  // is_admin onto body[data-is-admin] so the CSS can hide delete buttons
+  // for everyone except admins — and the backend /api/article/delete
+  // independently requires admin, so the gate works even if someone
+  // tampers with the attribute in DevTools.
   fetch("/api/auth/whoami").then((r) => r.json()).then((d) => {
     const loggedIn = !!(d && d.user);
+    const isAdmin = !!(d && d.user && d.user.is_admin);
     const loginA  = document.getElementById("settings-login");
     const logoutA = document.getElementById("settings-logout");
     if (loginA)  loginA.hidden  = loggedIn;
     if (logoutA) logoutA.hidden = !loggedIn;
+    if (isAdmin) document.body.dataset.isAdmin = "1";
+    else         delete document.body.dataset.isAdmin;
   }).catch(() => {});
   document.getElementById("settings-logout")?.addEventListener("click", async (e) => {
     e.preventDefault();
