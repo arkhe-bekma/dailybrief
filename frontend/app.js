@@ -1397,13 +1397,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const loggedIn = !!user;
     const isAdmin = !!(user && user.is_admin);
 
-    // Settings popover account row
+    // Settings popover account row — five states, each link gated.
     const loginA   = document.getElementById("settings-login");
     const logoutA  = document.getElementById("settings-logout");
     const changeA  = document.getElementById("settings-changepw");
-    if (loginA)  loginA.hidden   = loggedIn;
-    if (logoutA) logoutA.hidden  = !loggedIn;
-    if (changeA) changeA.hidden  = !loggedIn;
+    const accountA = document.getElementById("settings-account");
+    const labA     = document.getElementById("settings-lab");
+    if (loginA)   loginA.hidden   = loggedIn;
+    if (logoutA)  logoutA.hidden  = !loggedIn;
+    if (changeA)  changeA.hidden  = !loggedIn;
+    if (accountA) accountA.hidden = !loggedIn;
+    // Lab is strictly admin-only — anonymous + regular users don't even
+    // see the link. Backend /lab also redirects them to /login, so the
+    // gate is enforced on both sides.
+    if (labA)     labA.hidden     = !isAdmin;
 
     // Body attribute drives the CSS delete-button gate.
     if (isAdmin) document.body.dataset.isAdmin = "1";
@@ -1439,16 +1446,13 @@ document.addEventListener("DOMContentLoaded", () => {
     paintAccount((d && d.user) || null);
   }).catch(() => paintAccount(null));
 
-  // Masthead account chip — anonymous → go to /login, logged-in →
-  // pop the settings panel so the user can change pw / log out.
+  // Masthead account button — anonymous → /login, logged-in → /account.
+  // Direct jump to the profile page is more intuitive than the settings
+  // popover dance, and the popover is one ⚙ click away anyway.
   document.getElementById("account-btn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (document.body.dataset.isAdmin === "1" ||
-        !document.getElementById("account-btn").classList.contains("account-anon")) {
-      toggleSettings();
-    } else {
-      location.href = "/login";
-    }
+    const anon = document.getElementById("account-btn").classList.contains("account-anon");
+    location.href = anon ? "/login" : "/account";
   });
 
   // Change-password link in settings → open modal.

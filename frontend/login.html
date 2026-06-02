@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>login · dailybrief</title>
+  <title>sign in · dailybrief</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -30,40 +30,67 @@
       place-items: center;
       padding: 20px;
     }
-    .login-card {
+    .card {
       width: 100%;
-      max-width: 380px;
+      max-width: 400px;
       background: var(--bg-2);
-      border: 1px solid var(--line-2);
+      border: 1px solid rgba(255,43,214,0.32);
       border-radius: 16px;
-      padding: 32px 28px 26px;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+      padding: 30px 28px 26px;
+      box-shadow:
+        0 24px 64px rgba(0,0,0,0.55),
+        0 0 24px rgba(255,43,214,0.18),
+        0 0 0 1px rgba(255,255,255,0.04) inset;
     }
     .brand {
       display: flex; align-items: center; gap: 8px;
-      margin-bottom: 4px;
+      margin-bottom: 18px;
       font-family: var(--display);
-      font-weight: 800;
-      font-size: 22px;
+      font-variation-settings: "opsz" 72, "wdth" 96;
+      font-weight: 700;
+      font-size: 24px;
       letter-spacing: -0.6px;
     }
     .brand .logo { color: var(--neon-cyan); font-size: 18px; }
-    .tag {
-      font-family: var(--mono);
-      font-size: 10.5px;
-      color: var(--muted);
-      letter-spacing: 1.4px;
-      text-transform: uppercase;
-      margin-bottom: 26px;
+
+    /* Tab bar: Sign in / Create account */
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 4px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 9px;
+      margin-bottom: 22px;
     }
+    .tab {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      padding: 8px 0;
+      border-radius: 7px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      cursor: pointer;
+      transition: color 140ms, background 140ms;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      background: var(--bg-1);
+      color: var(--text);
+      box-shadow: 0 1px 0 rgba(255,43,214,0.32) inset, 0 0 12px rgba(255,43,214,0.10);
+    }
+
     label {
       display: block;
       font-family: var(--mono);
-      font-size: 10.5px;
-      letter-spacing: 1px;
+      font-size: 10px;
+      letter-spacing: 1.2px;
       color: var(--muted);
       text-transform: uppercase;
-      margin: 14px 0 6px;
+      margin: 14px 0 5px;
     }
     input[type="text"], input[type="password"] {
       width: 100%;
@@ -74,12 +101,12 @@
       color: var(--text);
       font-family: var(--sans);
       font-size: 14px;
-      transition: border-color 120ms, box-shadow 120ms;
+      transition: border-color 140ms, box-shadow 140ms;
     }
     input:focus {
       outline: none;
-      border-color: var(--neon-cyan);
-      box-shadow: 0 0 0 2px rgba(0,225,255,0.18);
+      border-color: rgba(255,43,214,0.55);
+      box-shadow: 0 0 0 2px rgba(255,43,214,0.18);
     }
     button.primary {
       width: 100%;
@@ -89,25 +116,17 @@
       border: none;
       border-radius: 9px;
       padding: 12px;
-      font-family: var(--mono);
+      font-family: var(--sans);
       font-weight: 800;
-      font-size: 11.5px;
-      letter-spacing: 1.2px;
-      text-transform: uppercase;
+      font-size: 13px;
+      letter-spacing: 0.4px;
       cursor: pointer;
-      transition: transform 80ms, box-shadow 120ms;
+      transition: transform 80ms, box-shadow 140ms, filter 140ms;
     }
-    button.primary:hover { box-shadow: 0 0 18px rgba(0,225,255,0.4); }
+    button.primary:hover { filter: brightness(1.06); box-shadow: 0 0 18px rgba(0,225,255,0.4); }
     button.primary:active { transform: scale(0.99); }
     button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
-    .hint {
-      margin-top: 16px;
-      font-family: var(--mono);
-      font-size: 10px;
-      color: var(--muted);
-      letter-spacing: 0.6px;
-      text-align: center;
-    }
+
     .err {
       margin-top: 14px;
       padding: 9px 12px;
@@ -121,9 +140,10 @@
       display: none;
     }
     .err.visible { display: block; }
+
     a.back {
       display: inline-block;
-      margin-top: 14px;
+      margin-top: 16px;
       color: var(--muted);
       text-decoration: none;
       font-family: var(--mono);
@@ -132,65 +152,118 @@
       text-transform: uppercase;
     }
     a.back:hover { color: var(--neon-cyan); }
+
+    .pane { display: none; }
+    .pane.active { display: block; }
   </style>
 </head>
 <body>
-  <div class="login-card">
+  <div class="card">
     <div class="brand"><span class="logo">▮</span><span>dailybrief</span></div>
-    <div class="tag">ADMIN LOGIN</div>
 
-    <form id="login-form" autocomplete="on">
-      <label for="username">Username</label>
-      <input id="username" name="username" type="text" autocomplete="username" required autofocus />
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-pane="signin" type="button">Sign in</button>
+      <button class="tab" data-pane="signup" type="button">Create account</button>
+    </div>
 
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required />
+    <!-- SIGN IN -->
+    <form id="signin-form" class="pane active" autocomplete="on">
+      <label for="signin-user">Username</label>
+      <input id="signin-user" name="username" type="text" autocomplete="username" required autofocus />
 
-      <button class="primary" type="submit" id="submit-btn">SIGN IN</button>
-      <div class="err" id="err"></div>
+      <label for="signin-pass">Password</label>
+      <input id="signin-pass" name="password" type="password" autocomplete="current-password" required />
+
+      <button class="primary" type="submit" id="signin-btn">Sign in</button>
     </form>
 
-    <div class="hint">Default: admin / admin — change after first login.</div>
+    <!-- SIGN UP -->
+    <form id="signup-form" class="pane" autocomplete="off">
+      <label for="signup-user">Username</label>
+      <input id="signup-user" name="username" type="text" autocomplete="username" required minlength="3" maxlength="32" />
+
+      <label for="signup-pass">Password</label>
+      <input id="signup-pass" name="password" type="password" autocomplete="new-password" required minlength="4" />
+
+      <label for="signup-confirm">Confirm password</label>
+      <input id="signup-confirm" type="password" autocomplete="new-password" required minlength="4" />
+
+      <button class="primary" type="submit" id="signup-btn">Create account</button>
+    </form>
+
+    <div class="err" id="err"></div>
+
     <a class="back" href="/">← back to feed</a>
   </div>
 
   <script>
-    const form = document.getElementById("login-form");
-    const submit = document.getElementById("submit-btn");
-    const errBox = document.getElementById("err");
     const params = new URLSearchParams(location.search);
-    const next = params.get("next") || "/lab";
+    const next = params.get("next") || "/";
 
-    form.addEventListener("submit", async (e) => {
+    const err = document.getElementById("err");
+    const showErr = (msg) => { err.textContent = msg; err.classList.add("visible"); };
+    const clearErr = () => err.classList.remove("visible");
+
+    // Tab switcher
+    document.querySelectorAll(".tab").forEach((b) => {
+      b.addEventListener("click", () => {
+        const target = b.dataset.pane;
+        document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === b));
+        document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === `${target}-form`));
+        clearErr();
+        const focusEl = document.querySelector(`.pane.active input`);
+        if (focusEl) focusEl.focus();
+      });
+    });
+
+    // Sign-in submit
+    document.getElementById("signin-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      errBox.classList.remove("visible");
-      submit.disabled = true;
-      submit.textContent = "SIGNING IN…";
+      clearErr();
+      const btn = document.getElementById("signin-btn");
+      btn.disabled = true; btn.textContent = "Signing in…";
       try {
         const r = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            username: document.getElementById("username").value,
-            password: document.getElementById("password").value,
+            username: document.getElementById("signin-user").value.trim(),
+            password: document.getElementById("signin-pass").value,
           }),
         });
         const d = await r.json();
-        if (!r.ok) {
-          errBox.textContent = d.detail || "login failed";
-          errBox.classList.add("visible");
-          submit.disabled = false;
-          submit.textContent = "SIGN IN";
-          return;
-        }
-        // Bounce to the requested next URL. /lab is admin-only;
-        // anonymous next= goes back to feed.
+        if (!r.ok) { showErr(d.detail || "Sign-in failed"); btn.disabled = false; btn.textContent = "Sign in"; return; }
         location.href = next;
-      } catch (err) {
-        errBox.textContent = err.message || "network error";
-        errBox.classList.add("visible");
-        submit.disabled = false;
-        submit.textContent = "SIGN IN";
+      } catch (e) {
+        showErr(e.message || "Network error");
+        btn.disabled = false; btn.textContent = "Sign in";
+      }
+    });
+
+    // Sign-up submit
+    document.getElementById("signup-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearErr();
+      const pw = document.getElementById("signup-pass").value;
+      const confirm = document.getElementById("signup-confirm").value;
+      if (pw !== confirm) { showErr("Passwords don't match."); return; }
+      const btn = document.getElementById("signup-btn");
+      btn.disabled = true; btn.textContent = "Creating…";
+      try {
+        const r = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("signup-user").value.trim(),
+            password: pw,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr(d.detail || "Signup failed"); btn.disabled = false; btn.textContent = "Create account"; return; }
+        location.href = next;
+      } catch (e) {
+        showErr(e.message || "Network error");
+        btn.disabled = false; btn.textContent = "Create account";
       }
     });
   </script>

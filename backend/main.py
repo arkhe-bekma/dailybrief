@@ -668,6 +668,54 @@ async def auth_whoami(request: Request):
     }
 
 
+@app.get("/api/auth/profile")
+async def auth_profile(request: Request):
+    """Full profile data for the /account page — adds created_at on top
+    of /whoami so the page can show 'member since'."""
+    user = await auth.current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="login required")
+    rec = await asyncio.to_thread(auth._get_user_by_username_sync, user["username"])
+    if not rec:
+        raise HTTPException(status_code=404, detail="user not found")
+    return {
+        "username": rec["username"],
+        "is_admin": bool(rec["is_admin"]),
+        "subscription": bool(rec["subscription"]),
+        "created_at": rec["created_at"],
+    }
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(body: dict, response: Response):
+    """Open signup. New accounts default to non-admin + no subscription;
+    only admin/admin (seeded on first boot) can elevate others via direct
+    DB edits. Auto-login on success so the user lands signed in."""
+    username = ((body or {}).get("username") or "").strip()
+    password = (body or {}).get("password") or ""
+    if len(username) < 3 or len(username) > 32:
+        raise HTTPException(status_code=400, detail="username must be 3-32 chars")
+    if not username.replace("_", "").replace("-", "").replace(".", "").isalnum():
+        raise HTTPException(status_code=400, detail="username: letters, digits, . _ - only")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="password must be at least 4 chars")
+    existing = await asyncio.to_thread(auth._get_user_by_username_sync, username)
+    if existing:
+        raise HTTPException(status_code=409, detail="username already taken")
+    user_id = await auth.create_user(
+        username, password, subscription=False, is_admin=False,
+    )
+    if not user_id:
+        raise HTTPException(status_code=500, detail="signup failed")
+    # Auto-login: drop a session cookie so the new user lands signed in.
+    token = await auth.create_session(user_id)
+    auth.set_session_cookie(response, token)
+    return {
+        "ok": True,
+        "user": {"username": username, "is_admin": False, "subscription": False},
+    }
+
+
 @app.post("/api/auth/change-password")
 async def auth_change_password(body: dict, request: Request):
     """Logged-in user changes their own password. Requires the old
@@ -1439,6 +1487,16 @@ async def login_page():
     """Tiny login page. Standalone HTML so we don't have to inline a
     form into the main feed UI."""
     return FileResponse(FRONTEND_DIR / "login.html", headers=_NO_STORE_HEADERS)
+
+
+@app.get("/account")
+async def account_page(request: Request):
+    """User profile + account settings. Anonymous visitors are bounced
+    to /login so the page itself never has to render an empty state."""
+    user = await auth.current_user(request)
+    if not user:
+        return RedirectResponse(url="/login?next=/account", status_code=302)
+    return FileResponse(FRONTEND_DIR / "account.html", headers=_NO_STORE_HEADERS)
 
 
 @app.get("/api/page")
