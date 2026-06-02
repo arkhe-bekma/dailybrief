@@ -128,42 +128,68 @@ def _compose_dek_from_body(paras: list[str], title: str = "") -> str:
     return (" ".join(picked))[:700]
 
 
-async def _resummary_worker():
-    await asyncio.sleep(45)   # let validator + ingest settle first
-    print("[resummary] worker armed", flush=True)
-    while True:
+async def _process_resummary_batch(limit: int) -> tuple[int, int]:
+    """Single resummary pass — pull `limit` candidates and rewrite
+    their deks from extracted body. Returns (rewritten, total)."""
+    try:
+        batch = await db.list_resummary_candidates(limit=limit)
+    except Exception as exc:
+        print(f"[resummary] queue read failed: {exc!r}", flush=True)
+        return 0, 0
+    rewritten = 0
+    for row in batch:
+        url = row.get("url")
+        if not url:
+            continue
         try:
-            batch = await db.list_resummary_candidates(limit=12)
-        except Exception as exc:
-            print(f"[resummary] queue read failed: {exc!r}", flush=True)
-            await asyncio.sleep(120)
-            continue
-        if not batch:
-            await asyncio.sleep(180)
-            continue
-        rewritten = 0
-        for row in batch:
-            url = row.get("url")
-            if not url:
+            payload = await db.get_reader(url)
+            if not payload:
                 continue
-            try:
-                payload = await db.get_reader(url)
-                if not payload:
-                    continue
-                paras = payload.get("paragraphs") or []
-                if not paras:
-                    continue
-                title = payload.get("title") or row.get("title") or ""
-                combined = _compose_dek_from_body(paras, title)
-                if not combined or len(combined) <= row.get("summary_len", 0):
-                    continue
-                await db.force_update_summary(url, combined)
-                rewritten += 1
-            except Exception as exc:
-                print(f"[resummary] {url[:60]} failed: {exc!r}", flush=True)
+            paras = payload.get("paragraphs") or []
+            if not paras:
+                continue
+            title = payload.get("title") or row.get("title") or ""
+            combined = _compose_dek_from_body(paras, title)
+            if not combined or len(combined) <= row.get("summary_len", 0):
+                continue
+            await db.force_update_summary(url, combined)
+            rewritten += 1
+        except Exception as exc:
+            print(f"[resummary] {url[:60]} failed: {exc!r}", flush=True)
+    return rewritten, len(batch)
+
+
+async def _resummary_worker():
+    """Two phases:
+      • Startup burst — chew through whatever's in the queue right now
+        in big batches with no sleep between, so a fresh deploy clears
+        the backlog in well under a minute.
+      • Steady state — 30-row batches every second; sleep longer when
+        the queue is empty.
+    User asked for "20-30 at a time" + "fix the visible feed fast"."""
+    await asyncio.sleep(20)
+    print("[resummary] worker armed — entering startup burst", flush=True)
+
+    # Phase 1: burst until the queue is empty or we've done 60 batches.
+    for _ in range(60):
+        rewritten, total = await _process_resummary_batch(limit=40)
         if rewritten:
-            print(f"[resummary] rewrote {rewritten}/{len(batch)} card deks", flush=True)
-        await asyncio.sleep(3)
+            print(f"[resummary] burst rewrote {rewritten}/{total}", flush=True)
+        if total < 40:
+            break
+        await asyncio.sleep(0.2)
+
+    print("[resummary] burst complete — entering steady cadence", flush=True)
+
+    # Phase 2: steady cadence.
+    while True:
+        rewritten, total = await _process_resummary_batch(limit=30)
+        if rewritten:
+            print(f"[resummary] rewrote {rewritten}/{total}", flush=True)
+        if total == 0:
+            await asyncio.sleep(60)
+        else:
+            await asyncio.sleep(1)
 
 
 async def _prune_worker():
@@ -330,6 +356,15 @@ async def api_translate(url: str, lang: str = "ko"):
     if out is None:
         return {"error": "translation unavailable — check GEMINI_API_KEY or model error"}
     return out
+
+
+@app.post("/api/ingest/resummary")
+async def trigger_resummary(limit: int = 200):
+    """Force-rerun the dek rewriter on `limit` short-summary articles
+    right now. Useful for clearing a freshly-noticed backlog without
+    waiting for the worker's pace. Returns counts."""
+    rewritten, total = await _process_resummary_batch(limit=max(1, min(limit, 500)))
+    return {"rewritten": rewritten, "examined": total}
 
 
 @app.get("/api/usage")
