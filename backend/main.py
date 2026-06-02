@@ -458,11 +458,42 @@ async def trigger_resummary(request: Request, limit: int = 200):
     return {"rewritten": rewritten, "examined": total}
 
 
+def _mask_api_key(k: str | None) -> str | None:
+    """Return a masked fingerprint of an API key (first 4 · last 4)
+    so the operator can see which key is active without exposing the
+    full secret. None when the env var isn't set."""
+    if not k or len(k) < 10:
+        return None
+    return f"{k[:4]}…{k[-4:]}"
+
+
 @app.get("/api/usage")
 async def api_usage(request: Request):
-    """LLM cost telemetry. Admin-only — exposes ${} cost per provider."""
+    """LLM cost telemetry + masked key fingerprints. Admin-only —
+    surfaces ${} cost per provider plus which key each provider is
+    currently using (first 4 + last 4 chars only)."""
     await _require_admin(request)
-    return await db.api_usage()
+    import os as _os
+    payload = await db.api_usage()
+    payload["keys"] = {
+        "gemini": {
+            "set": bool(_os.getenv("GEMINI_API_KEY") or _os.getenv("GOOGLE_API_KEY")),
+            "fingerprint": _mask_api_key(
+                _os.getenv("GEMINI_API_KEY") or _os.getenv("GOOGLE_API_KEY")
+            ),
+            "env_var": (
+                "GEMINI_API_KEY" if _os.getenv("GEMINI_API_KEY")
+                else "GOOGLE_API_KEY" if _os.getenv("GOOGLE_API_KEY")
+                else None
+            ),
+        },
+        "anthropic": {
+            "set": bool(_os.getenv("ANTHROPIC_API_KEY")),
+            "fingerprint": _mask_api_key(_os.getenv("ANTHROPIC_API_KEY")),
+            "env_var": "ANTHROPIC_API_KEY" if _os.getenv("ANTHROPIC_API_KEY") else None,
+        },
+    }
+    return payload
 
 
 @app.get("/api/ingest/status")

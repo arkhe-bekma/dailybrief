@@ -545,6 +545,62 @@ body.lab {
 }
 .usage-recent summary:hover { color: var(--neon-cyan); }
 
+/* ── API keys block (masked fingerprints) ─────────────────────── */
+.usage-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+.usage-key-row {
+  display: grid;
+  grid-template-columns: 120px 180px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--mono);
+}
+.usage-key-row.inactive {
+  border-style: dashed;
+  opacity: 0.55;
+}
+.usage-key-name {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: var(--neon-cyan);
+}
+.usage-key-row.inactive .usage-key-name { color: var(--muted); }
+.usage-key-env {
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  color: var(--text-2);
+}
+.usage-key-fp {
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  color: var(--text);
+  background: rgba(0,225,255,0.08);
+  border: 1px solid rgba(0,225,255,0.30);
+  padding: 3px 9px;
+  border-radius: 5px;
+  justify-self: start;
+  user-select: all;  /* lets the operator triple-click + copy the masked fingerprint into Slack etc. */
+}
+.usage-key-row.inactive .usage-key-fp {
+  background: transparent;
+  border-color: var(--line-2);
+  color: var(--muted);
+}
+@media (max-width: 640px) {
+  .usage-key-row { grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px 10px; }
+  .usage-key-env { font-size: 9.5px; }
+  .usage-key-fp  { grid-column: 1 / -1; justify-self: start; }
+}
+
 @media (max-width: 640px) {
   .usage-row { grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .usage-tile { padding: 8px 10px; }

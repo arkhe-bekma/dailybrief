@@ -152,6 +152,34 @@ function paintUsage(d) {
       : `<span class="ago">no calls today</span>`;
   }
 
+  // API keys block — masked fingerprints so the operator can confirm
+  // which key is wired into each provider without leaking the secret.
+  const keysEl = document.getElementById("usage-keys");
+  if (keysEl) {
+    const keys = d.keys || {};
+    const providers = [
+      { id: "gemini",    label: "Gemini" },
+      { id: "anthropic", label: "Anthropic" },
+    ];
+    keysEl.innerHTML = providers.map((p) => {
+      const k = keys[p.id] || {};
+      if (!k.set) {
+        return `
+          <div class="usage-key-row inactive">
+            <span class="usage-key-name">${p.label}</span>
+            <span class="usage-key-env">—</span>
+            <span class="usage-key-fp">not set</span>
+          </div>`;
+      }
+      return `
+        <div class="usage-key-row">
+          <span class="usage-key-name">${p.label}</span>
+          <span class="usage-key-env">${k.env_var || ""}</span>
+          <span class="usage-key-fp" title="${p.label} key fingerprint">${k.fingerprint || "—"}</span>
+        </div>`;
+    }).join("");
+  }
+
   const recentBody = document.querySelector("#usage-recent-table tbody");
   if (recentBody) {
     const rows = d.recent || [];
