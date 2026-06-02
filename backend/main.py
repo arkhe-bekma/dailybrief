@@ -113,6 +113,10 @@ def _compose_dek_from_body(paras: list[str], title: str = "") -> str:
         s = (raw or "").strip()
         if not s:
             continue
+        # Related-links tail markers — once we cross into them, the
+        # rest of the body is junk navigation; stop walking.
+        if _looks_like_related_link(s):
+            break
         norm = s.lower()
         # Skip title-as-paragraph (exact match or near-exact).
         if t and (norm == t or (norm.startswith(t) and len(norm) <= len(t) + 4)):
@@ -729,6 +733,41 @@ _EMOJI_RE = re.compile(
 # U+FFFD (replacement char) means trafilatura got mojibake. Drop the line.
 _GARBLE_CHAR = "�"
 
+# "Related links" tail markers — Yonhap, AP, Reuters, AFP and similar
+# wire services like to dump a list of other headlines at the END of
+# the article body. trafilatura grabs them as paragraphs even though
+# they're navigational chrome, not actual story content. Two reliable
+# tells:
+#   1. Yonhap-style headline tags:  "(LEAD)", "(URGENT)", "(3rd LD)",
+#      "(5th LD)", "(2nd UPDATE)"
+#   2. Lines ending in a single trailing dash (Yonhap's link separator):
+#      "BTS shows in N. America draw 840,000 concertgoers: agency -"
+# Once we hit one, EVERYTHING that follows is overwhelmingly more of
+# the same — bail out and treat the body as ended.
+_HEADLINE_LINK_TAG_RE = re.compile(
+    r"^\s*\(\s*(?:LEAD|URGENT|UPDATE|"
+    r"\d+(?:st|nd|rd|th)\s*(?:LD|UPDATE)|"
+    r"UPDATE\s*\d*)\s*\)",
+    re.IGNORECASE,
+)
+_HEADLINE_LINK_TRAIL_RE = re.compile(r"\s[-–—]\s*$")
+
+
+def _looks_like_related_link(line: str) -> bool:
+    """True for navigational headline links that get appended after
+    the real article body."""
+    if not line:
+        return False
+    s = line.strip()
+    if _HEADLINE_LINK_TAG_RE.match(s):
+        return True
+    # Trailing-dash headline ONLY counts as a link when the line is
+    # short (typical headline length). Real paragraphs that happen to
+    # end with em-dash punctuation are usually 200+ chars.
+    if len(s) < 200 and _HEADLINE_LINK_TRAIL_RE.search(s):
+        return True
+    return False
+
 
 # Adaptive ceiling on what the reader modal shows. Short articles render
 # every paragraph; long ones get clipped where the reader almost certainly
@@ -853,6 +892,11 @@ def _split_paragraphs(text: str) -> list[str]:
         # Lines that are mostly raw HTML attribute fragments
         if _ATTR_FRAG_RE.search(p) and len(_ATTR_FRAG_RE.findall(p)) >= 2:
             continue
+        # Related-links tail (Yonhap "(LEAD)…", trailing " -" headlines):
+        # once we hit one, every line after is usually another link of
+        # the same shape. Bail out of the loop entirely.
+        if _looks_like_related_link(p):
+            break
         out.append(p)
         total_chars += len(p)
         if len(out) >= _PARA_HARD_MAX or total_chars >= _PARA_CHAR_BUDGET:
