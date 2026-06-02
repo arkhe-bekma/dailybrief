@@ -1336,6 +1336,13 @@ function openDeleteModal(url, title) {
   DELETE_TARGET = { url, title: title || "" };
   const headline = document.getElementById("delete-headline");
   if (headline) headline.textContent = title || url;
+  // Clear any leftover error / submitting state from a previous open.
+  const errEl = document.getElementById("delete-error");
+  if (errEl) { errEl.textContent = ""; errEl.classList.remove("visible"); }
+  const reasons = document.getElementById("delete-reasons");
+  if (reasons) reasons.classList.remove("submitting");
+  reasons?.querySelectorAll(".submitting-active")
+    .forEach((b) => b.classList.remove("submitting-active"));
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
   lockBodyScroll();
@@ -1365,21 +1372,60 @@ function purgeUrlLocally(url) {
 async function confirmDelete(reason) {
   const url = DELETE_TARGET.url;
   if (!url) { closeDeleteModal(); return; }
-  // Close immediately for snappy UX; the fade-out happens in parallel
-  // with the network call.
-  closeDeleteModal();
-  purgeUrlLocally(url);
+
+  // Lock the picker buttons while we wait so the user can't fire the
+  // request twice + so it's clear something is happening.
+  const reasonsBlock = document.getElementById("delete-reasons");
+  if (reasonsBlock) reasonsBlock.classList.add("submitting");
+  const clickedBtn = reasonsBlock?.querySelector(`[data-reason="${reason}"]`);
+  if (clickedBtn) clickedBtn.classList.add("submitting-active");
+
+  // Fire FIRST, await the response, then act on success. The old
+  // optimistic-purge pattern hid auth failures from the user — the
+  // card vanished visually but the DB row stayed, so refresh brought
+  // it back. Now the card only goes away when the server confirms.
+  let serverOk = false;
+  let errMsg = null;
   try {
     const r = await fetch("/api/article/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, reason }),
     });
-    if (!r.ok) {
-      console.warn("delete failed:", r.status);
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok !== false) {
+      serverOk = true;
+    } else if (r.status === 401) {
+      errMsg = "You need to sign in to delete articles.";
+    } else if (r.status === 403) {
+      errMsg = "Only admins can delete articles.";
+    } else {
+      errMsg = d.detail || `Delete failed (HTTP ${r.status})`;
     }
   } catch (e) {
-    console.warn("delete error:", e);
+    errMsg = e.message || "Network error";
+  }
+
+  if (reasonsBlock) reasonsBlock.classList.remove("submitting");
+  if (clickedBtn) clickedBtn.classList.remove("submitting-active");
+
+  if (serverOk) {
+    closeDeleteModal();
+    purgeUrlLocally(url);
+  } else {
+    // Surface the error inside the modal so the user understands the
+    // article was NOT deleted. Anonymous users now get a clear "sign
+    // in required" instead of a silent failure that confused
+    // everyone before.
+    let msgEl = document.getElementById("delete-error");
+    if (!msgEl) {
+      msgEl = el("div", { id: "delete-error", class: "delete-error" }, "");
+      const card = document.querySelector("#delete-modal .delete-card");
+      const actions = card?.querySelector(".delete-actions");
+      if (card && actions) card.insertBefore(msgEl, actions);
+    }
+    msgEl.textContent = "⚠ " + (errMsg || "Delete failed");
+    msgEl.classList.add("visible");
   }
 }
 
