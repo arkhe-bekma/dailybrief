@@ -1068,6 +1068,72 @@ function attachSwipeToClose(modalSelector, closeFn) {
   });
 }
 
+// ── Change-password modal ──────────────────────────────────────
+function openPwModal() {
+  const modal = document.getElementById("pw-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  lockBodyScroll();
+  // Reset form + status line
+  const form = document.getElementById("pw-form");
+  if (form) form.reset();
+  const msg = document.getElementById("pw-msg");
+  if (msg) { msg.textContent = ""; msg.classList.remove("ok", "err"); }
+  // Focus the first field after the modal animation settles
+  setTimeout(() => document.getElementById("pw-old")?.focus(), 60);
+}
+function closePwModal() {
+  const modal = document.getElementById("pw-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  unlockBodyScroll();
+}
+async function submitPwChange(e) {
+  e.preventDefault();
+  const submit = document.getElementById("pw-submit");
+  const msg = document.getElementById("pw-msg");
+  const oldPw = document.getElementById("pw-old").value;
+  const newPw = document.getElementById("pw-new").value;
+  const confirm = document.getElementById("pw-confirm").value;
+  msg.classList.remove("ok", "err");
+  if (newPw !== confirm) {
+    msg.textContent = "New passwords don't match.";
+    msg.classList.add("err");
+    return;
+  }
+  if (newPw.length < 4) {
+    msg.textContent = "New password must be at least 4 characters.";
+    msg.classList.add("err");
+    return;
+  }
+  submit.disabled = true;
+  submit.textContent = "Updating…";
+  try {
+    const r = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      msg.textContent = d.detail || `Update failed (HTTP ${r.status})`;
+      msg.classList.add("err");
+      return;
+    }
+    msg.textContent = "✓ Password updated.";
+    msg.classList.add("ok");
+    setTimeout(closePwModal, 900);
+  } catch (err) {
+    msg.textContent = err.message || "Network error";
+    msg.classList.add("err");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Update";
+  }
+}
+
 // ── Delete-with-reason modal ───────────────────────────────────
 // Tracks which URL the open modal is acting on; reset on close.
 let DELETE_TARGET = { url: null, title: null };
@@ -1211,22 +1277,81 @@ document.addEventListener("DOMContentLoaded", () => {
     paint(false);
   });
 
-  // Account row + admin gate. /whoami returns {user: {username, is_admin,
-  // subscription}} when logged in, {user: null} otherwise. We mirror
-  // is_admin onto body[data-is-admin] so the CSS can hide delete buttons
-  // for everyone except admins — and the backend /api/article/delete
-  // independently requires admin, so the gate works even if someone
-  // tampers with the attribute in DevTools.
-  fetch("/api/auth/whoami").then((r) => r.json()).then((d) => {
-    const loggedIn = !!(d && d.user);
-    const isAdmin = !!(d && d.user && d.user.is_admin);
-    const loginA  = document.getElementById("settings-login");
-    const logoutA = document.getElementById("settings-logout");
-    if (loginA)  loginA.hidden  = loggedIn;
-    if (logoutA) logoutA.hidden = !loggedIn;
+  // Account state + admin gate. /whoami returns {user: {username,
+  // is_admin, subscription}} when logged in, {user: null} otherwise.
+  // We use this to: (1) show login/logout/change-pw in the settings
+  // popover, (2) paint the masthead account chip with the right
+  // state, (3) mirror is_admin onto body[data-is-admin] so CSS can
+  // hide delete buttons. The backend /api/article/delete independently
+  // requires admin, so DevTools tampering can't actually delete.
+  function paintAccount(user) {
+    const loggedIn = !!user;
+    const isAdmin = !!(user && user.is_admin);
+
+    // Settings popover account row
+    const loginA   = document.getElementById("settings-login");
+    const logoutA  = document.getElementById("settings-logout");
+    const changeA  = document.getElementById("settings-changepw");
+    if (loginA)  loginA.hidden   = loggedIn;
+    if (logoutA) logoutA.hidden  = !loggedIn;
+    if (changeA) changeA.hidden  = !loggedIn;
+
+    // Body attribute drives the CSS delete-button gate.
     if (isAdmin) document.body.dataset.isAdmin = "1";
     else         delete document.body.dataset.isAdmin;
-  }).catch(() => {});
+
+    // Masthead chip — three states.
+    const chip = document.getElementById("account-btn");
+    if (!chip) return;
+    chip.classList.remove("account-anon", "account-user", "account-admin");
+    chip.innerHTML = "";
+    if (!loggedIn) {
+      chip.classList.add("account-anon");
+      chip.title = "Click to sign in";
+      chip.appendChild(el("span", { class: "acct-dot", "aria-hidden": "true" }, "●"));
+      chip.appendChild(el("span", { class: "acct-label" }, "Sign in"));
+    } else if (isAdmin) {
+      chip.classList.add("account-admin");
+      chip.title = `Logged in as ${user.username} (admin)`;
+      chip.appendChild(el("span", { class: "acct-dot", "aria-hidden": "true" }, "●"));
+      chip.appendChild(el("span", { class: "acct-label" }, user.username));
+      chip.appendChild(el("span", { class: "acct-pip" }, "ADMIN"));
+    } else {
+      chip.classList.add("account-user");
+      chip.title = `Logged in as ${user.username}`;
+      chip.appendChild(el("span", { class: "acct-dot", "aria-hidden": "true" }, "●"));
+      chip.appendChild(el("span", { class: "acct-label" }, user.username));
+    }
+
+    // Change-pw modal sub-line shows who's logged in.
+    const sub = document.getElementById("pw-current-user");
+    if (sub) sub.textContent = loggedIn ? `Signed in as ${user.username}` : "Not signed in";
+  }
+  fetch("/api/auth/whoami").then((r) => r.json()).then((d) => {
+    paintAccount((d && d.user) || null);
+  }).catch(() => paintAccount(null));
+
+  // Masthead account chip — anonymous → go to /login, logged-in →
+  // pop the settings panel so the user can change pw / log out.
+  document.getElementById("account-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (document.body.dataset.isAdmin === "1" ||
+        !document.getElementById("account-btn").classList.contains("account-anon")) {
+      toggleSettings();
+    } else {
+      location.href = "/login";
+    }
+  });
+
+  // Change-password link in settings → open modal.
+  document.getElementById("settings-changepw")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleSettings(false);
+    openPwModal();
+  });
+  document.querySelectorAll('#pw-modal [data-close="pw"]').forEach((n) =>
+    n.addEventListener("click", closePwModal));
+  document.getElementById("pw-form")?.addEventListener("submit", submitPwChange);
   document.getElementById("settings-logout")?.addEventListener("click", async (e) => {
     e.preventDefault();
     try { await fetch("/api/auth/logout", { method: "POST" }); } catch {}
@@ -1331,7 +1456,7 @@ document.addEventListener("DOMContentLoaded", () => {
     confirmDelete(btn.dataset.reason || "other");
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { closeReader(); closeFlow(); closeDeleteModal(); }
+    if (e.key === "Escape") { closeReader(); closeFlow(); closeDeleteModal(); closePwModal(); }
   });
 
   // Strip clicks → flow modal. data-kind + data-index are stamped onto

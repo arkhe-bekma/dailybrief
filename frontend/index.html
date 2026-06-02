@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=64" />
+  <link rel="stylesheet" href="/static/style.css?v=65" />
 </head>
 <body>
   <header class="masthead">
@@ -19,6 +19,15 @@
     </div>
     <div class="actions">
       <span class="date" id="today"></span>
+      <!-- Account chip — shows the user's initial + role pip when
+           logged in, or a faint "Sign in" link when anonymous. Click
+           opens the settings popover where login / change-pw / logout
+           live. JS swaps content based on /api/auth/whoami. -->
+      <button id="account-btn" class="account-chip account-anon" type="button"
+              title="account" aria-label="account">
+        <span class="acct-dot" aria-hidden="true">●</span>
+        <span class="acct-label">Sign in</span>
+      </button>
       <button id="settings-btn" title="settings" aria-label="settings">⚙</button>
     </div>
   </header>
@@ -65,6 +74,7 @@
       <span class="settings-account">
         <a class="settings-action" href="/lab">→ lab dashboard</a>
         <a class="settings-action" id="settings-login" href="/login">→ login</a>
+        <a class="settings-action" id="settings-changepw" href="#" hidden>→ change password</a>
         <a class="settings-action" id="settings-logout" href="#" hidden>→ logout</a>
       </span>
     </div>
@@ -175,6 +185,35 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=63"></script>
+  <!-- Change-password modal — reuses the .reader modal scaffolding for
+       open/close behaviour. Triggered from the settings popover. -->
+  <div id="pw-modal" class="reader hidden" aria-hidden="true">
+    <div class="reader-backdrop" data-close="pw"></div>
+    <div class="pw-card" role="dialog" aria-label="change password">
+      <button class="reader-close" data-close="pw" aria-label="close">×</button>
+      <div class="pw-title">Change password</div>
+      <div class="pw-sub" id="pw-current-user">—</div>
+
+      <form id="pw-form" autocomplete="off">
+        <label class="pw-label" for="pw-old">Current password</label>
+        <input class="pw-input" id="pw-old" type="password" autocomplete="current-password" required />
+
+        <label class="pw-label" for="pw-new">New password</label>
+        <input class="pw-input" id="pw-new" type="password" autocomplete="new-password" required minlength="4" />
+
+        <label class="pw-label" for="pw-confirm">Confirm new password</label>
+        <input class="pw-input" id="pw-confirm" type="password" autocomplete="new-password" required minlength="4" />
+
+        <div class="pw-msg" id="pw-msg"></div>
+
+        <div class="pw-actions">
+          <button class="pw-cancel" type="button" data-close="pw">Cancel</button>
+          <button class="pw-submit" type="submit" id="pw-submit">Update</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=64"></script>
 </body>
 </html>

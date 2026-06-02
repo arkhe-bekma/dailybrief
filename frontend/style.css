@@ -536,6 +536,70 @@ a { color: inherit; text-decoration: none; }
 /* Push the date pill away from the refresh button so they don't read
    as one combined chunk. */
 .actions .date { margin-left: 12px; }
+
+/* Account chip — sits between the date and the ⚙ in the masthead.
+   Three visual states:
+     .account-anon   → faint outline + "Sign in" label
+     .account-user   → cyan dot + username initial-circle + name
+     .account-admin  → amber dot + bold "ADMIN" pip + name
+   JS sets the right class after /api/auth/whoami resolves. */
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.7px;
+  cursor: pointer;
+  transition: border-color 140ms, background 140ms, color 140ms, box-shadow 140ms;
+}
+.account-chip:hover {
+  border-color: rgba(255,255,255,0.40);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+.account-chip .acct-dot {
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(255,255,255,0.45);
+}
+.account-chip .acct-label { text-transform: uppercase; }
+.account-chip .acct-pip {
+  background: rgba(255,255,255,0.10);
+  color: var(--text);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.account-chip.account-user {
+  border-color: rgba(0,225,255,0.40);
+  background: rgba(0,225,255,0.08);
+  color: var(--neon-cyan);
+}
+.account-chip.account-user .acct-dot { color: var(--neon-cyan); text-shadow: 0 0 8px rgba(0,225,255,0.55); }
+.account-chip.account-admin {
+  border-color: rgba(246,192,96,0.50);
+  background: rgba(246,192,96,0.10);
+  color: #f6c060;
+}
+.account-chip.account-admin .acct-dot { color: #f6c060; text-shadow: 0 0 8px rgba(246,192,96,0.55); }
+.account-chip.account-admin .acct-pip {
+  background: rgba(246,192,96,0.20);
+  color: #ffe7b6;
+}
+@media (max-width: 600px) {
+  .account-chip { padding: 0 9px; height: 26px; font-size: 10px; }
+  .account-chip .acct-label { display: none; }   /* keep just dot + pip on phones */
+}
 .actions button {
   background: rgba(255,255,255,0.05);
   color: var(--text);
@@ -1311,6 +1375,118 @@ body:not([data-is-admin="1"]) .reader-delete {
 .art.cat-whale   { --c: var(--c-whale); }
 .art.cat-trade   { --c: var(--c-trade); }
 .art.cat-video   { --c: var(--c-video); }
+
+/* ── Change-password modal ────────────────────────────────────
+   Uses the existing .reader.hidden / .reader-backdrop / .reader
+   scaffolding for centered overlay + close behaviour. .pw-card is
+   the inner sheet — matches the editorial polish of #delete-modal
+   so the two destructive-ish surfaces feel like the same family. */
+#pw-modal .pw-card {
+  position: relative;
+  margin: auto;
+  max-width: 420px;
+  width: calc(100% - 24px);
+  background: var(--bg-2, #11131f);
+  border: 1px solid rgba(255,43,214,0.32);
+  border-radius: 14px;
+  padding: 26px 26px 22px;
+  box-shadow:
+    0 24px 64px rgba(0,0,0,0.55),
+    0 0 24px rgba(255,43,214,0.18),
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+  color: var(--text);
+  font-family: var(--sans);
+}
+#pw-modal .reader-close { position: absolute; top: 10px; right: 10px; }
+#pw-modal .pw-title {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 72, "wdth" 96;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -0.4px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+#pw-modal .pw-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+#pw-modal .pw-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 12px 0 5px;
+}
+#pw-modal .pw-input {
+  width: 100%;
+  background: var(--bg-1, #0b0d18);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 9px;
+  padding: 11px 13px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  transition: border-color 140ms, box-shadow 140ms;
+}
+#pw-modal .pw-input:focus {
+  outline: none;
+  border-color: rgba(255,43,214,0.55);
+  box-shadow: 0 0 0 2px rgba(255,43,214,0.18);
+}
+#pw-modal .pw-msg {
+  margin-top: 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  min-height: 16px;
+}
+#pw-modal .pw-msg.err { color: var(--down); }
+#pw-modal .pw-msg.ok  { color: var(--up, #4ade80); }
+#pw-modal .pw-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+#pw-modal .pw-cancel,
+#pw-modal .pw-submit {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms, color 140ms;
+}
+#pw-modal .pw-cancel {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--text-2);
+}
+#pw-modal .pw-cancel:hover {
+  border-color: rgba(255,255,255,0.40);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+}
+#pw-modal .pw-submit {
+  background: linear-gradient(135deg, rgba(255,43,214,0.85), rgba(255,43,214,0.55));
+  border: 1px solid rgba(255,43,214,0.65);
+  color: #1a0014;
+  font-weight: 800;
+}
+#pw-modal .pw-submit:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 14px rgba(255,43,214,0.35);
+}
+#pw-modal .pw-submit:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .art::before { background: var(--c, var(--line-2)); }
 
