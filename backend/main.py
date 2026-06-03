@@ -1043,19 +1043,19 @@ def _brief_db_fallback() -> dict | None:
     RSS fetch, no LLM headline, no image scraping. Used as the first
     response when the in-memory cache is cold on a fresh user.
 
-    The query uses a window function to cap each outlet to ≤2 of the
-    24 slots so the feed isn't 8 articles from the same publisher
-    stacked at the top. SQLite supports ROW_NUMBER() since 3.25
-    (Ubuntu 22.04 has 3.37+).
+    Round-robin by category: take rank-1 from each chip in order, then
+    rank-2 from each, etc. So the feed reads as
+        WLD-1, MKT-1, BIZ-1, TCH-1, AI-1, CRYPT-1, SCI-1, GEO-1,
+        OP-ED-1, 한국-1, K-ENT-1, WLD-2, MKT-2, ...
+    This matches the chip nav order exactly. No single category can
+    dominate the top of the wall even when one has a huge backlog.
+    SQLite supports ROW_NUMBER + CTE since 3.25; Ubuntu 22.04 has 3.37+.
     """
     try:
         import sqlite3
         from contextlib import closing as _cl
         with _cl(db._conn()) as c:
             rows = c.execute(
-                # Window function pass: rank articles within each outlet,
-                # then take only the top 2 from each outlet. The outer
-                # ORDER BY still picks the 24 best overall.
                 """
                 WITH ranked AS (
                   SELECT
@@ -1063,9 +1063,23 @@ def _brief_db_fallback() -> dict | None:
                     score, title_ko, dek_ko, translated_at, published_at,
                     premium, weight, fetched_at,
                     ROW_NUMBER() OVER (
-                      PARTITION BY outlet
+                      PARTITION BY category
                       ORDER BY premium DESC, score DESC, fetched_at DESC
-                    ) AS outlet_rank
+                    ) AS cat_rank,
+                    CASE category
+                      WHEN 'world'   THEN 1
+                      WHEN 'econ'    THEN 2
+                      WHEN 'biz'     THEN 3
+                      WHEN 'tech'    THEN 4
+                      WHEN 'ai'      THEN 5
+                      WHEN 'crypto'  THEN 6
+                      WHEN 'science' THEN 7
+                      WHEN 'geo'     THEN 8
+                      WHEN 'opinion' THEN 9
+                      WHEN 'korea'   THEN 10
+                      WHEN 'kent'    THEN 11
+                      ELSE 99
+                    END AS cat_order
                   FROM articles
                   WHERE archived = 0 AND validated != -1
                 )
@@ -1073,8 +1087,8 @@ def _brief_db_fallback() -> dict | None:
                        score, title_ko, dek_ko, translated_at, published_at,
                        premium, weight
                 FROM ranked
-                WHERE outlet_rank <= 2
-                ORDER BY premium DESC, score DESC, fetched_at DESC
+                WHERE cat_rank <= 4
+                ORDER BY cat_rank ASC, cat_order ASC
                 LIMIT 24
                 """
             ).fetchall()
