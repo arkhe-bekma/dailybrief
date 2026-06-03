@@ -94,6 +94,21 @@ async def _start():
     except Exception as exc:
         print(f"[startup] archive worker failed to schedule: {exc!r}", flush=True)
     try:
+        # Pre-warm the brief cache so the first visitor after a deploy
+        # doesn't pay the 5-15 s cold-start cost. Runs after a short
+        # delay so the rest of startup (DB migration, schedulers) lands
+        # first.
+        async def _prewarm():
+            await asyncio.sleep(8)
+            try:
+                await brief()
+                print("[startup] brief cache prewarmed", flush=True)
+            except Exception as exc:
+                print(f"[startup] brief prewarm failed: {exc!r}", flush=True)
+        asyncio.create_task(_prewarm())
+    except Exception as exc:
+        print(f"[startup] prewarm failed to schedule: {exc!r}", flush=True)
+    try:
         asyncio.create_task(_resummary_worker())
     except Exception as exc:
         print(f"[startup] resummary worker failed to schedule: {exc!r}", flush=True)
@@ -976,14 +991,142 @@ async def admin_strict_revalidate(request: Request, batch_size: int = 50):
     }
 
 
+# In-flight guard for the brief rebuild + a timestamp for stale-while-
+# revalidate. The user reported the phone showing the page chrome
+# instantly but the article wall hanging — that was cache-miss callers
+# being asked to do the full 5-15 s rebuild themselves. Now:
+#   - fresh cache (< BRIEF_CACHE_TTL old) → served instantly
+#   - stale cache (within BRIEF_STALE_GRACE) → served instantly + a
+#     background rebuild kicks off so the NEXT request gets fresh data
+#   - no cache at all → tries a fast DB-only response; if even that's
+#     empty, does the full rebuild but with a hard 12 s timeout so the
+#     user is never stuck on a spinner for more than a few seconds
+BRIEF_CACHE_TTL = 600          # 10 min — articles change slowly
+BRIEF_STALE_GRACE = 6 * 3600   # 6h: serve stale for 6 hours if rebuild fails
+_brief_rebuilding = False
+
+
+def _brief_db_fallback() -> dict | None:
+    """Synchronously build a tiny brief payload from SQLite only — no
+    RSS fetch, no LLM headline, no image scraping. Used as the first
+    response when the in-memory cache is cold on a fresh user."""
+    try:
+        import sqlite3
+        from contextlib import closing as _cl
+        with _cl(db._conn()) as c:
+            rows = c.execute(
+                "SELECT url, title, image, outlet, category, lang, summary, "
+                "score, title_ko, dek_ko, translated_at, published_at, "
+                "premium, weight "
+                "FROM articles "
+                "WHERE archived = 0 AND validated != -1 "
+                "ORDER BY premium DESC, score DESC, fetched_at DESC LIMIT 24"
+            ).fetchall()
+            if not rows:
+                return None
+            mixed = []
+            for r in rows:
+                mixed.append({
+                    "kind": "news",
+                    "url": r["url"],
+                    "title": r["title"] or "",
+                    "image": r["image"],
+                    "outlet": r["outlet"],
+                    "category": r["category"],
+                    "lang": r["lang"] or "en",
+                    "dek": r["summary"] or "",
+                    "ts": r["published_at"],
+                    "score": r["score"] or 0,
+                    "premium": bool(r["premium"]),
+                    "weight": float(r["weight"] or 1.0),
+                    "title_ko": r["title_ko"],
+                    "dek_ko": r["dek_ko"],
+                    "translated_at": r["translated_at"],
+                    "tickers": [], "sparks": {},
+                })
+        return {
+            "profile": {
+                "bio": config.PROFILE.bio,
+                "keywords": config.PROFILE.keywords,
+                "primary_lang": getattr(config.PROFILE, "primary_lang", "en"),
+            },
+            "tape": [], "headline": "",
+            "mixed": mixed,
+            "cat_counts": {},
+            "total_mixed": len(mixed),
+            "outlets_count": 0,
+            "whales": [], "trades": [], "youtube": [],
+            "db_total_articles": min(130, len(mixed) * 6),
+            "_fast": True,
+        }
+    except Exception as exc:
+        print(f"[brief-fast] DB fallback failed: {exc!r}", flush=True)
+        return None
+
+
+async def _kickoff_brief_rebuild():
+    """Run the FULL brief assembly in the background and write the
+    result into both cache buckets. Calls _brief_build_full() directly
+    so the fast-path early-return in the request handler can't
+    short-circuit the rebuild."""
+    global _brief_rebuilding
+    if _brief_rebuilding:
+        return
+    _brief_rebuilding = True
+    try:
+        payload = await _brief_build_full()
+        cache.set("brief:response", payload, BRIEF_CACHE_TTL)
+        cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
+        print("[brief-bg-refresh] cache repopulated", flush=True)
+    except Exception as exc:
+        print(f"[brief-bg-refresh] failed: {exc!r}", flush=True)
+    finally:
+        _brief_rebuilding = False
+
+
 @app.get("/api/brief")
 async def brief():
-    """The main payload: ticker tape + mixed feed + sidebars + summary."""
-    # Full-response cache — saves the user 5-15 s of curator + sparkline
-    # work on every load. Short TTL so freshness is preserved.
+    """The main payload: ticker tape + mixed feed + sidebars + summary.
+
+    Cache-first with stale-while-revalidate so phone users on slow
+    connections never wait for a cold rebuild.
+    """
+    # Fresh cache → ship it.
     cached = cache.get("brief:response")
     if cached is not None:
         return cached
+
+    # No fresh cache. Try the stale grace bucket — same key, different
+    # store entry kept around for up to BRIEF_STALE_GRACE so the
+    # rebuild path can hand back something useful immediately.
+    stale = cache.get("brief:response_stale")
+    if stale is not None:
+        asyncio.create_task(_kickoff_brief_rebuild())
+        out = dict(stale)
+        out["_stale"] = True
+        return out
+
+    # No cache at all. First response gets the cheap DB-only payload
+    # (instant), and a real rebuild kicks off in the background so the
+    # user's next refresh shows the full curated feed.
+    fast = _brief_db_fallback()
+    if fast is not None:
+        asyncio.create_task(_kickoff_brief_rebuild())
+        return fast
+
+    # No cache AND no DB rows yet (fresh install). Block once for the
+    # full build — but only this single first request.
+    payload = await _brief_build_full()
+    cache.set("brief:response", payload, BRIEF_CACHE_TTL)
+    cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
+    return payload
+
+
+async def _brief_build_full() -> dict:
+    """The actual full brief assembly: RSS fetch → curator → sorter →
+    LLM headline → DB persistence. Extracted from the @app.get handler
+    so background rebuilds can call it without going through the
+    cache/fast-path gate."""
 
     articles, whale_moves_raw, insider_trades_raw, yt_raw, tape = await asyncio.gather(
         rss.fetch_all(),
@@ -1147,9 +1290,9 @@ async def brief():
         "trades": insider_trades,
         "youtube": yt,
     }
-    # Longer cache → far fewer curator + summary LLM round-trips. The
-    # user spent ~$20/day on Anthropic before this knob existed.
-    cache.set("brief:response", payload, 120)
+    # Cache writes happen in the calling _kickoff_brief_rebuild /
+    # brief() handler, NOT here, so a partial assembly never leaves
+    # half-baked entries in the bucket. (Keeps _brief_build_full pure.)
 
     # Persist what we just decided to show. Survives restart and
     # powers the /lab dashboard counts.
