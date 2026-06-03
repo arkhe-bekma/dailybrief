@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=69">
-  <link rel="stylesheet" href="/static/lab.css?v=50">
+  <link rel="stylesheet" href="/static/style.css?v=75">
+  <link rel="stylesheet" href="/static/lab.css?v=51">
 </head>
 <body class="lab">
   <header class="lab-mast">
@@ -265,6 +265,14 @@
           <span class="ab-title">STRICT REVALIDATE + PURGE</span>
           <span class="ab-desc">Deep clean: resets every article, re-runs the validator with the strictest heuristics, then permanently drops everything that fails. Use after tightening thresholds. <b>Permanent.</b></span>
         </button>
+        <button class="action-btn act-danger" id="act-factory-reset">
+          <span class="ab-title">FACTORY RESET DB</span>
+          <span class="ab-desc">Wipe every article, every cached body, every blocked URL back to empty + VACUUM the file. Keeps user accounts. The next refresh cycle reseeds the feed from live RSS. <b>Use when the DB has grown unwieldy.</b></span>
+        </button>
+        <button class="action-btn" id="act-validate-batch">
+          <span class="ab-title">RUN VALIDATION (20 articles)</span>
+          <span class="ab-desc">Manual replacement for the disabled background validator. Processes 20 pending articles inline. Click repeatedly to chip through the backlog at your own pace.</span>
+        </button>
       </div>
       <div class="action-result" id="action-result"></div>
     </section>
@@ -318,6 +326,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=51"></script>
+  <script src="/static/lab.js?v=52"></script>
 </body>
 </html>

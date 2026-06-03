@@ -623,6 +623,31 @@ async def archive_stats() -> dict:
     return await asyncio.to_thread(_archive_stats_sync)
 
 
+def _factory_reset_sync() -> dict:
+    """Nuke the article inventory back to empty. Drops every row from
+    articles, blocked_urls, and reader_results. Keeps users + sessions
+    intact so the admin doesn't get logged out. Followed by VACUUM so
+    the file actually shrinks on disk.
+
+    Used when the DB has grown unwieldy + the operator wants to start
+    from a clean slate. Next /api/brief refill cycle will reseed from
+    live RSS feeds.
+    """
+    with closing(_conn()) as c:
+        a = c.execute("SELECT COUNT(*) AS n FROM articles").fetchone()["n"]
+        r = c.execute("SELECT COUNT(*) AS n FROM reader_results").fetchone()["n"]
+        b = c.execute("SELECT COUNT(*) AS n FROM blocked_urls").fetchone()["n"]
+        c.execute("DELETE FROM articles")
+        c.execute("DELETE FROM reader_results")
+        c.execute("DELETE FROM blocked_urls")
+        c.execute("VACUUM")
+    return {"removed_articles": a, "removed_reader_results": r, "removed_blocked": b}
+
+
+async def factory_reset() -> dict:
+    return await asyncio.to_thread(_factory_reset_sync)
+
+
 def _purge_failed_articles_sync() -> int:
     """Drop every article currently marked validated = -1 along with
     its cached reader_results body. Used by the admin rebuild endpoint

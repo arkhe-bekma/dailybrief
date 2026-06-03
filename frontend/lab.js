@@ -496,6 +496,23 @@ document.getElementById("act-unarchive")?.addEventListener("click", () => {
   runAction("UNARCHIVE ALL", "/api/admin/unarchive-all", { method: "POST" });
 });
 
+// Factory reset: nuke articles + reader_results + blocked_urls. Keeps
+// user accounts. Use when the DB has grown unwieldy.
+document.getElementById("act-factory-reset")?.addEventListener("click", () => {
+  const msg = "PERMANENTLY WIPE every article + cached body + blocked URL?\n\n" +
+              "User accounts are kept. The next refresh cycle will reseed\n" +
+              "the feed from live RSS. THIS CANNOT BE UNDONE.";
+  if (!confirm(msg)) return;
+  if (!confirm("Are you absolutely sure? Type-confirm by clicking OK one more time.")) return;
+  runAction("FACTORY RESET", "/api/admin/factory-reset", { method: "POST" });
+});
+
+// Manual validation — process 20 pending articles inline. Replaces the
+// disabled background validator. Click repeatedly to chip through.
+document.getElementById("act-validate-batch")?.addEventListener("click", () => {
+  runAction("RUN VALIDATION (20)", "/api/admin/run-validation?batch_size=20", { method: "POST" });
+});
+
 $("#interval-save").addEventListener("click", async () => {
   const v = parseInt($("#interval-input").value, 10);
   if (!Number.isFinite(v)) return;

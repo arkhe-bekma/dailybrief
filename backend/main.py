@@ -77,42 +77,30 @@ async def _start():
         await auth.init()  # creates users/sessions tables + seeds admin/admin
     except Exception as exc:
         print(f"[startup] auth.init failed: {exc!r}", flush=True)
+    # ── Background workers (minimal set) ────────────────────────────
+    # The Lightsail 512MB box was under sustained CPU + SQLite-lock
+    # pressure from 5 concurrent workers. The site was technically up
+    # but /api/brief was taking 5-8 s. Strict diet now: only the two
+    # genuinely cheap workers stay enabled. Heavy ones (validation,
+    # resummary, prune) are admin-triggered via the lab when needed.
     try:
-        asyncio.create_task(_refresh_agent())
+        asyncio.create_task(_refresh_agent())   # hourly cache-bust, very cheap
     except Exception as exc:
         print(f"[startup] refresh agent failed to schedule: {exc!r}", flush=True)
     try:
-        asyncio.create_task(_validation_worker())
-    except Exception as exc:
-        print(f"[startup] validation worker failed to schedule: {exc!r}", flush=True)
-    try:
-        asyncio.create_task(_prune_worker())
-    except Exception as exc:
-        print(f"[startup] prune worker failed to schedule: {exc!r}", flush=True)
-    try:
-        asyncio.create_task(_archive_worker())
+        asyncio.create_task(_archive_worker())  # 6-hourly, single UPDATE stmt
     except Exception as exc:
         print(f"[startup] archive worker failed to schedule: {exc!r}", flush=True)
     try:
-        asyncio.create_task(_brief_refresh_worker())
+        asyncio.create_task(_brief_refresh_worker())  # hourly cache refill
     except Exception as exc:
         print(f"[startup] brief refresh worker failed to schedule: {exc!r}", flush=True)
+    # Prewarm the cache immediately so the very first visitor doesn't
+    # see an empty payload.
     try:
-        # Pre-warm the brief cache so the first visitor after a deploy
-        # doesn't pay the 5-15 s cold-start cost. Runs after a short
-        # delay so the rest of startup (DB migration, schedulers) lands
-        # first.
         async def _prewarm():
-            # Wait ~30s so the OTHER background workers (validator,
-            # archive, prune, resummary) have a chance to finish their
-            # first burst before we add load.
-            await asyncio.sleep(30)
+            await asyncio.sleep(15)
             try:
-                # ONLY warm the cache with the cheap DB-only payload.
-                # Don't trigger the full RSS+curator+LLM chain on a
-                # small box — that's what was crashing uvicorn under
-                # memory pressure. The full rebuild happens lazily
-                # when the first stale cache request lands.
                 fast = _brief_db_fallback()
                 if fast is not None:
                     cache.set("brief:response", fast, BRIEF_CACHE_TTL)
@@ -123,10 +111,10 @@ async def _start():
         asyncio.create_task(_prewarm())
     except Exception as exc:
         print(f"[startup] prewarm failed to schedule: {exc!r}", flush=True)
-    try:
-        asyncio.create_task(_resummary_worker())
-    except Exception as exc:
-        print(f"[startup] resummary worker failed to schedule: {exc!r}", flush=True)
+    # DISABLED workers (admin-triggered via lab → ACTIONS):
+    #   _validation_worker   – per-article HTTP fetch every 5 s, network-heavy
+    #   _resummary_worker    – DB read+rewrite loop
+    #   _prune_worker        – once-a-day VACUUM, OK to skip on small box
 
 
 # ── Bad-title detection ─────────────────────────────────────────────
@@ -320,7 +308,7 @@ async def _brief_refresh_worker():
     uvicorn under traffic. Uses the hard 60 s timeout inside
     _kickoff_brief_rebuild so a stuck call can't pin the flag.
     """
-    REFRESH_EVERY = 20 * 60  # 20 minutes
+    REFRESH_EVERY = 60 * 60  # 1 hour — slower so the box has more idle CPU
     # Wait a long time before first run so startup is fully settled.
     await asyncio.sleep(90)
     while True:
@@ -332,21 +320,23 @@ async def _brief_refresh_worker():
 
 
 async def _archive_worker():
-    """Hourly auto-archive: anything older than 7 days flips to
+    """6-hourly auto-archive: anything older than 7 days flips to
     archived = 1. Articles aren't deleted — operator can still pull
-    them back from /api/admin/unarchive-all. Keeps the active set
-    (what /api/brief + /api/page expose to anonymous visitors) at a
-    sane size automatically so the front-end pager never reaches the
-    150-page absurdity the user reported."""
+    them back from /api/admin/unarchive-all. Was hourly + cleared the
+    ENTIRE cache on every run, which forced a full cold rebuild for
+    the next visitor. Now: 6h cadence + targeted cache key drop so
+    only the brief response is invalidated."""
     ARCHIVE_DAYS = 7
-    INTERVAL_SECONDS = 3600  # once an hour
-    await asyncio.sleep(45)  # let startup settle
+    INTERVAL_SECONDS = 6 * 3600
+    await asyncio.sleep(120)  # let startup settle properly
     while True:
         try:
             moved = await db.archive_old_articles(days_old=ARCHIVE_DAYS)
             if moved:
                 stats = await db.archive_stats()
-                cache.clear()
+                # Targeted invalidation: only the public-facing brief
+                # cache, NOT the RSS feed cache or per-URL caches.
+                cache._store.pop("brief:response", None)
                 print(
                     f"[archive] moved {moved} → archive. "
                     f"active={stats['active']} archived={stats['archived']}",
@@ -932,6 +922,49 @@ async def lab_archive_stats(request: Request):
     """Active vs archived counts for the lab dashboard. Admin-only."""
     await _require_admin(request)
     return await db.archive_stats()
+
+
+@app.post("/api/admin/factory-reset")
+async def admin_factory_reset(request: Request):
+    """Wipe articles + reader_results + blocked_urls back to empty +
+    VACUUM. Keeps users/sessions so the admin stays logged in. The
+    next /api/brief tick will reseed from live RSS feeds. Admin-only,
+    irreversible."""
+    await _require_admin(request)
+    result = await db.factory_reset()
+    cache.clear()
+    return {"ok": True, **result}
+
+
+@app.post("/api/admin/run-validation")
+async def admin_run_validation(request: Request, batch_size: int = 20):
+    """Process up to `batch_size` pending articles inline (HTTP fetch +
+    validator). Manual replacement for the disabled validation worker.
+    Returns counts so the operator can chip through the backlog
+    deliberately instead of running a worker that grinds the box."""
+    await _require_admin(request)
+    batch = await db.list_unvalidated(limit=max(1, min(batch_size, 50)))
+    if not batch:
+        return {"examined": 0, "passed": 0, "failed": 0}
+    results = await asyncio.gather(
+        *[_validate_one(a) for a in batch], return_exceptions=True,
+    )
+    passed = failed = 0
+    for art, res in zip(batch, results):
+        url = art.get("url")
+        if not url:
+            continue
+        if isinstance(res, Exception):
+            status, reason = -1, f"crash:{type(res).__name__}"
+        else:
+            status, reason = res
+        try:
+            await db.set_article_validated(url, status, reason)
+            if status == 1: passed += 1
+            else:           failed += 1
+        except Exception:
+            pass
+    return {"examined": len(batch), "passed": passed, "failed": failed}
 
 
 @app.post("/api/admin/purge-failed")
