@@ -1041,18 +1041,42 @@ _brief_rebuilding = False
 def _brief_db_fallback() -> dict | None:
     """Synchronously build a tiny brief payload from SQLite only — no
     RSS fetch, no LLM headline, no image scraping. Used as the first
-    response when the in-memory cache is cold on a fresh user."""
+    response when the in-memory cache is cold on a fresh user.
+
+    The query uses a window function to cap each outlet to ≤2 of the
+    24 slots so the feed isn't 8 articles from the same publisher
+    stacked at the top. SQLite supports ROW_NUMBER() since 3.25
+    (Ubuntu 22.04 has 3.37+).
+    """
     try:
         import sqlite3
         from contextlib import closing as _cl
         with _cl(db._conn()) as c:
             rows = c.execute(
-                "SELECT url, title, image, outlet, category, lang, summary, "
-                "score, title_ko, dek_ko, translated_at, published_at, "
-                "premium, weight "
-                "FROM articles "
-                "WHERE archived = 0 AND validated != -1 "
-                "ORDER BY premium DESC, score DESC, fetched_at DESC LIMIT 24"
+                # Window function pass: rank articles within each outlet,
+                # then take only the top 2 from each outlet. The outer
+                # ORDER BY still picks the 24 best overall.
+                """
+                WITH ranked AS (
+                  SELECT
+                    url, title, image, outlet, category, lang, summary,
+                    score, title_ko, dek_ko, translated_at, published_at,
+                    premium, weight, fetched_at,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY outlet
+                      ORDER BY premium DESC, score DESC, fetched_at DESC
+                    ) AS outlet_rank
+                  FROM articles
+                  WHERE archived = 0 AND validated != -1
+                )
+                SELECT url, title, image, outlet, category, lang, summary,
+                       score, title_ko, dek_ko, translated_at, published_at,
+                       premium, weight
+                FROM ranked
+                WHERE outlet_rank <= 2
+                ORDER BY premium DESC, score DESC, fetched_at DESC
+                LIMIT 24
+                """
             ).fetchall()
             if not rows:
                 return None

@@ -164,93 +164,6 @@ function renderTape(quotes) {
   tape.appendChild(track);
 }
 
-// ── Strip renderers (whales / trades / videos) ────────────────
-// Each strip mimics the price tape: a horizontal marquee that loops.
-// Clicking any item opens the flow modal (see openFlow). Items are
-// duplicated into two blocks for seamless scroll.
-function _renderStrip(rootId, label, items, makeItem, kind) {
-  const root = $(`#${rootId}`);
-  if (!root) return;
-  root.innerHTML = "";
-  if (!items || !items.length) return;
-  const track = el("div", { class: "strip-track" });
-  const block = () => {
-    const frag = document.createDocumentFragment();
-    frag.appendChild(el("span", { class: "strip-label" }, label));
-    items.forEach((it, idx) => {
-      const node = makeItem(it);
-      node.classList.add("strip-item");
-      node.dataset.kind = kind;
-      node.dataset.index = String(idx);
-      frag.appendChild(node);
-    });
-    return frag;
-  };
-  track.appendChild(block());
-  track.appendChild(block());
-  root.appendChild(track);
-}
-
-// Known centralized exchanges. Movement TO one = sell pressure
-// (the holder is depositing to sell); movement FROM one = buy pressure
-// (the holder is withdrawing to hold long).
-const EXCHANGES = [
-  "binance", "coinbase", "kraken", "bitfinex", "bitstamp",
-  "okx", "bybit", "kucoin", "huobi", "gate.io", "mexc",
-  "upbit", "bithumb",
-];
-function isExchange(label) {
-  if (!label) return false;
-  const l = label.toLowerCase();
-  return EXCHANGES.some((e) => l.includes(e));
-}
-function shortWallet(label) {
-  if (!label) return "—";
-  const l = label.toLowerCase();
-  if (l.includes("unknown wallet") || l.includes("unknown")) return "UNK";
-  if (l.includes("tether treasury")) return "Tether";
-  if (l.includes("treasury")) return "Treasury";
-  // strip trailing " wallet"
-  return label.replace(/\s*wallet\s*$/i, "").trim();
-}
-function whaleDirection(w) {
-  const fromX = isExchange(w.from_label);
-  const toX   = isExchange(w.to_label);
-  if (toX && !fromX) return "SELL";  // deposit → likely sell pressure
-  if (fromX && !toX) return "BUY";   // withdraw → likely buy / accumulation
-  return null;                       // wallet ↔ wallet, or exchange ↔ exchange
-}
-
-function renderWhalesStrip(items) {
-  _renderStrip("strip-whales", "🐋 WHALES", items, (w) => {
-    const dir = whaleDirection(w);
-    return el("span", {}, [
-      el("span", { class: "asset" }, w.asset || ""),
-      dir ? el("span", { class: `action ${dir}` }, dir) : null,
-      el("span", { class: "amt" }, fmtUSD(w.amount_usd || 0)),
-      el("span", { class: "flow" }, shortWallet(w.from_label)),
-      el("span", { class: "arrow" }, "→"),
-      el("span", { class: "flow" }, shortWallet(w.to_label)),
-    ]);
-  }, "whale");
-}
-
-function renderTradesStrip(items) {
-  _renderStrip("strip-trades", "🏛 INSIDERS", items, (t) => el("span", {}, [
-    el("span", { class: "who", lang: "ko" }, t.name || ""),
-    el("span", { class: `action ${t.action}` }, t.action || ""),
-    el("span", { class: "ticker" }, t.ticker || ""),
-    el("span", { class: "band" }, t.size_band || ""),
-  ]), "trade");
-}
-
-function renderVideosStrip(items) {
-  _renderStrip("strip-videos", "📺 WATCH", items, (v) => el("span", {}, [
-    el("span", { class: "channel" }, v.channel || ""),
-    el("span", { class: "vtitle" }, v.title || ""),
-  ]), "video");
-}
-
 // ── News card body ─────────────────────────────────────────────
 function newsBody(item, opts = {}) {
   // When the card has a stored translation and the user has toggled
@@ -666,9 +579,6 @@ function paintFromState() {
       1, Math.ceil(STATE.db_total_articles / PAGE_SIZE),
     );
   }
-  renderWhalesStrip(STATE.whales || []);
-  renderTradesStrip(STATE.trades || []);
-  renderVideosStrip(STATE.youtube || []);
   paint(false);
 }
 
@@ -711,8 +621,7 @@ async function silentRefresh() {
   // visually-unrelated scroll position. Deferred refresh fires the
   // moment the modal closes via the "pendingRefresh" flag below.
   const readerOpen = !document.getElementById("reader")?.classList.contains("hidden");
-  const flowOpen = !document.getElementById("flow")?.classList.contains("hidden");
-  if (readerOpen || flowOpen) {
+  if (readerOpen) {
     PENDING_REFRESH = true;
     return;
   }
@@ -1062,94 +971,6 @@ function unlockBodyScroll() {
   // again on the next frame to catch them.
   requestAnimationFrame(restore);
 }
-function openFlow(kind, index) {
-  const modal = document.getElementById("flow");
-  if (!modal) return;
-  lockBodyScroll();
-  const list =
-    kind === "whale" ? (STATE.whales || []) :
-    kind === "trade" ? (STATE.trades || []) :
-    kind === "video" ? (STATE.youtube || []) : [];
-  const item = list[index];
-  if (!item) return;
-  modal.classList.remove("hidden");
-  modal.setAttribute("aria-hidden", "false");
-  // lockBodyScroll() above already handles overflow; no extra style nudge.
-  const content = document.getElementById("flow-content");
-  content.innerHTML = "";
-
-  if (kind === "whale") {
-    content.appendChild(el("div", { class: "reader-meta" }, [
-      el("span", { class: "tag" }, "WHALE"),
-      el("span", { class: "src" }, item.asset || ""),
-      el("span", {}, fmtWhen(item.timestamp)),
-    ]));
-    content.appendChild(el("h1", { class: "reader-title" },
-      `${fmtUSD(item.amount_usd || 0)} ${item.asset || ""}`));
-    content.appendChild(el("div", { class: "reader-body" }, [
-      el("p", {}, `From: ${item.from_label || "—"}`),
-      el("p", {}, `To: ${item.to_label || "—"}`),
-    ]));
-    content.appendChild(el("div", { class: "reader-footer" }, [
-      el("span", { class: "badge" }, "✦ whale-alert"),
-      item.tx_url ? el("a", {
-        href: item.tx_url, target: "_blank", rel: "noopener",
-        class: "reader-original",
-      }, "transaction ↗") : null,
-    ]));
-  } else if (kind === "trade") {
-    content.appendChild(el("div", { class: "reader-meta" }, [
-      el("span", { class: "tag" }, "INSIDER TRADE"),
-      el("span", { class: "src" }, item.role || ""),
-      el("span", {}, fmtWhen(item.timestamp)),
-    ]));
-    content.appendChild(el("h1", { class: "reader-title", lang: "ko" },
-      `${item.name} ${item.action} ${item.ticker}`));
-    content.appendChild(el("div", { class: "reader-body" }, [
-      el("p", {}, `Company: ${item.company || item.ticker}`),
-      el("p", {}, `Size band: ${item.size_band || "—"}`),
-    ]));
-    content.appendChild(el("div", { class: "reader-footer" }, [
-      el("span", { class: "badge" }, "✦ insider trades"),
-      item.source_url ? el("a", {
-        href: item.source_url, target: "_blank", rel: "noopener",
-        class: "reader-original",
-      }, "disclosure ↗") : null,
-    ]));
-  } else if (kind === "video") {
-    content.appendChild(el("div", { class: "reader-meta" }, [
-      el("span", { class: "tag" }, "VIDEO"),
-      el("span", { class: "src" }, item.channel || ""),
-      el("span", {}, fmtWhen(item.published)),
-    ]));
-    if (item.thumbnail) {
-      content.appendChild(el("div", {
-        class: "reader-img",
-        style: `background-image:url('${item.thumbnail}')`,
-      }));
-    }
-    content.appendChild(el("h1", { class: "reader-title" }, item.title || ""));
-    content.appendChild(el("div", { class: "reader-footer" }, [
-      el("span", { class: "badge" }, "✦ youtube"),
-      item.url ? el("a", {
-        href: item.url, target: "_blank", rel: "noopener",
-        class: "reader-original",
-      }, "watch on YouTube ↗") : null,
-    ]));
-  }
-}
-
-function closeFlow() {
-  const modal = document.getElementById("flow");
-  if (!modal) return;
-  modal.classList.add("hidden");
-  modal.setAttribute("aria-hidden", "true");
-  unlockBodyScroll();
-  if (PENDING_REFRESH) {
-    PENDING_REFRESH = false;
-    setTimeout(silentRefresh, 250);
-  }
-}
 
 // ── Swipe-to-close (iOS-style sheet) ──────────────────────────
 // Arms only at scroll edges (top → pull-down closes, bottom →
@@ -1458,7 +1279,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Swipe gestures on the reader + flow modals (mobile dismiss UX)
   attachSwipeToClose("#reader", closeReader);
-  attachSwipeToClose("#flow",   closeFlow);
+  // (flow modal removed)
 
   // Restore saved text scale
   let savedScale = 1;
@@ -1704,8 +1525,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // ×/backdrop in index.html are each wired ONCE here.
   document.querySelector("#reader .reader-close")?.addEventListener("click", closeReader);
   document.querySelector("#reader .reader-backdrop")?.addEventListener("click", closeReader);
-  document.querySelectorAll('#flow [data-close="flow"]').forEach((n) =>
-    n.addEventListener("click", closeFlow));
   // Delete modal — close, reason picker, and ESC.
   document.querySelectorAll('#delete-modal [data-close="delete"]').forEach((n) =>
     n.addEventListener("click", closeDeleteModal));
@@ -1715,17 +1534,7 @@ document.addEventListener("DOMContentLoaded", () => {
     confirmDelete(btn.dataset.reason || "other");
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { closeReader(); closeFlow(); closeDeleteModal(); closePwModal(); }
-  });
-
-  // Strip clicks → flow modal. data-kind + data-index are stamped onto
-  // each .strip-item by _renderStrip.
-  document.addEventListener("click", (e) => {
-    const item = e.target.closest(".strip-item");
-    if (!item) return;
-    const kind = item.dataset.kind;
-    const idx = parseInt(item.dataset.index || "0", 10);
-    if (kind) openFlow(kind, idx);
+    if (e.key === "Escape") { closeReader(); closeDeleteModal(); closePwModal(); }
   });
 
   load();

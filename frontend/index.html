@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=71" />
+  <link rel="stylesheet" href="/static/style.css?v=72" />
 </head>
 <body>
   <header class="masthead">
@@ -92,13 +92,6 @@
   </div>
 
   <div class="tape" id="tape"></div>
-
-  <!-- Compact marquee strips for whales / insider trades / videos.
-       Each row flows horizontally like the price tape; clicking any
-       item opens a detail modal. Replaces the old right rail. -->
-  <div class="strip strip-whales"  id="strip-whales"  data-kind="whale"></div>
-  <div class="strip strip-trades"  id="strip-trades"  data-kind="trade"></div>
-  <div class="strip strip-videos"  id="strip-videos"  data-kind="video"></div>
 
   <div class="headline" id="headline"></div>
 
@@ -186,17 +179,7 @@
     </div>
   </div>
 
-  <!-- Flow detail modal: clicking a whale / trade / video item opens
-       this with kind-specific body content. -->
-  <div id="flow" class="reader hidden" aria-hidden="true">
-    <div class="reader-backdrop" data-close="flow"></div>
-    <div class="reader-card" role="dialog" aria-label="detail">
-      <button class="reader-close" data-close="flow" aria-label="close">×</button>
-      <div class="reader-content" id="flow-content"></div>
-    </div>
-  </div>
-
-  <!-- Change-password modal — reuses the .reader modal scaffolding for
+<!-- Change-password modal — reuses the .reader modal scaffolding for
        open/close behaviour. Triggered from the settings popover. -->
   <div id="pw-modal" class="reader hidden" aria-hidden="true">
     <div class="reader-backdrop" data-close="pw"></div>
@@ -225,6 +208,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=70"></script>
+  <script src="/static/app.js?v=71"></script>
 </body>
 </html>

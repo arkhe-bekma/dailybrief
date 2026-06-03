@@ -727,6 +727,15 @@ a { color: inherit; text-decoration: none; }
      phone. Shrink so it doesn't wrap into 4 lines. */
   .headline { font-size: 14px; padding-top: 12px; padding-bottom: 12px; }
 
+  /* Stack the sticky bars cleanly + push the article wall down so the
+     first card never tucks under the masthead+tape+chips when the user
+     scrolls. Sum of: masthead (~46px) + tape (~28px) + chips (~50px)
+     = ~124px. scroll-margin so anchor-jumps don't hide cards either. */
+  .tape  { top: 46px; }
+  .chips { top: 74px; }
+  .main-col { padding-top: 16px; }
+  .art { scroll-margin-top: 140px; }
+
   /* The price tape and the three flow strips were inheriting desktop
      padding (24px) but now share the same 12px. Same with the chip
      scroll gutter. */
@@ -950,85 +959,65 @@ a { color: inherit; text-decoration: none; }
   margin: 0 auto;
 }
 
-/* ── Horizontal marquee strips for whales / trades / videos ─────────
-   Match the price-tape pattern at the top: each strip is a thin
-   horizontal band that scrolls infinitely. Hover pauses. Click any
-   item opens the detail modal. ── */
-.strip {
-  position: relative;
-  overflow: hidden;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
-}
-.strip:empty { display: none; }
-.strip-track {
-  display: flex;
-  gap: 18px;
-  padding: 4px 14px;
-  white-space: nowrap;
-  animation: marquee 28s linear infinite;   /* was 100s — 3.6× faster */
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-.strip:hover .strip-track { animation-play-state: paused; }
-
-.strip-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 800;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  font-size: 10.5px;
-  padding-right: 10px;
-  border-right: 1px solid var(--line);
-  margin-right: 4px;
-}
-.strip-whales .strip-label { color: var(--neon-lime);   text-shadow: 0 0 14px rgba(182,255,60,0.45); }
-.strip-trades .strip-label { color: var(--neon-yellow); text-shadow: 0 0 14px rgba(255,230,0,0.45); }
-.strip-videos .strip-label { color: var(--neon-pink);   text-shadow: 0 0 14px rgba(255,91,232,0.45); }
-
-.strip-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  padding: 0 4px;
-  border-radius: 4px;
-  transition: background 0.12s;
-}
-.strip-item:hover { background: rgba(255,255,255,0.05); }
-
-/* Whale strip item: [BTC] [BUY] $79M UNK → Binance */
-.strip-whales .asset { color: var(--neon-cyan); font-weight: 800; letter-spacing: 0.5px; }
-.strip-whales .amt   { color: var(--neon-lime); font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(182,255,60,0.35); }
-.strip-whales .flow  { color: var(--text-2); }
-.strip-whales .arrow { color: var(--muted); padding: 0 1px; }
-.strip-whales .action {
-  font-weight: 800;
-  font-size: 9.5px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  letter-spacing: 0.6px;
-}
-.strip-whales .action.BUY  { background: rgba(182,255,60,0.18); color: var(--up); }
-.strip-whales .action.SELL { background: rgba(255,77,109,0.18); color: var(--down); }
-
-/* Trade strip item: Pelosi BUY NVDA $1M–$5M */
-.strip-trades .who    { color: var(--text); font-weight: 700; }
-.strip-trades .action { font-weight: 800; padding: 0 5px; border-radius: 3px; font-size: 10px; }
-.strip-trades .action.BUY  { background: rgba(182,255,60,0.18);  color: var(--up); }
-.strip-trades .action.SELL { background: rgba(255,77,109,0.18); color: var(--down); }
-.strip-trades .ticker { color: var(--neon-yellow); font-weight: 800; text-shadow: 0 0 8px rgba(255,230,0,0.3); }
-.strip-trades .band   { color: var(--muted); }
-
-/* Video strip item: 📺 Bloomberg · headline… */
-.strip-videos .channel { color: var(--neon-pink); font-weight: 800; }
-.strip-videos .vtitle  { color: var(--text-2); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
+/* Whale / insider-trade / video strips were retired with the
+   right rail. Only the .tape marquee at the top remains. */
 @keyframes marquee {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
+}
+
+/* ── Position-based card accent (cycles a 6-color palette) ────────
+   Every card in the grid picks a hue based on its slot, not its
+   source. Gives the wall visual rhythm + helps the eye track where
+   it is in the page. The border + glow stack with the base .art
+   styling. Hero (first card) is always magenta to anchor the page. */
+:root {
+  --acc-1: 255, 43, 214;    /* magenta  */
+  --acc-2: 0, 225, 255;     /* cyan     */
+  --acc-3: 246, 192, 96;    /* amber    */
+  --acc-4: 158, 119, 255;   /* violet   */
+  --acc-5: 74, 222, 128;    /* green    */
+  --acc-6: 255, 122, 105;   /* coral    */
+}
+#paper .art:nth-child(6n+1) { --acc: var(--acc-1); }
+#paper .art:nth-child(6n+2) { --acc: var(--acc-2); }
+#paper .art:nth-child(6n+3) { --acc: var(--acc-3); }
+#paper .art:nth-child(6n+4) { --acc: var(--acc-4); }
+#paper .art:nth-child(6n+5) { --acc: var(--acc-5); }
+#paper .art:nth-child(6n+6) { --acc: var(--acc-6); }
+#paper-noimg .art:nth-child(3n+1) { --acc: var(--acc-2); }
+#paper-noimg .art:nth-child(3n+2) { --acc: var(--acc-5); }
+#paper-noimg .art:nth-child(3n)   { --acc: var(--acc-3); }
+
+/* Apply the position color over the base subtle magenta border so
+   the rhythm pops while the "soothing" base is preserved. */
+.art {
+  border-color: rgba(var(--acc, var(--acc-1)), 0.42) !important;
+  box-shadow:
+    0 0 0 1px rgba(var(--acc, var(--acc-1)), 0.14),
+    0 0 22px rgba(var(--acc, var(--acc-1)), 0.18),
+    0 10px 28px rgba(0,0,0,0.40) !important;
+}
+.art:hover {
+  border-color: rgba(var(--acc, var(--acc-1)), 0.78) !important;
+  box-shadow:
+    0 0 0 1px rgba(var(--acc, var(--acc-1)), 0.28),
+    0 0 30px rgba(var(--acc, var(--acc-1)), 0.32),
+    0 14px 36px rgba(0,0,0,0.55) !important;
+  transform: translateY(-2px);
+}
+.art .meta .tag { background: rgba(var(--acc, var(--acc-1)), 0.18); color: rgba(var(--acc, var(--acc-1)), 1); }
+
+/* Translated cards keep the magenta override for the "has translation"
+   signal — overrides the position-cycling color so the affordance
+   still reads clearly. */
+.art.has-ko { --acc: var(--acc-1); }
+.art.has-ko {
+  border-color: rgba(255,43,214,0.68) !important;
+  box-shadow:
+    0 0 0 1px rgba(255,43,214,0.36),
+    0 0 28px rgba(255,43,214,0.32),
+    0 10px 28px rgba(0,0,0,0.40) !important;
 }
 
 /* ── No-image cards: float layout — each card sizes to its own
