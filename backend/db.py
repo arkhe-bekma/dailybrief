@@ -148,6 +148,12 @@ def _init_sync() -> None:
             "ALTER TABLE articles ADD COLUMN validated INTEGER DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN validation_reason TEXT",
             "ALTER TABLE articles ADD COLUMN validated_at INTEGER",
+            # Archive flag — articles older than ~7 days flip to 1 so
+            # the "active" feed stays small + fast. Archived rows
+            # aren't purged: they stay readable via /api/page&archived=1
+            # and the modal still serves them from reader_results.
+            "ALTER TABLE articles ADD COLUMN archived INTEGER DEFAULT 0",
+            "ALTER TABLE articles ADD COLUMN archived_at INTEGER",
         ):
             try:
                 c.execute(stmt)
@@ -162,6 +168,8 @@ def _init_sync() -> None:
             CREATE INDEX IF NOT EXISTS idx_articles_score     ON articles(score DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_premium   ON articles(premium DESC, score DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_validated ON articles(validated, fetched_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_articles_archived  ON articles(archived, fetched_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_articles_active    ON articles(archived, validated, fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_reader_used        ON reader_results(last_used_at DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
         """)
@@ -213,12 +221,16 @@ def _upsert_article_sync(row: dict) -> None:
 
 
 # ── page query (lazy / from-disk pagination) ───────────────────────
+# All article-listing paths default to the ACTIVE set (archived = 0).
+# Lab / debug callers can pass include_archived=True to see everything.
 def _list_articles_sync(
     offset: int, limit: int, cat: str | None, premium_only: bool = False,
-    validated_only: bool = True,
+    validated_only: bool = True, include_archived: bool = False,
 ) -> list[dict]:
     args: list = []
     where_parts: list[str] = []
+    if not include_archived:
+        where_parts.append("archived = 0")
     if cat:
         where_parts.append("category = ?")
         args.append(cat)
@@ -245,34 +257,39 @@ def _list_articles_sync(
         return [dict(r) for r in rows]
 
 
-def _count_articles_sync(cat: str | None) -> int:
+def _count_articles_sync(cat: str | None, include_archived: bool = False) -> int:
     args: list = []
-    where = ""
+    where_parts: list[str] = []
+    if not include_archived:
+        where_parts.append("archived = 0")
     if cat:
-        where = "WHERE category = ?"
+        where_parts.append("category = ?")
         args.append(cat)
+    where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
     with closing(_conn()) as c:
         return c.execute(f"SELECT COUNT(*) AS n FROM articles {where}", args).fetchone()["n"]
 
 
 async def list_articles(
     offset: int, limit: int, cat: str | None = None, premium_only: bool = False,
-    validated_only: bool = True,
+    validated_only: bool = True, include_archived: bool = False,
 ) -> list[dict]:
     return await asyncio.to_thread(
         _list_articles_sync, offset, limit, cat, premium_only, validated_only,
+        include_archived,
     )
 
 
-def _count_articles_validated_sync(cat: str | None) -> int:
-    # Same semantics as the listing path: hide validated=-1, count
-    # passed + pending so the page counter doesn't whiplash as the
-    # worker chips through the backlog.
+def _count_articles_validated_sync(cat: str | None, include_archived: bool = False) -> int:
+    # Same semantics as the listing path: hide validated=-1 + archived.
     args: list = []
-    where = "WHERE validated != -1"
+    where_parts = ["validated != -1"]
+    if not include_archived:
+        where_parts.append("archived = 0")
     if cat:
-        where += " AND category = ?"
+        where_parts.append("category = ?")
         args.append(cat)
+    where = "WHERE " + " AND ".join(where_parts)
     with closing(_conn()) as c:
         return c.execute(
             f"SELECT COUNT(*) AS n FROM articles {where}", args,
@@ -281,10 +298,13 @@ def _count_articles_validated_sync(cat: str | None) -> int:
 
 async def count_articles(
     cat: str | None = None, validated_only: bool = True,
+    include_archived: bool = False,
 ) -> int:
     if validated_only:
-        return await asyncio.to_thread(_count_articles_validated_sync, cat)
-    return await asyncio.to_thread(_count_articles_sync, cat)
+        return await asyncio.to_thread(
+            _count_articles_validated_sync, cat, include_archived,
+        )
+    return await asyncio.to_thread(_count_articles_sync, cat, include_archived)
 
 
 def _upsert_articles_batch_sync(rows: list[dict]) -> int:
@@ -547,6 +567,62 @@ async def reset_validation() -> int:
     return await asyncio.to_thread(_reset_validation_sync)
 
 
+def _archive_old_articles_sync(days_old: int) -> int:
+    """Flip `archived = 1` on every article whose `fetched_at` is older
+    than `days_old` days. Articles aren't deleted — they stay queryable
+    via include_archived=True paths (lab, audit). Returns the count
+    flipped on this call."""
+    cutoff = int(time.time()) - days_old * 86_400
+    now = int(time.time())
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles SET archived = 1, archived_at = ? "
+            "WHERE archived = 0 AND fetched_at < ?",
+            (now, cutoff),
+        )
+        return cur.rowcount
+
+
+async def archive_old_articles(days_old: int = 7) -> int:
+    return await asyncio.to_thread(_archive_old_articles_sync, days_old)
+
+
+def _unarchive_all_sync() -> int:
+    """Restore every archived article back into the active pool. Used
+    by the lab when the operator wants to surface the long tail again."""
+    now = int(time.time())
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles SET archived = 0, archived_at = NULL WHERE archived = 1"
+        )
+        return cur.rowcount
+
+
+async def unarchive_all() -> int:
+    return await asyncio.to_thread(_unarchive_all_sync)
+
+
+def _archive_stats_sync() -> dict:
+    """Counts of active vs archived for the lab dashboard."""
+    with closing(_conn()) as c:
+        active = c.execute(
+            "SELECT COUNT(*) AS n FROM articles WHERE archived = 0"
+        ).fetchone()["n"]
+        archived = c.execute(
+            "SELECT COUNT(*) AS n FROM articles WHERE archived = 1"
+        ).fetchone()["n"]
+        # Oldest active article so the operator can spot when they
+        # should archive again.
+        oldest = c.execute(
+            "SELECT MIN(fetched_at) AS t FROM articles WHERE archived = 0"
+        ).fetchone()["t"]
+        return {"active": active, "archived": archived, "oldest_active_fetched_at": oldest}
+
+
+async def archive_stats() -> dict:
+    return await asyncio.to_thread(_archive_stats_sync)
+
+
 def _purge_failed_articles_sync() -> int:
     """Drop every article currently marked validated = -1 along with
     its cached reader_results body. Used by the admin rebuild endpoint
@@ -671,14 +747,14 @@ async def update_article_image(url: str, image: str) -> bool:
 
 # ── Validation worker helpers ──────────────────────────────────────
 def _list_unvalidated_sync(limit: int) -> list[dict]:
-    """Pick the next batch of articles the worker should check. Ordered
-    by recency so the freshest items get validated first — that's what
-    the user is most likely staring at."""
+    """Pick the next batch of articles the worker should check. Skips
+    archived rows so the worker doesn't waste cycles on stale content.
+    Ordered by recency so the freshest items get validated first."""
     with closing(_conn()) as c:
         rows = c.execute(
             "SELECT url, title, image, outlet, category, lang, summary "
             "FROM articles "
-            "WHERE validated = 0 "
+            "WHERE validated = 0 AND archived = 0 "
             "ORDER BY fetched_at DESC LIMIT ?",
             (limit,),
         ).fetchall()

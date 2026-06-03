@@ -429,9 +429,12 @@ let CAT = "all";
 let PAGE = 1;
 let LAST_LOAD = null;
 let PENDING_REFRESH = false;  // set true when silentRefresh is deferred
-// Odd page size so HERO (always 1) + the rest is even, which packs
-// cleanly into the 2-per-row tiers below the hero.
-const PAGE_SIZE = 31;
+// Smaller page size means fewer total pages even with thousands of
+// articles in the archive. The user explicitly wanted a "premium
+// committee" feel — one tidy page at a time, not a 158-page wall.
+// 13 = HERO (1) + 12 of the rest, which packs cleanly into the
+// 2-per-row tiers below the hero.
+const PAGE_SIZE = 13;
 const AUTO_REFRESH_MS = 2 * 60 * 1000;  // 2 minutes — near-real-time
 
 // User-tunable interests — categories the user wants boosted in the

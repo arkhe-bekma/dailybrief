@@ -249,13 +249,21 @@
           <span class="ab-title">RE-SUMMARIZE</span>
           <span class="ab-desc">Walk the last 500 articles with stored bodies and rewrite their card deks from the extracted prose (lang-aware length cap).</span>
         </button>
+        <button class="action-btn" id="act-archive-7">
+          <span class="ab-title">ARCHIVE OLDER THAN 7 DAYS</span>
+          <span class="ab-desc">Move articles fetched more than 7 days ago to the archive pool. They stay queryable from the lab but disappear from the public feed + pager. <b>Reversible</b> — use UNARCHIVE ALL to restore.</span>
+        </button>
+        <button class="action-btn" id="act-archive-3">
+          <span class="ab-title">ARCHIVE OLDER THAN 3 DAYS</span>
+          <span class="ab-desc">Aggressive cut for when the feed feels too long. Same archive flow, shorter cutoff. Reversible.</span>
+        </button>
+        <button class="action-btn" id="act-unarchive">
+          <span class="ab-title">UNARCHIVE ALL</span>
+          <span class="ab-desc">Pull every archived article back into the active pool. Use when you accidentally over-archived or want to surface the long tail again.</span>
+        </button>
         <button class="action-btn act-danger" id="act-strict">
           <span class="ab-title">STRICT REVALIDATE + PURGE</span>
-          <span class="ab-desc">One-shot deep clean: resets every article, re-runs the validator with the strictest current heuristics, then drops everything that fails. Use this after tightening thresholds. <b>Permanent.</b></span>
-        </button>
-        <button class="action-btn act-danger" id="act-purge">
-          <span class="ab-title">PURGE FAILED</span>
-          <span class="ab-desc">Permanently drop every article currently marked <code>validated = -1</code> along with its cached body. <b>Cannot be undone.</b></span>
+          <span class="ab-desc">Deep clean: resets every article, re-runs the validator with the strictest heuristics, then permanently drops everything that fails. Use after tightening thresholds. <b>Permanent.</b></span>
         </button>
       </div>
       <div class="action-result" id="action-result"></div>
@@ -310,6 +318,6 @@
     <span class="muted">dailybrief lab · <span id="lab-status">refreshing every 4s</span></span>
   </footer>
 
-  <script src="/static/lab.js?v=50"></script>
+  <script src="/static/lab.js?v=51"></script>
 </body>
 </html>

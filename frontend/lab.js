@@ -476,13 +476,24 @@ document.getElementById("act-rebuild")?.addEventListener("click", () => {
 document.getElementById("act-resummary")?.addEventListener("click", () =>
   runAction("RE-SUMMARIZE 500", "/api/ingest/resummary?limit=500", { method: "POST" })
 );
-document.getElementById("act-purge")?.addEventListener("click", () => {
-  if (!confirm("Permanently DELETE every article currently failing validation? This cannot be undone.")) return;
-  runAction("PURGE FAILED", "/api/admin/purge-failed", { method: "POST" });
-});
 document.getElementById("act-strict")?.addEventListener("click", () => {
   if (!confirm("Re-validate the entire archive against the strictest current rules, then permanently DELETE everything that fails? This can take a few minutes.")) return;
   runAction("STRICT REVALIDATE", "/api/admin/strict-revalidate?batch_size=30", { method: "POST" });
+});
+
+// Archive actions — move (not delete) older articles out of the
+// active feed. Reversible via UNARCHIVE ALL.
+document.getElementById("act-archive-7")?.addEventListener("click", () => {
+  if (!confirm("Move every article older than 7 days into the archive pool? Reversible.")) return;
+  runAction("ARCHIVE 7d", "/api/admin/archive-old?days=7", { method: "POST" });
+});
+document.getElementById("act-archive-3")?.addEventListener("click", () => {
+  if (!confirm("Move every article older than 3 days into the archive pool? Reversible.")) return;
+  runAction("ARCHIVE 3d", "/api/admin/archive-old?days=3", { method: "POST" });
+});
+document.getElementById("act-unarchive")?.addEventListener("click", () => {
+  if (!confirm("Restore every archived article back into the active pool?")) return;
+  runAction("UNARCHIVE ALL", "/api/admin/unarchive-all", { method: "POST" });
 });
 
 $("#interval-save").addEventListener("click", async () => {

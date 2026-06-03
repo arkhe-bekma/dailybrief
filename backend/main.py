@@ -90,6 +90,10 @@ async def _start():
     except Exception as exc:
         print(f"[startup] prune worker failed to schedule: {exc!r}", flush=True)
     try:
+        asyncio.create_task(_archive_worker())
+    except Exception as exc:
+        print(f"[startup] archive worker failed to schedule: {exc!r}", flush=True)
+    try:
         asyncio.create_task(_resummary_worker())
     except Exception as exc:
         print(f"[startup] resummary worker failed to schedule: {exc!r}", flush=True)
@@ -278,6 +282,32 @@ async def _resummary_worker():
             await asyncio.sleep(60)
         else:
             await asyncio.sleep(1)
+
+
+async def _archive_worker():
+    """Hourly auto-archive: anything older than 7 days flips to
+    archived = 1. Articles aren't deleted — operator can still pull
+    them back from /api/admin/unarchive-all. Keeps the active set
+    (what /api/brief + /api/page expose to anonymous visitors) at a
+    sane size automatically so the front-end pager never reaches the
+    150-page absurdity the user reported."""
+    ARCHIVE_DAYS = 7
+    INTERVAL_SECONDS = 3600  # once an hour
+    await asyncio.sleep(45)  # let startup settle
+    while True:
+        try:
+            moved = await db.archive_old_articles(days_old=ARCHIVE_DAYS)
+            if moved:
+                stats = await db.archive_stats()
+                cache.clear()
+                print(
+                    f"[archive] moved {moved} → archive. "
+                    f"active={stats['active']} archived={stats['archived']}",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(f"[archive] failed: {exc!r}", flush=True)
+        await asyncio.sleep(INTERVAL_SECONDS)
 
 
 async def _prune_worker():
@@ -824,6 +854,39 @@ async def delete_article_by_user(body: dict, request: Request):
     return {"ok": True, **result}
 
 
+@app.post("/api/admin/archive-old")
+async def admin_archive_old(request: Request, days: int = 7):
+    """Move articles older than `days` from active → archived. Archived
+    articles aren't deleted, just hidden from /api/brief + /api/page by
+    default. They stay readable via lab tools and the reader_results
+    cache. Admin-only."""
+    await _require_admin(request)
+    days = max(1, min(int(days or 7), 365))
+    moved = await db.archive_old_articles(days_old=days)
+    cache.clear()
+    stats = await db.archive_stats()
+    return {"archived_now": moved, "days": days, **stats}
+
+
+@app.post("/api/admin/unarchive-all")
+async def admin_unarchive_all(request: Request):
+    """Pull every archived article back into the active pool. Used
+    when the operator wants to surface the long tail or has misjudged
+    a previous archive run. Admin-only."""
+    await _require_admin(request)
+    moved = await db.unarchive_all()
+    cache.clear()
+    stats = await db.archive_stats()
+    return {"unarchived": moved, **stats}
+
+
+@app.get("/api/lab/archive-stats")
+async def lab_archive_stats(request: Request):
+    """Active vs archived counts for the lab dashboard. Admin-only."""
+    await _require_admin(request)
+    return await db.archive_stats()
+
+
 @app.post("/api/admin/purge-failed")
 async def admin_purge_failed(request: Request):
     """Drop every article currently marked validated=-1 along with
@@ -1049,12 +1112,22 @@ async def brief():
 
     headline = await summary.generate(mixed)
 
-    # Trim the wire payload: only ship the first ~60 mixed items (enough
-    # for the initial 2 pages of 31). The rest of the archive is reached
-    # via /api/page on demand, which reads straight from SQLite. This
-    # keeps initial load tiny — was ~750 KB, now ~150 KB.
-    INITIAL_WIRE_ITEMS = 62
+    # Trim the wire payload aggressively. The site previously shipped 62
+    # mixed items + the DB pager exposed 150+ pages worth of older
+    # articles — way too much for the user (and Lightsail's 512MB box
+    # struggled). Now: top 24 only on /api/brief, pages 2+ come from a
+    # DB query that excludes archived rows so the total page count
+    # stays in the low double digits.
+    INITIAL_WIRE_ITEMS = 24
     mixed_wire = mixed[:INITIAL_WIRE_ITEMS]
+
+    # Hard cap on how deep the front-end pager can go. The user
+    # explicitly: "we don't need that many articles to be shown" — so
+    # even if the DB has 3000 active rows, only the top 130 (≈ 10
+    # pages of 13) are reachable. The archive worker rotates the
+    # cap-defining set hourly: the highest-quality, premium-skewed,
+    # recent articles bubble to the top, older ones drop off.
+    MAX_VISIBLE_ARTICLES = 130
 
     payload = {
         "profile": {
@@ -1111,7 +1184,13 @@ async def brief():
 
         # Tell the frontend how deep the archive goes so its pager can
         # render however many pages the DB actually supports.
-        payload["db_total_articles"] = await db.count_articles()
+        # Capped so the pager never advertises more pages than the
+        # hard ceiling above. The DB still has the long tail (archived
+        # rows + the rest of the active set); the user just can't page
+        # into it from the regular UI.
+        payload["db_total_articles"] = min(
+            await db.count_articles(), MAX_VISIBLE_ARTICLES,
+        )
     except Exception as exc:
         print(f"[db] upsert articles failed: {exc}")
 
@@ -1578,18 +1657,21 @@ async def account_page(request: Request):
 
 @app.get("/api/page")
 async def api_page(
-    n: int = 1, size: int = 31,
+    n: int = 1, size: int = 13,
     cat: Optional[str] = None, premium: int = 0,
 ):
-    """Lazy pagination — page 2+ pulls from the SQLite archive instead
-    of the in-memory curator output. Total page count grows as the DB
-    grows, with no upper limit baked in. Pass `premium=1` to filter to
-    only premium-outlet articles."""
+    """Lazy pagination — page 2+ pulls from the SQLite archive (active
+    rows only). Total page count is hard-capped at MAX_VISIBLE_PAGES so
+    the pager never grows past what the user actually wants to scroll
+    through. Pass `premium=1` to filter to only premium-outlet articles."""
+    MAX_VISIBLE_ARTICLES = 130
     n = max(1, n)
     size = max(1, min(size, 100))
     cat_clean = cat if cat and cat != "all" else None
     premium_only = bool(premium)
-    total = await db.count_articles(cat=cat_clean)
+    total = min(
+        await db.count_articles(cat=cat_clean), MAX_VISIBLE_ARTICLES,
+    )
     pages = max(1, (total + size - 1) // size)
     n = min(n, pages)
     items = await db.list_articles(
