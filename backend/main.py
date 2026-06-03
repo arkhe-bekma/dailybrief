@@ -101,8 +101,12 @@ async def _start():
         async def _prewarm():
             await asyncio.sleep(8)
             try:
-                await brief()
+                # 30s timeout — never block startup forever even if RSS
+                # is slow or the LLM headline call stalls.
+                await asyncio.wait_for(brief(), timeout=30.0)
                 print("[startup] brief cache prewarmed", flush=True)
+            except asyncio.TimeoutError:
+                print("[startup] brief prewarm timeout (30s), giving up", flush=True)
             except Exception as exc:
                 print(f"[startup] brief prewarm failed: {exc!r}", flush=True)
         asyncio.create_task(_prewarm())
@@ -1066,60 +1070,96 @@ def _brief_db_fallback() -> dict | None:
 
 async def _kickoff_brief_rebuild():
     """Run the FULL brief assembly in the background and write the
-    result into both cache buckets. Calls _brief_build_full() directly
-    so the fast-path early-return in the request handler can't
-    short-circuit the rebuild."""
+    result into both cache buckets. Bounded by a 60 s hard timeout so
+    a stuck RSS fetch or hung LLM call can't pin the rebuilding flag
+    forever (which would mean no future caller could ever trigger
+    another rebuild)."""
     global _brief_rebuilding
     if _brief_rebuilding:
         return
     _brief_rebuilding = True
     try:
-        payload = await _brief_build_full()
+        payload = await asyncio.wait_for(_brief_build_full(), timeout=60.0)
         cache.set("brief:response", payload, BRIEF_CACHE_TTL)
         cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
         print("[brief-bg-refresh] cache repopulated", flush=True)
+    except asyncio.TimeoutError:
+        print("[brief-bg-refresh] hit 60s timeout, abandoned", flush=True)
     except Exception as exc:
         print(f"[brief-bg-refresh] failed: {exc!r}", flush=True)
     finally:
         _brief_rebuilding = False
 
 
+def _empty_brief_payload(msg: str = "Loading…") -> dict:
+    """Last-resort payload when everything else has failed or timed out.
+    Frontend still renders the chrome; status line shows the message."""
+    return {
+        "profile": {
+            "bio": getattr(config.PROFILE, "bio", ""),
+            "keywords": getattr(config.PROFILE, "keywords", []),
+            "primary_lang": getattr(config.PROFILE, "primary_lang", "en"),
+        },
+        "tape": [], "headline": msg,
+        "mixed": [], "cat_counts": {}, "total_mixed": 0,
+        "outlets_count": 0, "whales": [], "trades": [], "youtube": [],
+        "db_total_articles": 0, "_loading": True,
+    }
+
+
 @app.get("/api/brief")
 async def brief():
     """The main payload: ticker tape + mixed feed + sidebars + summary.
 
-    Cache-first with stale-while-revalidate so phone users on slow
-    connections never wait for a cold rebuild.
+    Cache-first with stale-while-revalidate AND a hard 6 s timeout on
+    every code path so phone users on slow connections / Caddy with a
+    30 s upstream cap never sit on a hanging request.
     """
-    # Fresh cache → ship it.
-    cached = cache.get("brief:response")
-    if cached is not None:
-        return cached
+    try:
+        # Fresh cache → ship it.
+        cached = cache.get("brief:response")
+        if cached is not None:
+            return cached
 
-    # No fresh cache. Try the stale grace bucket — same key, different
-    # store entry kept around for up to BRIEF_STALE_GRACE so the
-    # rebuild path can hand back something useful immediately.
-    stale = cache.get("brief:response_stale")
-    if stale is not None:
-        asyncio.create_task(_kickoff_brief_rebuild())
-        out = dict(stale)
-        out["_stale"] = True
-        return out
+        # No fresh cache. Try the stale grace bucket.
+        stale = cache.get("brief:response_stale")
+        if stale is not None:
+            asyncio.create_task(_kickoff_brief_rebuild())
+            out = dict(stale)
+            out["_stale"] = True
+            return out
 
-    # No cache at all. First response gets the cheap DB-only payload
-    # (instant), and a real rebuild kicks off in the background so the
-    # user's next refresh shows the full curated feed.
-    fast = _brief_db_fallback()
-    if fast is not None:
-        asyncio.create_task(_kickoff_brief_rebuild())
-        return fast
+        # No cache at all. First response gets the cheap DB-only payload
+        # (instant), and a real rebuild kicks off in the background so
+        # the user's next refresh shows the full curated feed. The
+        # fallback itself has its own try/except — if it crashes we
+        # still fall through to the timeout-bounded full build below.
+        try:
+            fast = _brief_db_fallback()
+            if fast is not None:
+                asyncio.create_task(_kickoff_brief_rebuild())
+                return fast
+        except Exception as exc:
+            print(f"[brief] fast-path crashed: {exc!r}", flush=True)
 
-    # No cache AND no DB rows yet (fresh install). Block once for the
-    # full build — but only this single first request.
-    payload = await _brief_build_full()
-    cache.set("brief:response", payload, BRIEF_CACHE_TTL)
-    cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
-    return payload
+        # No cache AND no DB rows. Block once with a hard timeout — if
+        # the full build runs long the user gets the empty-loading
+        # payload + a background rebuild that fills cache for the next
+        # request. Better than 502.
+        try:
+            payload = await asyncio.wait_for(_brief_build_full(), timeout=10.0)
+            cache.set("brief:response", payload, BRIEF_CACHE_TTL)
+            cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
+            return payload
+        except asyncio.TimeoutError:
+            asyncio.create_task(_kickoff_brief_rebuild())
+            return _empty_brief_payload("Loading feed…")
+    except Exception as exc:
+        # Absolute last-resort: log + ship the empty payload so the
+        # endpoint NEVER returns a 5xx. Caddy proxies a 5xx to the user
+        # as 502, which is what they reported.
+        print(f"[brief] handler crashed, serving empty: {exc!r}", flush=True)
+        return _empty_brief_payload("Loading…")
 
 
 async def _brief_build_full() -> dict:
