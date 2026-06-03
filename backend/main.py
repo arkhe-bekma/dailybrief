@@ -92,6 +92,10 @@ async def _start():
     except Exception as exc:
         print(f"[startup] archive worker failed to schedule: {exc!r}", flush=True)
     try:
+        asyncio.create_task(_rss_ingest_worker())  # 30-min light RSS-only fetch
+    except Exception as exc:
+        print(f"[startup] rss ingest worker failed to schedule: {exc!r}", flush=True)
+    try:
         asyncio.create_task(_brief_refresh_worker())  # hourly cache refill
     except Exception as exc:
         print(f"[startup] brief refresh worker failed to schedule: {exc!r}", flush=True)
@@ -300,6 +304,49 @@ async def _resummary_worker():
             await asyncio.sleep(60)
         else:
             await asyncio.sleep(1)
+
+
+async def _rss_ingest_worker():
+    """LIGHTWEIGHT periodic RSS ingest. Runs every 30 min and ONLY
+    does: fetch every RSS feed → drop blocked URLs → upsert into the
+    articles table. No curator, no LLM, no image scrape — those are
+    what made _brief_build_full time out at 60 s.
+
+    This guarantees the DB stays populated with fresh articles even
+    when the heavy curator chain fails. The fast-path query
+    (_brief_db_fallback) then has new rows to serve on the next
+    /api/brief tick.
+    """
+    INTERVAL_SECONDS = 30 * 60   # 30 min
+    await asyncio.sleep(60)
+    while True:
+        try:
+            articles = await asyncio.wait_for(rss.fetch_all(), timeout=120.0)
+            blocked = await db.blocked_url_set()
+            if blocked:
+                articles = [a for a in articles if a.url not in blocked]
+            if articles:
+                now_ts = int(__import__("time").time())
+                rows = [{
+                    "url": a.url, "title": a.title, "image": a.image,
+                    "outlet": a.outlet, "category": a.category, "lang": a.lang,
+                    "summary": a.summary, "published_at": a.published,
+                    "fetched_at": now_ts,
+                } for a in articles if a.url]
+                await db.upsert_articles(rows)
+                # Drop the brief response cache so the next /api/brief
+                # request runs the fast path and picks up the new rows.
+                cache._store.pop("brief:response", None)
+                print(
+                    f"[rss-ingest] pulled {len(articles)} articles, "
+                    f"upserted {len(rows)} rows",
+                    flush=True,
+                )
+        except asyncio.TimeoutError:
+            print("[rss-ingest] timed out at 120 s", flush=True)
+        except Exception as exc:
+            print(f"[rss-ingest] failed: {exc!r}", flush=True)
+        await asyncio.sleep(INTERVAL_SECONDS)
 
 
 async def _brief_refresh_worker():
@@ -1178,12 +1225,16 @@ async def _kickoff_brief_rebuild():
         return
     _brief_rebuilding = True
     try:
-        payload = await asyncio.wait_for(_brief_build_full(), timeout=60.0)
+        # 5 min budget — the full chain on a small Lightsail box can
+        # take 90-180 s under load (RSS fetch + image scraping + LLM
+        # headline). 60s was too tight, causing every rebuild to fail
+        # silently and stranding the cache at the prewarm snapshot.
+        payload = await asyncio.wait_for(_brief_build_full(), timeout=300.0)
         cache.set("brief:response", payload, BRIEF_CACHE_TTL)
         cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
         print("[brief-bg-refresh] cache repopulated", flush=True)
     except asyncio.TimeoutError:
-        print("[brief-bg-refresh] hit 60s timeout, abandoned", flush=True)
+        print("[brief-bg-refresh] hit 300s timeout, abandoned", flush=True)
     except Exception as exc:
         print(f"[brief-bg-refresh] failed: {exc!r}", flush=True)
     finally:
