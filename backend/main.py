@@ -94,6 +94,10 @@ async def _start():
     except Exception as exc:
         print(f"[startup] archive worker failed to schedule: {exc!r}", flush=True)
     try:
+        asyncio.create_task(_brief_refresh_worker())
+    except Exception as exc:
+        print(f"[startup] brief refresh worker failed to schedule: {exc!r}", flush=True)
+    try:
         # Pre-warm the brief cache so the first visitor after a deploy
         # doesn't pay the 5-15 s cold-start cost. Runs after a short
         # delay so the rest of startup (DB migration, schedulers) lands
@@ -308,6 +312,23 @@ async def _resummary_worker():
             await asyncio.sleep(60)
         else:
             await asyncio.sleep(1)
+
+
+async def _brief_refresh_worker():
+    """ONE controlled brief rebuild every 20 min. Replaces the
+    per-request asyncio.create_task pattern that was OOM-killing
+    uvicorn under traffic. Uses the hard 60 s timeout inside
+    _kickoff_brief_rebuild so a stuck call can't pin the flag.
+    """
+    REFRESH_EVERY = 20 * 60  # 20 minutes
+    # Wait a long time before first run so startup is fully settled.
+    await asyncio.sleep(90)
+    while True:
+        try:
+            await _kickoff_brief_rebuild()
+        except Exception as exc:
+            print(f"[brief-refresh] {exc!r}", flush=True)
+        await asyncio.sleep(REFRESH_EVERY)
 
 
 async def _archive_worker():
@@ -1129,22 +1150,21 @@ async def brief():
             return cached
 
         # No fresh cache. Try the stale grace bucket.
+        # NOT triggering a rebuild here either — see comment below.
         stale = cache.get("brief:response_stale")
         if stale is not None:
-            asyncio.create_task(_kickoff_brief_rebuild())
             out = dict(stale)
             out["_stale"] = True
             return out
 
-        # No cache at all. First response gets the cheap DB-only payload
-        # (instant), and a real rebuild kicks off in the background so
-        # the user's next refresh shows the full curated feed. The
-        # fallback itself has its own try/except — if it crashes we
-        # still fall through to the timeout-bounded full build below.
+        # No cache at all. Serve the cheap DB-only payload — and
+        # DO NOT kick off a background rebuild here. On a 512MB
+        # Lightsail box the full rebuild's RSS+image-scrape+LLM chain
+        # was OOM-killing uvicorn under traffic. Rebuilds happen on a
+        # slow scheduled cadence below (see _brief_refresh_worker).
         try:
             fast = _brief_db_fallback()
             if fast is not None:
-                asyncio.create_task(_kickoff_brief_rebuild())
                 return fast
         except Exception as exc:
             print(f"[brief] fast-path crashed: {exc!r}", flush=True)
