@@ -99,14 +99,21 @@ async def _start():
         # delay so the rest of startup (DB migration, schedulers) lands
         # first.
         async def _prewarm():
-            await asyncio.sleep(8)
+            # Wait ~30s so the OTHER background workers (validator,
+            # archive, prune, resummary) have a chance to finish their
+            # first burst before we add load.
+            await asyncio.sleep(30)
             try:
-                # 30s timeout — never block startup forever even if RSS
-                # is slow or the LLM headline call stalls.
-                await asyncio.wait_for(brief(), timeout=30.0)
-                print("[startup] brief cache prewarmed", flush=True)
-            except asyncio.TimeoutError:
-                print("[startup] brief prewarm timeout (30s), giving up", flush=True)
+                # ONLY warm the cache with the cheap DB-only payload.
+                # Don't trigger the full RSS+curator+LLM chain on a
+                # small box — that's what was crashing uvicorn under
+                # memory pressure. The full rebuild happens lazily
+                # when the first stale cache request lands.
+                fast = _brief_db_fallback()
+                if fast is not None:
+                    cache.set("brief:response", fast, BRIEF_CACHE_TTL)
+                    cache.set("brief:response_stale", fast, BRIEF_STALE_GRACE)
+                    print("[startup] brief cache prewarmed (fast path)", flush=True)
             except Exception as exc:
                 print(f"[startup] brief prewarm failed: {exc!r}", flush=True)
         asyncio.create_task(_prewarm())
@@ -359,9 +366,9 @@ async def _prune_worker():
 #
 # Runs as a background task — never blocks /api/brief. Lab page polls
 # /api/ingest/status for the live progress dashboard.
-_INGEST_BATCH = 6           # how many articles per cycle
-_INGEST_PAUSE_BUSY = 2.0    # seconds between batches while there's work
-_INGEST_PAUSE_IDLE = 30.0   # seconds between polls when queue is empty
+_INGEST_BATCH = 3           # how many articles per cycle (was 6 — Lightsail 512MB)
+_INGEST_PAUSE_BUSY = 5.0    # seconds between batches while there's work (was 2)
+_INGEST_PAUSE_IDLE = 60.0   # seconds between polls when queue is empty (was 30)
 
 
 async def _validate_one(article: dict) -> tuple[int, str]:
