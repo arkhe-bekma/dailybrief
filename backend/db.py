@@ -280,6 +280,60 @@ async def list_articles(
     )
 
 
+# ── ALL-feed round-robin listing ────────────────────────────────────
+# The ALL tab must "just link the articles from the DB and display
+# them" — no separate materialised dataset. This is the paginated twin
+# of main._brief_db_fallback: rank each article within its category,
+# then emit rank-1 of every category (in chip order) before any rank-2,
+# so no single category dominates the wall. Active + non-failed only.
+def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
+    with closing(_conn()) as c:
+        rows = c.execute(
+            """
+            WITH ranked AS (
+              SELECT url, title, image, outlet, category, lang, summary, score,
+                     why, image_source, tier, premium, weight, premium_body,
+                     quality, title_ko, dek_ko, translated_at, published_at,
+                     fetched_at,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY category
+                       ORDER BY premium DESC, score DESC, fetched_at DESC
+                     ) AS cat_rank,
+                     CASE category
+                       WHEN 'world'   THEN 1
+                       WHEN 'econ'    THEN 2
+                       WHEN 'biz'     THEN 3
+                       WHEN 'tech'    THEN 4
+                       WHEN 'ai'      THEN 5
+                       WHEN 'crypto'  THEN 6
+                       WHEN 'science' THEN 7
+                       WHEN 'geo'     THEN 8
+                       WHEN 'opinion' THEN 9
+                       WHEN 'korea'   THEN 10
+                       WHEN 'kent'    THEN 11
+                       ELSE 99
+                     END AS cat_order
+              FROM articles
+              WHERE archived = 0 AND validated != -1
+            )
+            SELECT url, title, image, outlet, category, lang, summary, score,
+                   why, image_source, tier, premium, weight, premium_body,
+                   quality, title_ko, dek_ko, translated_at, published_at,
+                   fetched_at
+            FROM ranked
+            ORDER BY cat_rank ASC, cat_order ASC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def list_articles_roundrobin(offset: int, limit: int) -> list[dict]:
+    """Paginated round-robin ALL feed straight from SQLite."""
+    return await asyncio.to_thread(_list_articles_roundrobin_sync, offset, limit)
+
+
 def _count_articles_validated_sync(cat: str | None, include_archived: bool = False) -> int:
     # Same semantics as the listing path: hide validated=-1 + archived.
     args: list = []

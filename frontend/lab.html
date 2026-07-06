@@ -232,11 +232,20 @@
     <section class="card span-2">
       <div class="card-head">ACTIONS · MAINTENANCE</div>
       <p class="hint">
-        Each button runs a single admin task right now. Safe to click —
-        they only touch caches and validation flags, never your
-        un-removed articles. Watch the toast at the bottom for results.
+        Validation + a 10-minute self-healing supervisor now run
+        automatically in the background — these buttons are for driving a
+        task <b>right now</b> instead of waiting for the next tick. Safe
+        to click. Watch the toast at the bottom for results.
       </p>
       <div class="action-grid">
+        <button class="action-btn" id="act-self-heal">
+          <span class="ab-title">▶ SELF-HEAL NOW</span>
+          <span class="ab-desc">Run one supervisor pass immediately: probe the live site (chrome view), purge no-content articles, feed the validator, reseed the feed if it's empty, and top up the DB if it's thin. Same pass that runs every 10 min automatically.</span>
+        </button>
+        <button class="action-btn" id="act-run-cycle">
+          <span class="ab-title">▶ RUN FULL CYCLE</span>
+          <span class="ab-desc">One-shot "do everything now": fresh RSS ingest → validate up to 40 pending → purge no-content articles → rebuild the feed cache. The big green button when you want an instant end-to-end refresh.</span>
+        </button>
         <button class="action-btn" id="act-refresh">
           <span class="ab-title">FORCE REFRESH</span>
           <span class="ab-desc">Clear the in-memory feed/article cache so the next /api/brief pulls fresh RSS and re-runs the curator.</span>
@@ -271,7 +280,7 @@
         </button>
         <button class="action-btn" id="act-validate-batch">
           <span class="ab-title">RUN VALIDATION (20 articles)</span>
-          <span class="ab-desc">Manual replacement for the disabled background validator. Processes 20 pending articles inline. Click repeatedly to chip through the backlog at your own pace.</span>
+          <span class="ab-desc">Process 20 pending articles inline, right now, instead of waiting for the background validator's next batch. Click repeatedly to chip through the backlog faster.</span>
         </button>
       </div>
       <div class="action-result" id="action-result"></div>

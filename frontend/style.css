@@ -68,6 +68,77 @@
   --glow-mag:    0 0 22px rgba(255,43,214,0.45);
   --glow-lime:   0 0 22px rgba(182,255,60,0.45);
   --glow-yellow: 0 0 22px rgba(255,230,0,0.45);
+
+  /* ── Design tokens ────────────────────────────────────────────
+     Added 2026-06: codifying the spacing, radius, type, and motion
+     primitives that existed only as hardcoded numbers across this
+     file. New work uses these; the older rules can keep their literals
+     until they're touched (mass-rewrite would be too risky for visual
+     diff). */
+
+  /* Spacing — 4px base, geometric-ish progression. */
+  --sp-0:  2px;
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-7:  32px;
+  --sp-8:  40px;
+  --sp-9:  56px;
+  --sp-10: 72px;
+
+  /* Radius. Cards use --r-3, modals --r-4, pills/chips --r-pill. */
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-4: 18px;
+  --r-5: 24px;
+  --r-pill: 999px;
+
+  /* Type scale (px). Multiply by --text-scale where users size up. */
+  --fs-xs:   11px;
+  --fs-sm:   13px;
+  --fs-base: 15px;
+  --fs-md:   17px;
+  --fs-lg:   20px;
+  --fs-xl:   26px;
+  --fs-2xl:  34px;
+  --fs-3xl:  44px;
+
+  /* Line heights. */
+  --lh-tight:  1.15;
+  --lh-snug:   1.3;
+  --lh-normal: 1.5;
+  --lh-loose:  1.7;
+
+  /* Motion. Durations + easings. The card-fly + spring-back curves
+     used by the swipe-to-close gesture also live here so any future
+     sheet/dialog uses the same feel. */
+  --dur-1: 120ms;     /* hover/state */
+  --dur-2: 180ms;     /* small enter/exit */
+  --dur-3: 240ms;     /* default */
+  --dur-4: 320ms;     /* snap-back */
+  --dur-5: 380ms;     /* fly-off */
+
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);    /* ease-out-quart */
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);  /* spring overshoot */
+  --ease-emph:     cubic-bezier(0.4, 0, 0.2, 1);       /* material standard */
+
+  /* Elevation. Subtle layered shadows over the dark base — never solid
+     black drops, always with a touch of neon at high-elevation. */
+  --elev-1: 0 1px 0 rgba(255,255,255,0.04), 0 2px 6px rgba(0,0,0,0.25);
+  --elev-2: 0 1px 0 rgba(255,255,255,0.04), 0 8px 20px rgba(0,0,0,0.4);
+  --elev-3: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --elev-modal:
+    0 30px 100px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,43,214,0.18),
+    0 0 32px rgba(255,43,214,0.22),
+    0 0 70px rgba(255,43,214,0.10);
+
+  /* Focus ring. Single source for keyboard-navigation outlines. */
+  --focus-ring: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--neon-cyan);
 }
 
 * { box-sizing: border-box; }
@@ -119,6 +190,28 @@ html, body {
 }
 
 a { color: inherit; text-decoration: none; }
+
+/* ── Keyboard-focus ring ──────────────────────────────────────────
+   Single source for keyboard navigation outlines. Mouse clicks won't
+   show this because :focus-visible only triggers on keyboard focus
+   (Tab/Shift-Tab/Arrow). Buttons, links, inputs all share the same
+   ring so the visual language is consistent. */
+:focus { outline: none; }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 6px;
+}
+/* Inputs and segmented controls already have rounded corners, so the
+   default radius would clip awkwardly. Inherit theirs via currentColor
+   trick: drop the box-shadow override and use a pure outline instead. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow:
+    0 0 0 3px rgba(0,225,255,0.15),
+    0 0 0 1px var(--neon-cyan);
+}
 
 /* ── Language-aware typography ─────────────────────────────
    :lang() lets us tune the same CSS rules per content language.
@@ -206,8 +299,13 @@ a { color: inherit; text-decoration: none; }
   right: 14px;
   z-index: 60;
   width: 340px;
-  max-height: calc(100vh - 80px);
+  /* Use 100dvh (dynamic viewport height) so iOS Safari's chrome doesn't
+     chop off the bottom. Falls back to 100vh on browsers that don't
+     support dvh — slightly worse but still works. */
+  max-height: calc(100vh - 76px);
+  max-height: calc(100dvh - 76px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: rgba(11,13,24,0.97);
   border: 1px solid var(--line-2);
   border-radius: 12px;
@@ -224,7 +322,40 @@ a { color: inherit; text-decoration: none; }
 .settings-pop::-webkit-scrollbar { width: 6px; }
 .settings-pop::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 @media (max-width: 480px) {
-  .settings-pop { width: calc(100vw - 24px); right: 12px; }
+  .settings-pop {
+    width: calc(100vw - 16px);
+    right: 8px;
+    left: 8px;
+    top: 52px;
+    /* Account for the masthead height (~52px) + a small safe-area inset */
+    max-height: calc(100vh - 60px);
+    max-height: calc(100dvh - 60px);
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Settings backdrop — captures taps + locks body scroll ──────
+   When the popover is open the body gets .settings-open, which both
+   freezes the scroll position and reveals this backdrop. The popover
+   itself sits at z 60; backdrop at 55, so taps outside close it via
+   the existing document-click handler in JS. */
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(3, 4, 8, 0.45);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-2) var(--ease-emph);
+}
+body.settings-open .settings-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+body.settings-open {
+  overflow: hidden;
+  touch-action: none;
 }
 
 .settings-toggle {
@@ -453,8 +584,14 @@ a { color: inherit; text-decoration: none; }
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.6px;
+  transition: background var(--dur-2) var(--ease-emph),
+              border-color var(--dur-2) var(--ease-emph),
+              color var(--dur-2) var(--ease-emph),
+              box-shadow var(--dur-2) var(--ease-emph),
+              transform 80ms ease;
 }
 .settings-segs .seg:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); }
+.settings-segs .seg:active { transform: scale(0.96); }
 .settings-segs .seg.active {
   background: var(--neon-cyan);
   border-color: var(--neon-cyan);
@@ -483,6 +620,160 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* ── API key section (admin only) ──────────────────────────────── */
+.keys-active {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.keys-active:empty { display: none; }
+.key-active-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(0,225,255,0.08);
+  border: 1px solid rgba(0,225,255,0.32);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.key-active-chip .kac-name {
+  color: var(--neon-cyan);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.key-active-chip .kac-mask {
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+.key-active-chip .kac-remove {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  transition: color var(--dur-2) var(--ease-emph),
+              border-color var(--dur-2) var(--ease-emph);
+}
+.key-active-chip .kac-remove:hover {
+  color: var(--down);
+  border-color: var(--down);
+}
+
+.key-input-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#key-input {
+  flex: 1;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 9px 12px;
+  padding-right: 80px;     /* room for the provider badge */
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  transition: border-color var(--dur-2) var(--ease-emph),
+              box-shadow var(--dur-2) var(--ease-emph);
+}
+#key-input:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 3px rgba(0,225,255,0.15);
+}
+.key-provider-badge {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(0,225,255,0.14);
+  color: var(--neon-cyan);
+  border: 1px solid rgba(0,225,255,0.35);
+}
+.key-provider-badge.bad {
+  background: rgba(255,77,109,0.10);
+  color: var(--down);
+  border-color: rgba(255,77,109,0.35);
+}
+.key-save-btn {
+  position: relative;
+}
+.key-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.key-save-btn.loading {
+  color: transparent !important;
+  cursor: progress;
+}
+.key-save-btn.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: var(--neon-cyan);
+  border-radius: 50%;
+  animation: spin 720ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.key-msg {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  min-height: 14px;
+  margin-top: 2px;
+}
+.key-msg.err { color: var(--down); }
+.key-msg.ok  { color: var(--up); }
+
+.key-models {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.key-model-select {
+  width: 100%;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-2) var(--ease-emph);
+}
+.key-model-select:hover { border-color: var(--neon-cyan); }
+.key-model-select:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 3px rgba(0,225,255,0.15);
 }
 /* 5-segment rows (refresh rate uses this). */
 .settings-segs.settings-segs-5,
@@ -2322,6 +2613,60 @@ footer {
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
 }
+
+/* ── Drag-to-close handle ────────────────────────────────────────
+   Touch devices only — desktop closes via ×/backdrop/ESC, so the
+   handle would mislead about draggability there.
+   - Idle: faint (rgba 0.22). Just a subtle hint.
+   - .dragging: brighter + wider — confirms the gesture is tracked.
+   - .drag-commit: shifts to neon-cyan with glow — "release to close"
+     the moment the threshold is crossed.
+   Pseudo-element on .reader-card so no HTML changes. */
+.reader-card::before {
+  content: "";
+  position: sticky;     /* stays anchored to top even as card scrolls */
+  top: 6px;
+  display: none;
+  width: 44px;
+  height: 4px;
+  margin: -22px auto 14px;  /* pull up into the 30px top padding */
+  border-radius: 999px;
+  background: rgba(255,255,255,0.22);
+  transition:
+    background 160ms ease,
+    width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 160ms ease,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: 4;
+}
+.reader-card.dragging::before {
+  background: rgba(255,255,255,0.45);
+  width: 56px;
+}
+.reader-card.drag-commit::before {
+  background: var(--neon-cyan);
+  width: 72px;
+  box-shadow: 0 0 16px rgba(0,225,255,0.65);
+  transform: scaleY(1.4);
+}
+/* While dragging, slightly soften the magenta glow so the cyan
+   commit-handle reads cleanly against it. */
+.reader-card.dragging {
+  box-shadow:
+    0 30px 100px rgba(0,0,0,0.65),
+    0 0 0 1px rgba(255,43,214,0.10),
+    0 0 24px rgba(255,43,214,0.12);
+}
+.reader-card.drag-commit {
+  border-color: rgba(0,225,255,0.55);
+}
+@media (pointer: coarse) {
+  .reader-card::before { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-card::before { transition: background 100ms linear; }
+}
 .reader-card::-webkit-scrollbar { width: 6px; }
 .reader-card::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 .reader-close {
@@ -2480,6 +2825,23 @@ footer {
 }
 .reader-tnote[lang="ko"] { font-family: var(--kr); text-transform: none; font-size: 11.5px; }
 
+/* Partial-content notice — shown when live extraction failed and we're
+   serving the saved summary as the body. Amber to read as a soft
+   warning rather than the magenta translator note. */
+.reader-partial {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #f4b740;
+  letter-spacing: 0.4px;
+  line-height: 1.5;
+  margin: 0 0 18px;
+  padding: 8px 12px;
+  border-left: 2px solid #f4b740;
+  background: rgba(244,183,64,0.08);
+  border-radius: 2px;
+}
+.reader-partial[lang="ko"] { font-family: var(--kr); letter-spacing: 0; font-size: 12px; }
+
 .reader-loading {
   font-family: var(--mono);
   color: var(--muted);
@@ -2487,6 +2849,14 @@ footer {
   padding: 100px 0;
   font-size: 13px;
   letter-spacing: 1.5px;
+  animation: reader-loading-pulse 1.4s ease-in-out infinite;
+}
+@keyframes reader-loading-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-loading { animation: none; }
 }
 
 .reader-img {
@@ -2688,4 +3058,36 @@ footer {
 .reader-delete:active { transform: scale(0.97); }
 @media (max-width: 500px) {
   .reader-delete { padding: 6px 12px; font-size: 10px; }
+}
+
+/* Copy-whole-article button — cyan/neutral outline so it reads as a
+   safe, useful action next to the destructive delete. Turns green on a
+   successful copy. */
+.reader-copy {
+  background: transparent;
+  border: 1px solid rgba(0,229,255,0.4);
+  color: var(--neon-cyan);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms, color 140ms,
+              box-shadow 140ms, transform 80ms;
+}
+.reader-copy:hover {
+  background: rgba(0,229,255,0.12);
+  box-shadow: 0 0 16px rgba(0,229,255,0.28);
+}
+.reader-copy:active { transform: scale(0.97); }
+.reader-copy.copied {
+  border-color: #2ee6a0;
+  color: #2ee6a0;
+  box-shadow: 0 0 16px rgba(46,230,160,0.35);
+}
+@media (max-width: 500px) {
+  .reader-copy { padding: 6px 12px; font-size: 10px; }
 }

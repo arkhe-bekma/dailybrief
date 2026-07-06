@@ -77,6 +77,17 @@ async def _start():
         await auth.init()  # creates users/sessions tables + seeds admin/admin
     except Exception as exc:
         print(f"[startup] auth.init failed: {exc!r}", flush=True)
+    # Restore any API keys the admin previously set via the settings
+    # popover. Settings rows survive restarts; os.environ does not.
+    try:
+        import os as _os
+        for _spec in _KEY_PROVIDERS.values():
+            _stored = await db.get_setting(_spec["env"], "")
+            if _stored and not _os.environ.get(_spec["env"]):
+                _os.environ[_spec["env"]] = _stored
+                print(f"[startup] restored {_spec['env']} from settings", flush=True)
+    except Exception as exc:
+        print(f"[startup] key restore failed: {exc!r}", flush=True)
     # ── Background workers (minimal set) ────────────────────────────
     # The Lightsail 512MB box was under sustained CPU + SQLite-lock
     # pressure from 5 concurrent workers. The site was technically up
@@ -99,6 +110,24 @@ async def _start():
         asyncio.create_task(_brief_refresh_worker())  # hourly cache refill
     except Exception as exc:
         print(f"[startup] brief refresh worker failed to schedule: {exc!r}", flush=True)
+    # Re-enabled (gently) so the feed self-cleans without an operator:
+    #   • validation worker  – small batches, flags no-content articles
+    #   • supervisor         – 10-min self-heal: purge junk, reseed a
+    #                          stale feed, top up a thin DB, self-probe
+    # These are the light cousins of the old heavy workers; the batch
+    # sizes / cadences above keep them off the box's back.
+    try:
+        asyncio.create_task(_validation_worker())   # continuous quality gate
+    except Exception as exc:
+        print(f"[startup] validation worker failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_supervisor_worker())   # self-healing loop
+    except Exception as exc:
+        print(f"[startup] supervisor worker failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_prune_worker())   # daily: drop >60d rows + VACUUM
+    except Exception as exc:
+        print(f"[startup] prune worker failed to schedule: {exc!r}", flush=True)
     # Prewarm the cache immediately so the very first visitor doesn't
     # see an empty payload.
     try:
@@ -115,10 +144,12 @@ async def _start():
         asyncio.create_task(_prewarm())
     except Exception as exc:
         print(f"[startup] prewarm failed to schedule: {exc!r}", flush=True)
-    # DISABLED workers (admin-triggered via lab → ACTIONS):
-    #   _validation_worker   – per-article HTTP fetch every 5 s, network-heavy
-    #   _resummary_worker    – DB read+rewrite loop
-    #   _prune_worker        – once-a-day VACUUM, OK to skip on small box
+    # STILL admin-triggered only (heavier / redundant now):
+    #   _resummary_worker    – DB read+rewrite loop; the validator already
+    #                          backfills card deks on pass, so this is
+    #                          mostly redundant. Run from the lab if needed.
+    # (_validation_worker, _supervisor_worker and _prune_worker are all
+    #  scheduled above — the feed now self-cleans end to end.)
 
 
 # ── Bad-title detection ─────────────────────────────────────────────
@@ -306,42 +337,48 @@ async def _resummary_worker():
             await asyncio.sleep(1)
 
 
+async def _light_ingest_once() -> int:
+    """One lightweight RSS-only ingest: fetch every feed → drop blocked
+    URLs → upsert into `articles`. No curator, no LLM, no image scrape.
+    Returns the number of rows upserted. Shared by the periodic worker,
+    the self-healing supervisor, and the manual run-cycle endpoint so
+    there's a single definition of "top up the article well cheaply"."""
+    import time as _t
+    articles = await asyncio.wait_for(rss.fetch_all(), timeout=120.0)
+    blocked = await db.blocked_url_set()
+    if blocked:
+        articles = [a for a in articles if a.url not in blocked]
+    if not articles:
+        return 0
+    now_ts = int(_t.time())
+    rows = [{
+        "url": a.url, "title": a.title, "image": a.image,
+        "outlet": a.outlet, "category": a.category, "lang": a.lang,
+        "summary": a.summary, "published_at": a.published,
+        "fetched_at": now_ts,
+    } for a in articles if a.url]
+    if rows:
+        await db.upsert_articles(rows)
+        # Drop the brief response cache so the next /api/brief request
+        # runs the fast path and picks up the new rows.
+        cache._store.pop("brief:response", None)
+    return len(rows)
+
+
 async def _rss_ingest_worker():
     """LIGHTWEIGHT periodic RSS ingest. Runs every 30 min and ONLY
-    does: fetch every RSS feed → drop blocked URLs → upsert into the
-    articles table. No curator, no LLM, no image scrape — those are
-    what made _brief_build_full time out at 60 s.
-
-    This guarantees the DB stays populated with fresh articles even
-    when the heavy curator chain fails. The fast-path query
-    (_brief_db_fallback) then has new rows to serve on the next
-    /api/brief tick.
+    fetches feeds → drops blocked URLs → upserts. This guarantees the DB
+    stays populated with fresh articles even when the heavy curator
+    chain fails. The fast-path query (_brief_db_fallback) then has new
+    rows to serve on the next /api/brief tick.
     """
     INTERVAL_SECONDS = 30 * 60   # 30 min
     await asyncio.sleep(60)
     while True:
         try:
-            articles = await asyncio.wait_for(rss.fetch_all(), timeout=120.0)
-            blocked = await db.blocked_url_set()
-            if blocked:
-                articles = [a for a in articles if a.url not in blocked]
-            if articles:
-                now_ts = int(__import__("time").time())
-                rows = [{
-                    "url": a.url, "title": a.title, "image": a.image,
-                    "outlet": a.outlet, "category": a.category, "lang": a.lang,
-                    "summary": a.summary, "published_at": a.published,
-                    "fetched_at": now_ts,
-                } for a in articles if a.url]
-                await db.upsert_articles(rows)
-                # Drop the brief response cache so the next /api/brief
-                # request runs the fast path and picks up the new rows.
-                cache._store.pop("brief:response", None)
-                print(
-                    f"[rss-ingest] pulled {len(articles)} articles, "
-                    f"upserted {len(rows)} rows",
-                    flush=True,
-                )
+            n = await _light_ingest_once()
+            if n:
+                print(f"[rss-ingest] upserted {n} rows", flush=True)
         except asyncio.TimeoutError:
             print("[rss-ingest] timed out at 120 s", flush=True)
         except Exception as exc:
@@ -526,6 +563,201 @@ async def _validation_worker():
                 print(f"[ingest] mark failed for {url[:60]}: {exc!r}", flush=True)
         await asyncio.sleep(_INGEST_PAUSE_BUSY)
 
+
+# ── Self-healing supervisor ──────────────────────────────────────────
+# A single, gentle loop that plays the role the user asked for: "make a
+# self learning loop where it will go thru troubleshooting itself and
+# fix itself." It periodically LOOKS AT THE LIVE SITE the way a browser
+# ("chrome view") would — over the loopback port Caddy proxies to —
+# checks that a real visitor is being served a non-empty feed, and then
+# takes the minimal set of corrective actions to fix whatever it found:
+# purge no-content articles, feed the validation queue, reseed/rebuild a
+# stale feed, and top up a thin DB. One loop, small bounded batches, so
+# the 512MB box is never thrashed the way the old 5-worker setup did.
+SUPERVISOR_INTERVAL = 600          # 10 min between self-heal passes
+SUPERVISOR_MIN_ARTICLES = 30       # below this, pull a fresh RSS ingest
+SUPERVISOR_VALIDATE_BATCH = 6      # articles validated per pass (gentle)
+
+
+async def _self_probe() -> dict:
+    """Fetch our own public surface — the index shell + the feed payload
+    — exactly as a browser would, and report what a visitor is actually
+    being served right now. This is the 'periodically check the chrome
+    view to check server status' requirement, done in-process (no
+    headless browser) so it fits the small box and needs no extra infra."""
+    import os as _os, time as _t
+    port = _os.environ.get("PORT", "8000")
+    base = f"http://127.0.0.1:{port}"
+    out: dict = {
+        "checked_at": int(_t.time()),
+        "ok": False, "index_ok": False, "brief_ok": False,
+        "brief_items": 0, "brief_loading": False, "errors": [],
+    }
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=8.0) as client:
+            # The actual HTML shell the browser renders.
+            try:
+                r = await client.get(base + "/")
+                out["index_ok"] = (
+                    r.status_code == 200 and "<body" in r.text.lower()
+                )
+                if not out["index_ok"]:
+                    out["errors"].append(f"index HTTP {r.status_code}")
+            except Exception as exc:
+                out["errors"].append(f"index:{type(exc).__name__}")
+            # The feed the article wall is built from.
+            try:
+                r = await client.get(base + "/api/brief")
+                if r.status_code == 200:
+                    body = r.json()
+                    out["brief_ok"] = True
+                    out["brief_items"] = len(body.get("mixed") or [])
+                    out["brief_loading"] = bool(body.get("_loading"))
+                else:
+                    out["errors"].append(f"brief HTTP {r.status_code}")
+            except Exception as exc:
+                out["errors"].append(f"brief:{type(exc).__name__}")
+    except Exception as exc:
+        out["errors"].append(f"probe:{type(exc).__name__}")
+    out["ok"] = out["index_ok"] and out["brief_ok"] and not out["errors"]
+    return out
+
+
+async def _supervisor_tick() -> dict:
+    """One self-healing pass. Diagnoses via _self_probe + DB stats, then
+    takes only the corrective actions the diagnosis calls for. Every step
+    is guarded + bounded so a single tick can never wedge the box. The
+    resulting status dict is persisted to `settings.supervisor_status` so
+    /lab and the manual button can show what it saw and did."""
+    import time as _t
+    actions: list[str] = []
+    problems: list[str] = []
+
+    probe = await _self_probe()
+    if not probe.get("ok"):
+        problems.extend(probe.get("errors") or ["probe not ok"])
+
+    try:
+        vstats = await db.validation_stats()   # {pending, validated, failed}
+    except Exception:
+        vstats = {"pending": 0, "validated": 0, "failed": 0}
+    try:
+        active = await db.count_articles()     # active, non-failed rows
+    except Exception:
+        active = 0
+
+    # 1. Auto-delete — permanently drop everything the validator flagged
+    #    as having no distinct content (validated = -1). This is the
+    #    "자동으로 지우는 로직" the user wanted actually running.
+    if vstats.get("failed", 0) > 0:
+        try:
+            purged = await db.purge_failed_articles()
+            if purged:
+                actions.append(f"purged {purged} no-content articles")
+                cache._store.pop("brief:response", None)
+        except Exception as exc:
+            problems.append(f"purge:{type(exc).__name__}")
+
+    # 2. Keep the validation queue moving so junk keeps getting flagged
+    #    (and good articles get their body persisted). Small batch only.
+    if vstats.get("pending", 0) > 0:
+        try:
+            batch = await db.list_unvalidated(limit=SUPERVISOR_VALIDATE_BATCH)
+            if batch:
+                results = await asyncio.gather(
+                    *[_validate_one(a) for a in batch], return_exceptions=True,
+                )
+                passed = failed = 0
+                for art, res in zip(batch, results):
+                    u = art.get("url")
+                    if not u:
+                        continue
+                    if isinstance(res, Exception):
+                        status, reason = -1, f"crash:{type(res).__name__}"
+                    else:
+                        status, reason = res
+                    try:
+                        await db.set_article_validated(u, status, reason)
+                        if status == 1:
+                            passed += 1
+                        else:
+                            failed += 1
+                    except Exception:
+                        pass
+                actions.append(f"validated {len(batch)} (+{passed}/-{failed})")
+        except Exception as exc:
+            problems.append(f"validate:{type(exc).__name__}")
+
+    # 3. Feed empty/loading but the DB has rows → the cache is cold or
+    #    stale. Reseed from the DB fast-path immediately, then kick one
+    #    controlled full rebuild for the next request.
+    feed_empty = probe.get("brief_ok") and (
+        probe.get("brief_items", 0) == 0 or probe.get("brief_loading")
+    )
+    if feed_empty and active > 0:
+        problems.append("feed empty despite DB rows")
+        try:
+            cache._store.pop("brief:response", None)
+            fast = _brief_db_fallback()
+            if fast is not None:
+                cache.set("brief:response", fast, BRIEF_CACHE_TTL)
+                cache.set("brief:response_stale", fast, BRIEF_STALE_GRACE)
+                actions.append("reseeded brief cache from DB")
+            asyncio.create_task(_kickoff_brief_rebuild())
+            actions.append("kicked off brief rebuild")
+        except Exception as exc:
+            problems.append(f"reseed:{type(exc).__name__}")
+
+    # 4. DB running dry → pull a fresh lightweight RSS ingest so the well
+    #    never empties. Bounded by _light_ingest_once's 120s timeout.
+    if active < SUPERVISOR_MIN_ARTICLES:
+        problems.append(f"only {active} active articles")
+        try:
+            got = await _light_ingest_once()
+            if got:
+                actions.append(f"ingested {got} fresh articles")
+        except Exception as exc:
+            problems.append(f"ingest:{type(exc).__name__}")
+
+    status = {
+        "ran_at": int(_t.time()),
+        "probe": probe,
+        "validation": vstats,
+        "active_articles": active,
+        "problems": problems,
+        "actions": actions,
+        "healthy": bool(probe.get("ok")) and not problems,
+    }
+    try:
+        await db.set_setting("supervisor_status", status)
+        await db.bump_counter("supervisor_ticks")
+        if actions:
+            await db.bump_counter("supervisor_actions", by=len(actions))
+    except Exception:
+        pass
+    if actions or problems:
+        print(
+            f"[supervisor] problems={problems or '-'} actions={actions or '-'}",
+            flush=True,
+        )
+    return status
+
+
+async def _supervisor_worker():
+    """The self-healing loop. Runs a tick every SUPERVISOR_INTERVAL,
+    forever, never raising."""
+    await asyncio.sleep(45)   # let startup settle before first probe
+    print("[supervisor] self-healing loop armed", flush=True)
+    while True:
+        try:
+            await asyncio.wait_for(_supervisor_tick(), timeout=180.0)
+        except asyncio.TimeoutError:
+            print("[supervisor] tick hit 180s timeout, skipped", flush=True)
+        except Exception as exc:
+            print(f"[supervisor] tick failed: {exc!r}", flush=True)
+        await asyncio.sleep(SUPERVISOR_INTERVAL)
+
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
@@ -579,6 +811,174 @@ def _mask_api_key(k: str | None) -> str | None:
     if not k or len(k) < 10:
         return None
     return f"{k[:4]}…{k[-4:]}"
+
+
+# ── API key management ──────────────────────────────────────────────
+# Admin enters a single key in the settings popover; the server detects
+# the provider from the key prefix, validates against the provider's
+# /models endpoint, persists into the SQLite settings table, and updates
+# os.environ so every subsequent agent call sees the new key without
+# requiring a restart. Settings rows are restored to os.environ on
+# startup (see _start). NB: keys never leave the server — the frontend
+# only ever receives the masked fingerprint.
+
+_KEY_PROVIDERS = {
+    "anthropic": {
+        "env": "ANTHROPIC_API_KEY",
+        "label": "Anthropic (Claude)",
+        "prefix": "sk-ant-",
+        "validate_url": "https://api.anthropic.com/v1/models",
+        "headers": lambda k: {
+            "x-api-key": k,
+            "anthropic-version": "2023-06-01",
+        },
+        "url_with_key": False,
+        "models_path": ("data",),    # response["data"] is the list
+    },
+    "gemini": {
+        "env": "GEMINI_API_KEY",
+        "label": "Google Gemini",
+        "prefix": "AIza",
+        "validate_url": "https://generativelanguage.googleapis.com/v1beta/models",
+        "headers": lambda k: {},
+        "url_with_key": True,        # query-param auth
+        "models_path": ("models",),
+    },
+}
+
+
+def _detect_provider(key: str) -> str | None:
+    """Pattern-match the key prefix back to a provider. Returns None for
+    anything we don't recognize so the caller can surface a clean 400."""
+    k = (key or "").strip()
+    for name, spec in _KEY_PROVIDERS.items():
+        if k.startswith(spec["prefix"]):
+            return name
+    return None
+
+
+async def _validate_provider_key(provider: str, key: str) -> tuple[bool, list[str], str | None]:
+    """Hit the provider's models endpoint with the candidate key. Returns
+    (ok, list-of-model-ids, error-message). Treats anything other than a
+    2xx with a parseable models array as a failure."""
+    import httpx as _httpx
+    spec = _KEY_PROVIDERS[provider]
+    url = spec["validate_url"]
+    if spec["url_with_key"]:
+        url = f"{url}?key={key}"
+    try:
+        async with _httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(url, headers=spec["headers"](key))
+    except Exception as exc:
+        return False, [], f"network error: {type(exc).__name__}"
+    if r.status_code != 200:
+        # Surface the provider's own error reason when available.
+        try:
+            detail = r.json()
+            msg = (
+                (detail.get("error") or {}).get("message")
+                if isinstance(detail.get("error"), dict)
+                else None
+            ) or r.text[:160]
+        except Exception:
+            msg = r.text[:160] or f"HTTP {r.status_code}"
+        return False, [], msg
+    try:
+        body = r.json()
+    except Exception:
+        return False, [], "non-JSON response"
+    # Walk to the models list (each provider names it differently).
+    node = body
+    for k in spec["models_path"]:
+        node = (node or {}).get(k)
+        if node is None:
+            return False, [], "unexpected response shape"
+    models: list[str] = []
+    for m in node:
+        mid = (m.get("id") or m.get("name") or "").strip()
+        # Gemini returns "models/gemini-2.5-flash" — strip the prefix.
+        if mid.startswith("models/"):
+            mid = mid[len("models/"):]
+        if mid:
+            models.append(mid)
+    return True, models, None
+
+
+@app.get("/api/admin/keys")
+async def admin_list_keys(request: Request):
+    """Returns the currently configured providers with masked
+    fingerprints. Admin-only — keys themselves never leave the server."""
+    await _require_admin(request)
+    import os as _os
+    out = {}
+    for name, spec in _KEY_PROVIDERS.items():
+        env_var = spec["env"]
+        val = _os.environ.get(env_var) or ""
+        # Gemini accepts GOOGLE_API_KEY as a fallback (used by some
+        # Google-side examples); surface it if that's all we've got.
+        if not val and name == "gemini":
+            val = _os.environ.get("GOOGLE_API_KEY") or ""
+        out[name] = {
+            "label": spec["label"],
+            "set": bool(val),
+            "masked": _mask_api_key(val) if val else None,
+        }
+    return out
+
+
+@app.post("/api/admin/keys")
+async def admin_set_key(request: Request, body: dict):
+    """Single-input endpoint: takes any provider's key, detects which
+    one it belongs to, validates against /models, and on success
+    persists + applies. Returns the provider label + masked fingerprint
+    + the list of model IDs the provider says this key can use."""
+    await _require_admin(request)
+    key = (body.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    provider = _detect_provider(key)
+    if not provider:
+        raise HTTPException(
+            status_code=400,
+            detail="key shape doesn't match any known provider "
+                   "(Anthropic keys start with 'sk-ant-', Gemini keys with 'AIza')",
+        )
+    ok, models, err = await _validate_provider_key(provider, key)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"validation failed: {err}")
+    spec = _KEY_PROVIDERS[provider]
+    # Persist to settings table (survives restarts) + apply to live env.
+    try:
+        await db.set_setting(spec["env"], key)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"persist failed: {exc!r}")
+    import os as _os
+    _os.environ[spec["env"]] = key
+    return {
+        "provider": provider,
+        "label": spec["label"],
+        "masked": _mask_api_key(key),
+        "models": models,
+    }
+
+
+@app.delete("/api/admin/keys/{provider}")
+async def admin_delete_key(provider: str, request: Request):
+    """Wipe a provider's stored key. Used by the settings UI's "Remove"
+    button when the admin wants to disconnect."""
+    await _require_admin(request)
+    spec = _KEY_PROVIDERS.get(provider)
+    if not spec:
+        raise HTTPException(status_code=400, detail="unknown provider")
+    try:
+        await db.set_setting(spec["env"], "")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"persist failed: {exc!r}")
+    import os as _os
+    _os.environ.pop(spec["env"], None)
+    if provider == "gemini":
+        _os.environ.pop("GOOGLE_API_KEY", None)
+    return {"ok": True}
 
 
 @app.get("/api/usage")
@@ -1024,6 +1424,86 @@ async def admin_purge_failed(request: Request):
     purged = await db.purge_failed_articles()
     cache.clear()
     return {"purged": purged}
+
+
+@app.get("/api/admin/self-heal/status")
+async def self_heal_status(request: Request):
+    """Last self-healing pass: what the supervisor saw on the live site
+    and what it did about it. Powers the lab health card. Admin-only."""
+    await _require_admin(request)
+    status = await db.get_setting("supervisor_status", None)
+    return {
+        "status": status,
+        "interval_seconds": SUPERVISOR_INTERVAL,
+    }
+
+
+@app.post("/api/admin/self-heal")
+async def self_heal_now(request: Request):
+    """Run one self-healing pass on demand (probe → diagnose → fix) and
+    return the result. Same code the background loop runs every 10 min —
+    this is just the manual button for it. Admin-only."""
+    await _require_admin(request)
+    return await _supervisor_tick()
+
+
+@app.post("/api/admin/run-cycle")
+async def admin_run_cycle(request: Request, validate: int = 40):
+    """One full maintenance cycle, inline: fresh RSS ingest → validate a
+    backlog chunk → purge no-content articles → rebuild the feed cache.
+    The clickable 'do everything now' button. Bounded so it returns
+    within request limits; `validate` caps how many articles get checked
+    this pass (the supervisor keeps chewing the rest). Admin-only."""
+    await _require_admin(request)
+    report: dict = {}
+
+    # 1. Top up the article well.
+    try:
+        report["ingested"] = await _light_ingest_once()
+    except Exception as exc:
+        report["ingest_error"] = f"{type(exc).__name__}"
+
+    # 2. Validate a bounded backlog chunk.
+    validate = max(0, min(int(validate or 0), 120))
+    passed = failed = 0
+    if validate:
+        try:
+            batch = await db.list_unvalidated(limit=validate)
+            if batch:
+                results = await asyncio.gather(
+                    *[_validate_one(a) for a in batch], return_exceptions=True,
+                )
+                for art, res in zip(batch, results):
+                    u = art.get("url")
+                    if not u:
+                        continue
+                    if isinstance(res, Exception):
+                        status, reason = -1, f"crash:{type(res).__name__}"
+                    else:
+                        status, reason = res
+                    try:
+                        await db.set_article_validated(u, status, reason)
+                        if status == 1:
+                            passed += 1
+                        else:
+                            failed += 1
+                    except Exception:
+                        pass
+            report["validated"] = {"examined": len(batch), "passed": passed, "failed": failed}
+        except Exception as exc:
+            report["validate_error"] = f"{type(exc).__name__}"
+
+    # 3. Purge everything flagged as no-content.
+    try:
+        report["purged"] = await db.purge_failed_articles()
+    except Exception as exc:
+        report["purge_error"] = f"{type(exc).__name__}"
+
+    # 4. Rebuild the feed so the changes show immediately.
+    cache.clear()
+    asyncio.create_task(_kickoff_brief_rebuild())
+    report["rebuild"] = "kicked off"
+    return {"ok": True, **report}
 
 
 _STRICT_RUNNING = False
@@ -1788,6 +2268,39 @@ def _split_paragraphs(text: str) -> list[str]:
     return out
 
 
+def _reader_fallback_from_row(url: str, article_row: dict | None) -> dict | None:
+    """Build a minimal reader payload from the stored articles row when
+    live extraction can't reach the publisher. Uses the card summary as
+    the body so the modal shows real text + the "open original" link
+    instead of a hard error. Returns None only when we have literally
+    nothing worth showing (no title)."""
+    if not article_row:
+        return None
+    title = (article_row.get("title") or "").strip()
+    if not title:
+        return None
+    summary = (article_row.get("summary") or "").strip()
+    paras = _split_paragraphs(summary) if summary else []
+    lang = (article_row.get("lang") or _detect_lang(title) or "en")
+    note = (
+        "본문을 불러오지 못했습니다 — 저장된 요약만 표시합니다. 아래에서 원문을 확인하세요."
+        if lang == "ko"
+        else "Couldn't load the full article — showing the saved summary. Open the original below for the complete story."
+    )
+    return {
+        "url": url,
+        "title": title,
+        "image": article_row.get("image"),
+        "byline": None,
+        "excerpt": summary[:300],
+        "lang": lang,
+        "word_count": len(summary.split()),
+        "paragraphs": paras,
+        "partial": True,
+        "note": note,
+    }
+
+
 @app.get("/api/article")
 async def article(url: str):
     """Reader-mode view of an external article.
@@ -1831,6 +2344,14 @@ async def article(url: str):
 
     reading = await reader.extract(url)
     if not reading:
+        # Live extraction failed (publisher blocked us / JS wall / dead
+        # URL). Rather than a dead-end error, test whether we already
+        # hold usable content for this story — a stored card summary is
+        # enough to show the reader *something* plus the original link.
+        fallback = _reader_fallback_from_row(url, article_row)
+        if fallback is not None:
+            await db.bump_counter("reader_fallback_summary")
+            return fallback
         return {"error": "could not extract the article body"}
 
     # No LLM rewrite — show the publisher's body directly, just cleaned
@@ -2006,12 +2527,22 @@ async def api_page(
     )
     pages = max(1, (total + size - 1) // size)
     n = min(n, pages)
-    items = await db.list_articles(
-        offset=(n - 1) * size,
-        limit=size,
-        cat=cat_clean,
-        premium_only=premium_only,
-    )
+    # ALL tab (no category, no premium filter) reads the round-robin
+    # view so page 1..N mirror the chip-ordered balance of the DB —
+    # exactly the same rows the fast-path fallback would show, just
+    # paginated. Category / premium pages keep the flat premium→score
+    # ordering. Both read straight from SQLite: no separate ALL dataset.
+    if cat_clean is None and not premium_only:
+        items = await db.list_articles_roundrobin(
+            offset=(n - 1) * size, limit=size,
+        )
+    else:
+        items = await db.list_articles(
+            offset=(n - 1) * size,
+            limit=size,
+            cat=cat_clean,
+            premium_only=premium_only,
+        )
     converted = [
         {
             "kind": "news",

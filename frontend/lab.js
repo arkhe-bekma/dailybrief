@@ -466,6 +466,12 @@ async function runAction(label, url, opts) {
     setActionResult(`${label} failed: ${err.message}`, "err");
   }
 }
+document.getElementById("act-self-heal")?.addEventListener("click", () =>
+  runAction("SELF-HEAL NOW", "/api/admin/self-heal", { method: "POST" })
+);
+document.getElementById("act-run-cycle")?.addEventListener("click", () =>
+  runAction("RUN FULL CYCLE", "/api/admin/run-cycle?validate=40", { method: "POST" })
+);
 document.getElementById("act-refresh")?.addEventListener("click", () =>
   runAction("FORCE REFRESH", "/api/refresh", { method: "POST" })
 );

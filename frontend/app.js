@@ -364,17 +364,11 @@ function _persistInterests() {
   try { localStorage.setItem(INTERESTS_KEY, JSON.stringify([...INTERESTS])); } catch {}
 }
 
-function filteredNews() {
-  const items = STATE.mixed.filter((it) => {
-    if (it.kind !== "news") return false;
-    if (CAT !== "all" && it.category !== CAT) return false;
-    return true;
-  });
-  // No interests configured, or a specific category is selected → leave
-  // the curator's ordering alone.
+// Stable two-bucket sort: interested categories first (preserving the
+// upstream ordering within each bucket), everyone else after. Applied
+// to the ALL view only; a specific category needs no reordering.
+function applyInterests(items) {
   if (CAT !== "all" || INTERESTS.size === 0) return items;
-  // Stable two-bucket sort: interested categories first (preserving
-  // curator score within), everyone else after.
   const liked = [];
   const rest = [];
   for (const it of items) {
@@ -382,6 +376,15 @@ function filteredNews() {
     else rest.push(it);
   }
   return [...liked, ...rest];
+}
+
+function filteredNews() {
+  const items = STATE.mixed.filter((it) => {
+    if (it.kind !== "news") return false;
+    if (CAT !== "all" && it.category !== CAT) return false;
+    return true;
+  });
+  return applyInterests(items);
 }
 
 // Lazy DB-backed pagination: page 1 comes from the in-memory feed
@@ -392,12 +395,12 @@ let PAGE_OVERRIDE_N = null; // which page that override belongs to
 let DB_TOTAL_PAGES = 1;
 
 async function fetchPage(n) {
-  // For "all" page 1 we use the in-memory mixed (fast). Every other
-  // combination — page 2+, or any specific category — pulls straight
-  // from the SQLite archive. This is what makes the chip nav reach
-  // beyond the lean wire payload.
-  const fromDb = (n > 1) || (CAT && CAT !== "all");
-  if (!fromDb) { PAGE_OVERRIDE = null; PAGE_OVERRIDE_N = null; return; }
+  // Every view — including ALL page 1 — now reads straight from the
+  // SQLite archive via /api/page. The user asked us to stop building a
+  // separate in-memory dataset for ALL and "just link the articles from
+  // the db and display them". /api/brief is still used for the tape,
+  // headline and sidebars, but the article wall itself is always DB-
+  // backed so what's on screen is exactly what's in the database.
   try {
     const params = new URLSearchParams({ n: String(n), size: String(PAGE_SIZE) });
     if (CAT && CAT !== "all" && CAT !== "premium") params.set("cat", CAT);
@@ -433,7 +436,9 @@ function paint(scrollTop = true) {
   // Use the DB-served override when present (page 2+, or any category
   // filter). Otherwise use the in-memory mixed slice.
   if (PAGE_OVERRIDE && PAGE_OVERRIDE_N === PAGE) {
-    slice = PAGE_OVERRIDE;
+    // DB-backed slice. For the ALL view, still honour the user's
+    // interest boost client-side so tapped categories float up.
+    slice = applyInterests(PAGE_OVERRIDE);
   } else {
     if (PAGE > memPages) PAGE = memPages;   // safety while async fetch finishes
     const startIdx = (PAGE - 1) * PAGE_SIZE;
@@ -605,6 +610,9 @@ async function load() {
     LAST_LOAD = Date.now();
     PAGE = 1;
     paintFromState();
+    // Pull page 1 straight from the DB (round-robin ALL feed) so the
+    // wall is DB-backed from the first paint, not the wire snapshot.
+    await fetchPage(1);
     paint(false);     // ensure pager + chip counts redrawn
     savePreset(STATE);
   } catch (e) {
@@ -824,6 +832,49 @@ function buildTranslateButton() {
 }
 
 
+// Clipboard write with a legacy fallback for non-secure contexts /
+// older mobile browsers where navigator.clipboard is undefined.
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) { /* fall through to legacy path */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Assemble the full plain-text article (headline → byline → body →
+// source URL) for the copy button. Uses whichever view is on screen,
+// so copying a translated article yields the translated text.
+function articleAsText(data, item) {
+  const parts = [];
+  const title = data.title || (item && item.title);
+  if (title) parts.push(title);
+  if (data.byline) parts.push(data.byline);
+  if (Array.isArray(data.paragraphs) && data.paragraphs.length) {
+    parts.push(data.paragraphs.join("\n\n"));
+  } else if (data.excerpt) {
+    parts.push(data.excerpt);
+  }
+  const src = data.url || (item && item.url);
+  if (src) parts.push(src);
+  return parts.join("\n\n");
+}
+
 function renderReader(content, data, item) {
   const lang = data.lang || item.lang || "en";
   content.innerHTML = "";   // the static .reader-close button lives OUTSIDE
@@ -872,6 +923,14 @@ function renderReader(content, data, item) {
     content.appendChild(el("div", { class: "reader-tnote", lang }, data.note.trim()));
   }
 
+  // Partial fallback — the publisher blocked live extraction so we're
+  // showing the saved card summary as the body. Make that explicit so
+  // the user knows to open the original for the full story.
+  if (data.partial) {
+    content.appendChild(el("div", { class: "reader-partial", lang },
+      data.note || "Showing the saved summary — open the original for the full article."));
+  }
+
   if (data.paragraphs && data.paragraphs.length) {
     const body = el("div", { class: "reader-body" });
     data.paragraphs.forEach((p) => body.appendChild(el("p", { lang }, p)));
@@ -898,6 +957,27 @@ function renderReader(content, data, item) {
     setTimeout(() => openDeleteModal(articleUrl, articleTitle), 100);
   });
 
+  // Copy-whole-article button — grabs headline + body + source URL to
+  // the clipboard in one tap. Reflects success/failure inline.
+  const copyBtn = el("button", {
+    class: "reader-copy",
+    type: "button",
+    title: "copy the whole article to the clipboard",
+  }, "⧉ COPY ARTICLE");
+  copyBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const text = articleAsText(data, item);
+    if (!text.trim()) return;
+    const ok = await copyToClipboard(text);
+    const original = "⧉ COPY ARTICLE";
+    copyBtn.textContent = ok ? "✓ COPIED" : "✗ COPY FAILED";
+    copyBtn.classList.toggle("copied", ok);
+    setTimeout(() => {
+      copyBtn.textContent = original;
+      copyBtn.classList.remove("copied");
+    }, 1600);
+  });
+
   content.appendChild(el("div", { class: "reader-footer" }, [
     el("span", { class: "badge" }, "✦ dailybrief reader"),
     el("a", {
@@ -906,6 +986,7 @@ function renderReader(content, data, item) {
       rel: "noopener",
       class: "reader-original",
     }, "open original ↗"),
+    copyBtn,
     delBtn,
   ]));
 }
@@ -998,14 +1079,29 @@ function attachSwipeToClose(modalSelector, closeFn) {
 
   let startY = null;
   let lastY = null;
+  let lastTs = 0;
+  let velocity = 0;       // px/ms, EMA over recent moves
   let atTop = false;
   let atBottom = false;
   let armed = false;
-  // Slightly more eager arming + lower dismiss threshold so the
-  // swipe-down-at-top gesture actually feels responsive. Article is
-  // open → finger touches → drag down → release; ~75px ends the modal.
-  const ARM_PX = 4;
-  const DISMISS_DELTA = 75;
+  let commitReady = false;
+  // Higher arm threshold so accidental finger micro-movements while
+  // scrolling at the edge don't immediately hijack into a close gesture.
+  // Higher dismiss distance so the user must clearly commit. A fast
+  // flick still closes via VELOCITY_DISMISS even at shorter distance.
+  const ARM_PX = 16;
+  const DISMISS_DELTA = 140;
+  const VELOCITY_DISMISS = 0.9;   // px/ms — quick flick threshold
+  const VELOCITY_MIN_DELTA = 60;  // even a flick needs some distance
+
+  function setCommitReady(next) {
+    if (next === commitReady) return;
+    commitReady = next;
+    card.classList.toggle("drag-commit", next);
+    if (next && typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(8); } catch (_) {}
+    }
+  }
 
   function clearTransitions() {
     card.style.transition = "";
@@ -1018,43 +1114,69 @@ function attachSwipeToClose(modalSelector, closeFn) {
     if (e.touches.length !== 1) return;
     startY = e.touches[0].clientY;
     lastY = startY;
+    lastTs = performance.now();
+    velocity = 0;
     atTop = card.scrollTop <= 0;
     atBottom = card.scrollTop + card.clientHeight >= card.scrollHeight - 1;
     armed = false;
+    setCommitReady(false);
   }, { passive: true });
 
   card.addEventListener("touchmove", (e) => {
     if (startY === null) return;
-    lastY = e.touches[0].clientY;
+    const y = e.touches[0].clientY;
+    const now = performance.now();
+    const dt = Math.max(1, now - lastTs);
+    // EMA over recent velocity, sign preserved (positive = downward)
+    velocity = 0.7 * velocity + 0.3 * ((y - lastY) / dt);
+    lastY = y;
+    lastTs = now;
     const rawDelta = lastY - startY;
 
     if (!armed) {
-      if (rawDelta > ARM_PX && atTop) armed = true;
-      else if (rawDelta < -ARM_PX && atBottom) armed = true;
-      else return;
+      if (rawDelta > ARM_PX && atTop) {
+        armed = true;
+        card.classList.add("dragging");
+      } else if (rawDelta < -ARM_PX && atBottom) {
+        armed = true;
+        card.classList.add("dragging");
+      } else {
+        return;
+      }
     }
 
     const d = damp(rawDelta);
     card.style.transition = "none";
     card.style.willChange = "transform, opacity";
-    // Subtle scale + fade as the user drags further — gives "weight"
-    const progress = Math.min(1, Math.abs(rawDelta) / 320);
-    const scale = 1 - progress * 0.05;          // shrinks toward 0.95
-    const opacity = 1 - progress * 0.25;        // fades toward 0.75
+    // Visual progress only reaches "near-commit" at DISMISS_DELTA, not before.
+    const progress = Math.min(1, Math.abs(rawDelta) / (DISMISS_DELTA * 1.4));
+    const scale = 1 - progress * 0.05;
+    const opacity = 1 - progress * 0.25;
     card.style.transform = `translateY(${d}px) scale(${scale})`;
     card.style.opacity = String(opacity);
     const backdrop = modal.querySelector(".reader-backdrop");
     if (backdrop) backdrop.style.opacity = String(Math.max(0.1, 1 - progress * 0.85));
+
+    setCommitReady(Math.abs(rawDelta) >= DISMISS_DELTA);
   }, { passive: true });
 
   card.addEventListener("touchend", () => {
     if (startY === null) return;
-    if (!armed) { startY = null; lastY = null; return; }
+    card.classList.remove("dragging");
+    if (!armed) {
+      setCommitReady(false);
+      startY = null; lastY = null;
+      return;
+    }
 
     const rawDelta = (lastY ?? startY) - startY;
     const backdrop = modal.querySelector(".reader-backdrop");
+    // Same direction as drag → flick counts. Slow drag must rely on distance.
+    const sameDir = (rawDelta > 0 && velocity > 0) || (rawDelta < 0 && velocity < 0);
+    const flick = sameDir && Math.abs(velocity) > VELOCITY_DISMISS && Math.abs(rawDelta) > VELOCITY_MIN_DELTA;
+    const shouldDismiss = flick || Math.abs(rawDelta) > DISMISS_DELTA;
 
-    if (Math.abs(rawDelta) > DISMISS_DELTA) {
+    if (shouldDismiss) {
       // Commit close: smooth fly-off, fade, scale-down, then closeFn.
       card.style.transition = `transform ${FLY_MS}ms ${EASE_FLY}, opacity ${FLY_MS}ms ${EASE_FLY}`;
       if (backdrop) backdrop.style.transition = `opacity ${FLY_MS}ms ${EASE_FLY}`;
@@ -1081,6 +1203,18 @@ function attachSwipeToClose(modalSelector, closeFn) {
     startY = null;
     lastY = null;
     armed = false;
+    setCommitReady(false);
+  });
+
+  card.addEventListener("touchcancel", () => {
+    card.classList.remove("dragging");
+    setCommitReady(false);
+    startY = null;
+    lastY = null;
+    armed = false;
+    clearTransitions();
+    card.style.transform = "";
+    card.style.opacity = "";
   });
 }
 
@@ -1269,6 +1403,172 @@ function toggleSettings(force) {
   const show = typeof force === "boolean" ? force : pop.classList.contains("hidden");
   pop.classList.toggle("hidden", !show);
   pop.setAttribute("aria-hidden", show ? "false" : "true");
+  // Lock body scroll while the popover is up. Class also reveals the
+  // backdrop (.settings-backdrop) via .settings-open in CSS.
+  document.body.classList.toggle("settings-open", show);
+  // Lazy-load the keys section the first time we open after admin login.
+  if (show) refreshKeysSection();
+}
+
+// ── API key management (admin only) ─────────────────────────────
+// Provider detection mirrors the server-side _detect_provider so the
+// badge changes the instant the user pastes — no round-trip needed.
+// Validation, persistence, and the available-models list still come
+// from the server.
+const KEY_PROVIDERS = {
+  anthropic: { label: "Claude",  prefix: "sk-ant-", color: "#ff9a3c" },
+  gemini:    { label: "Gemini",  prefix: "AIza",    color: "#00e1ff" },
+};
+
+function detectProviderLocal(raw) {
+  const k = (raw || "").trim();
+  for (const [name, p] of Object.entries(KEY_PROVIDERS)) {
+    if (k.startsWith(p.prefix) && k.length > p.prefix.length + 8) return name;
+  }
+  return null;
+}
+
+async function refreshKeysSection() {
+  const section = document.getElementById("settings-keys-section");
+  if (!section) return;
+  // Probe admin status. /api/admin/keys returns 401/403 for non-admins.
+  let payload = null;
+  try {
+    const r = await fetch("/api/admin/keys", { credentials: "same-origin" });
+    if (!r.ok) {
+      section.hidden = true;
+      return;
+    }
+    payload = await r.json();
+  } catch {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  // Render active keys (the ones already configured).
+  const active = document.getElementById("keys-active");
+  active.innerHTML = "";
+  for (const [provider, info] of Object.entries(payload)) {
+    if (!info.set) continue;
+    const chip = document.createElement("div");
+    chip.className = "key-active-chip";
+    chip.innerHTML = `
+      <span><span class="kac-name">${info.label}</span></span>
+      <span class="kac-mask">${info.masked || ""}</span>
+      <button class="kac-remove" type="button" data-provider="${provider}" aria-label="Remove ${info.label} key">Remove</button>
+    `;
+    active.appendChild(chip);
+  }
+  // Wire remove buttons.
+  active.querySelectorAll(".kac-remove").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const provider = btn.dataset.provider;
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/admin/keys/${provider}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "remove failed");
+        await refreshKeysSection();
+      } catch (e) {
+        const msg = document.getElementById("key-msg");
+        if (msg) { msg.className = "key-msg err"; msg.textContent = e.message || "remove failed"; }
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function wireApiKeyUI() {
+  const input = document.getElementById("key-input");
+  const badge = document.getElementById("key-provider-badge");
+  const btn   = document.getElementById("key-save-btn");
+  const msg   = document.getElementById("key-msg");
+  const modelsBox = document.getElementById("key-models");
+  const modelSelect = document.getElementById("key-model-select");
+  if (!input || !badge || !btn || !msg) return;
+
+  function setBadge(provider) {
+    if (!provider) {
+      badge.hidden = true;
+      badge.classList.remove("bad");
+      btn.disabled = !input.value.trim();
+      // If user typed something but we don't recognize it, mark bad.
+      if (input.value.trim().length > 6) {
+        badge.hidden = false;
+        badge.classList.add("bad");
+        badge.textContent = "?";
+      }
+    } else {
+      badge.hidden = false;
+      badge.classList.remove("bad");
+      badge.textContent = KEY_PROVIDERS[provider].label;
+      btn.disabled = false;
+    }
+  }
+
+  input.addEventListener("input", () => {
+    msg.className = "key-msg";
+    msg.textContent = "";
+    setBadge(detectProviderLocal(input.value));
+  });
+
+  btn.addEventListener("click", async () => {
+    const key = input.value.trim();
+    if (!key) return;
+    btn.classList.add("loading");
+    btn.disabled = true;
+    msg.className = "key-msg";
+    msg.textContent = "";
+    try {
+      const r = await fetch("/api/admin/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ key }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || "save failed");
+      msg.className = "key-msg ok";
+      msg.textContent = `✓ ${data.label} key saved (${data.masked})`;
+      input.value = "";
+      setBadge(null);
+      // Populate the model picker.
+      if (data.models && data.models.length && modelSelect) {
+        modelSelect.innerHTML = data.models
+          .map((m) => `<option value="${m}">${m}</option>`)
+          .join("");
+        modelsBox.hidden = false;
+        // Restore preferred model for this provider, if any.
+        try {
+          const saved = localStorage.getItem(`dailybrief.model.${data.provider}`);
+          if (saved && data.models.includes(saved)) modelSelect.value = saved;
+        } catch {}
+      }
+      await refreshKeysSection();
+    } catch (e) {
+      msg.className = "key-msg err";
+      msg.textContent = e.message || "save failed";
+    } finally {
+      btn.classList.remove("loading");
+      btn.disabled = !input.value.trim();
+    }
+  });
+
+  if (modelSelect) {
+    modelSelect.addEventListener("change", () => {
+      const provider = badge.textContent === KEY_PROVIDERS.anthropic.label
+        ? "anthropic"
+        : badge.textContent === KEY_PROVIDERS.gemini.label ? "gemini" : null;
+      // Best-effort: persist per-provider model preference client-side.
+      // Server doesn't read it yet — wire up consumer-side in a follow-up
+      // pass so the curator/translator respect this choice.
+      try {
+        if (provider) localStorage.setItem(`dailybrief.model.${provider}`, modelSelect.value);
+      } catch {}
+    });
+  }
 }
 
 // ── Wire up ────────────────────────────────────────────────────
@@ -1294,6 +1594,9 @@ document.addEventListener("DOMContentLoaded", () => {
     e.stopPropagation();
     toggleSettings();
   });
+  // Wire up the API key input + save button. The section stays hidden
+  // until refreshKeysSection() succeeds (admin-only).
+  wireApiKeyUI();
   $("#text-scale-segs")?.addEventListener("click", (e) => {
     const seg = e.target.closest(".seg");
     if (!seg) return;
@@ -1442,10 +1745,10 @@ document.addEventListener("DOMContentLoaded", () => {
     PAGE = 1;
     document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
-    // Category views (and premium) pull from the DB so the user sees
-    // the full archive for that category, not just the lean wire slice.
+    // Every view — ALL included — pulls from the DB so the user sees the
+    // real archive, not just the lean wire slice.
     PAGE_OVERRIDE = null; PAGE_OVERRIDE_N = null;
-    if (CAT !== "all") await fetchPage(1);
+    await fetchPage(1);
     paint();
   });
 

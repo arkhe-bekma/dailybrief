@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=75" />
+  <link rel="stylesheet" href="/static/style.css?v=76" />
 </head>
 <body>
   <header class="masthead">
@@ -27,6 +27,11 @@
       <button id="settings-btn" title="settings" aria-label="settings">⚙</button>
     </div>
   </header>
+
+  <!-- Backdrop sits behind the settings popover to capture outside taps
+       and dim the page. JS toggles body.settings-open which both reveals
+       it (opacity 1) and locks body scroll. -->
+  <div class="settings-backdrop" id="settings-backdrop" aria-hidden="true"></div>
 
   <!-- Settings popover — opens from the ⚙ in the masthead. Grouped
        into three semantic sections for legibility. -->
@@ -75,6 +80,44 @@
           <button class="interest" data-cat="opinion">✎ Op-Ed</button>
           <button class="interest" data-cat="korea">● Korea</button>
           <button class="interest" data-cat="kent">★ K-Ent</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- API keys — visible only to admins. The single input auto-detects
+         the provider (Anthropic vs Gemini) from the key prefix, validates
+         it against /models, and stores it server-side so every agent
+         call uses it immediately. -->
+    <div class="settings-section" id="settings-keys-section" hidden>
+      <div class="settings-section-title">AI Provider Keys</div>
+      <div class="settings-row settings-row-col">
+        <span class="settings-hint">Paste any Anthropic (sk-ant-…) or Gemini (AIza…) key. We'll detect the provider, validate it, and apply it instantly.</span>
+
+        <!-- Currently configured providers (masked) -->
+        <div class="keys-active" id="keys-active"></div>
+
+        <!-- Input row: text field + detected-provider badge + save -->
+        <div class="key-input-row">
+          <input
+            id="key-input"
+            type="password"
+            placeholder="sk-ant-…   /   AIza…"
+            autocomplete="off"
+            spellcheck="false"
+            inputmode="text"
+          />
+          <span class="key-provider-badge" id="key-provider-badge" hidden></span>
+        </div>
+        <button class="settings-action key-save-btn" id="key-save-btn" type="button" disabled>
+          <span class="key-save-label">Save key</span>
+        </button>
+        <span class="key-msg" id="key-msg"></span>
+
+        <!-- Model picker — surfaces only once a valid key is saved.
+             Populated from the provider's /models response. -->
+        <div class="key-models" id="key-models" hidden>
+          <span class="settings-label" style="margin-bottom: 4px;">Model</span>
+          <select id="key-model-select" class="key-model-select"></select>
         </div>
       </div>
     </div>
@@ -208,6 +251,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=71"></script>
+  <script src="/static/app.js?v=72"></script>
 </body>
 </html>
