@@ -50,6 +50,32 @@ BROWSER_HEADERS = {
 # Below this many words we treat the body as "not really an article" and
 # escalate to the next fallback.
 MIN_BODY_WORDS = 60
+# Korean packs far more meaning per whitespace token than English, so a
+# word floor would reject perfectly complete Korean articles. Count
+# characters there instead.
+MIN_BODY_CHARS_KO = 300
+
+
+def _is_korean(text: str) -> bool:
+    """True if the text is predominantly Hangul."""
+    if not text:
+        return False
+    hangul = sum(1 for ch in text[:600] if "\uac00" <= ch <= "\ud7a3")
+    return hangul >= 40
+
+
+def body_is_substantial(text: str) -> bool:
+    """Is this enough text to be an actual article?
+
+    The gate that decides whether a story is worth putting in the feed
+    at all. A headline plus a two-line RSS blurb is not an article — the
+    user was explicit that showing one is worse than showing nothing.
+    """
+    if not text:
+        return False
+    if _is_korean(text):
+        return len(text.replace(" ", "")) >= MIN_BODY_CHARS_KO
+    return len(text.split()) >= MIN_BODY_WORDS
 
 
 @dataclass
@@ -220,11 +246,17 @@ async def extract_detailed(url: str) -> tuple[Reading | None, ExtractError | Non
         if fb and len(fb.split()) > len(text.split()):
             text = fb
 
-    if not text and not title:
+    if not body_is_substantial(text):
+        # A title with no real body is not an article. Previously this
+        # passed through whenever a title existed, which is how
+        # headline-plus-blurb stubs reached the feed.
         err = ExtractError(
             reason="empty",
             status=200,
-            detail="no body found in page",
+            detail=(
+                "no body found in page" if not text
+                else f"body too thin ({len(text.split())} words)"
+            ),
             final_url=fetch_url,
         )
         cache.set(cache_key, err, 1800)

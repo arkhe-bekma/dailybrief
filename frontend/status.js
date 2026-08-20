@@ -56,7 +56,7 @@ function renderBanner(data) {
   // page is a page nobody reads.
   const subNote = subscription.length
     ? ` ${subscription.length} subscriber-only source` +
-      `${subscription.length === 1 ? " is" : "s are"} showing summaries, as expected.`
+      `${subscription.length === 1 ? " is" : "s are"} being dropped, as expected.`
     : "";
 
   if (!degraded.length) {
@@ -78,7 +78,7 @@ function renderSummary(data) {
   const tone = pct === null ? "" : pct >= 80 ? "ok" : pct >= 50 ? "warn" : "bad";
   const tiles = [
     ["Full articles", String(data.ok ?? 0), "ok"],
-    ["Summary fallback", String(data.failed ?? 0), (data.failed ? "warn" : "")],
+    ["Dropped, no body", String(data.failed ?? 0), (data.failed ? "warn" : "")],
     ["Success rate", pct === null ? "—" : `${pct}%`, tone],
     ["Sources seen", String((data.outlets || []).length), ""],
   ];
@@ -124,7 +124,7 @@ function renderReasons(data) {
   const keys = Object.keys(reasons);
   if (!keys.length) {
     $("reasons").replaceChildren(
-      el("span", { class: "st-reason none" }, "Nothing fell back in this window."));
+      el("span", { class: "st-reason none" }, "Nothing was dropped in this window."));
     return;
   }
   $("reasons").replaceChildren(...keys.map((k) =>

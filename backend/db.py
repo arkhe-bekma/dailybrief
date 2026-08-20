@@ -845,6 +845,39 @@ async def delete_article_by_user(
     return await asyncio.to_thread(_delete_article_by_user_sync, url, reason, note)
 
 
+def _drop_article_sync(url: str, reason: str) -> dict:
+    """Remove an article we can't show a body for.
+
+    Same machinery as a user delete — row gone, cached body gone, URL in
+    blocked_urls so the next RSS sweep can't pull it back — but tagged
+    `nobody:<reason>` so these are distinguishable from user removals in
+    the blocked list.
+    """
+    return _delete_article_by_user_sync(url, f"nobody:{(reason or 'error')[:16]}")
+
+
+async def drop_article(url: str, reason: str = "error") -> dict:
+    return await asyncio.to_thread(_drop_article_sync, url, reason)
+
+
+def _list_active_urls_sync(limit: int) -> list[dict]:
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT url, outlet FROM articles "
+            "WHERE archived = 0 AND (dup_of IS NULL OR dup_of = '') "
+            "  AND validated != -1 "
+            "ORDER BY fetched_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+async def list_active_urls(limit: int = 1000) -> list[dict]:
+    """Every article currently eligible for the feed. Used by the
+    body-check sweep."""
+    return await asyncio.to_thread(_list_active_urls_sync, limit)
+
+
 def _is_blocked_sync(url: str) -> bool:
     if not url:
         return False

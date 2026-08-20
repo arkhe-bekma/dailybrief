@@ -1148,6 +1148,62 @@ async def health_extraction(hours: int = 24):
     return data
 
 
+async def _body_sweep(limit: int = 400, concurrency: int = 8) -> dict:
+    """Walk the active feed and drop every article with no readable body.
+
+    Belt to the ingest gate's braces: it cleans out stories admitted
+    before the gate existed, and catches ones that were readable at
+    ingest and have since been paywalled.
+    """
+    rows = await db.list_active_urls(limit=limit)
+    sem = asyncio.Semaphore(concurrency)
+    dropped: dict[str, int] = {}
+    kept = 0
+
+    async def _one(row: dict) -> None:
+        nonlocal kept
+        url, outlet = row.get("url") or "", row.get("outlet") or ""
+        if not url:
+            return
+        async with sem:
+            try:
+                reading, err = await reader.extract_detailed(url)
+            except Exception:
+                return                      # transient — leave it alone
+        if reading:
+            kept += 1
+            await db.record_extract_result(outlet, url, True, "")
+            return
+        reason = err.reason if err else "error"
+        # Only a definitive "there is no body here" removes an article.
+        # A timeout or a transient error is not evidence of absence, and
+        # removing on one is how a slow publisher gets wiped out.
+        if reason not in ("paywall", "blocked", "notfound", "empty"):
+            return
+        await db.record_extract_result(outlet, url, False, reason)
+        await db.drop_article(url, reason=reason)
+        dropped[outlet] = dropped.get(outlet, 0) + 1
+
+    await asyncio.gather(*[_one(r) for r in rows])
+    total = sum(dropped.values())
+    if total:
+        print(f"[sweep] dropped {total} bodyless articles: "
+              f"{sorted(dropped.items(), key=lambda kv: -kv[1])[:8]}", flush=True)
+    return {
+        "checked": len(rows),
+        "kept": kept,
+        "dropped": total,
+        "dropped_by_outlet": dict(sorted(dropped.items(), key=lambda kv: -kv[1])),
+    }
+
+
+@app.post("/api/admin/sweep-bodies")
+async def admin_sweep_bodies(request: Request, limit: int = 400):
+    """Drop every active article that has no readable body."""
+    await _require_admin(request)
+    return await _body_sweep(limit=min(max(limit, 1), 2000))
+
+
 @app.get("/api/health/feeds")
 async def health_feeds(request: Request):
     """Probe every configured RSS feed and report which ones are dead.
@@ -2220,69 +2276,39 @@ def _split_paragraphs(text: str) -> list[str]:
 
 
 # ── Reader failure handling ──────────────────────────────────────
-# Publishers block us for reasons we cannot (and should not try to)
-# route around: hard paywalls, bot walls, geo gates. When live
-# extraction can't reach the body we still hold the outlet's own RSS
-# summary for that story, so the reader shows that plus a prominent
-# link to the original instead of a dead end.
-_READER_FAIL_COPY = {
-    "paywall": (
-        "이 기사는 유료 구독자 전용입니다 — 저장된 요약만 표시합니다.",
-        "This story is behind the publisher's paywall — showing the saved summary.",
-    ),
-    "blocked": (
-        "매체가 본문 접근을 차단했습니다 — 저장된 요약만 표시합니다.",
-        "The publisher blocked automated access — showing the saved summary.",
-    ),
-    "notfound": (
-        "원문이 삭제되었거나 이동했습니다 — 저장된 요약만 표시합니다.",
-        "The original article has moved or been removed — showing the saved summary.",
-    ),
-    "timeout": (
-        "매체 응답이 너무 느립니다 — 저장된 요약만 표시합니다.",
-        "The publisher's site timed out — showing the saved summary.",
-    ),
+# Policy, set by the user in no uncertain terms: if there is no article
+# body, the story does not belong in the feed. We used to serve the
+# outlet's RSS summary as a consolation prize — a headline plus two
+# lines of blurb under a "showing the saved summary" notice. That is
+# worse than nothing: the user clicked in order to *read* something, and
+# got the same sentence they had already seen on the card.
+#
+# So a failed extraction now removes the article from the feed instead.
+# /api/article returns {"gone": true} and the frontend drops the card.
+# The ingest gate (rss._probe_readability + Stage C) means this should
+# be rare — it catches stories that were readable at ingest and got
+# paywalled later.
+_READER_GONE_COPY = {
+    "paywall":  ("유료 기사라 본문을 볼 수 없어 목록에서 제거했습니다.",
+                 "Subscriber-only — removed from the feed."),
+    "blocked":  ("본문 접근이 차단되어 목록에서 제거했습니다.",
+                 "The publisher blocks reading — removed from the feed."),
+    "notfound": ("원문이 삭제되어 목록에서 제거했습니다.",
+                 "The original is gone — removed from the feed."),
 }
-_READER_FAIL_DEFAULT = (
-    "본문을 불러오지 못했습니다 — 저장된 요약만 표시합니다.",
-    "Couldn't load the full article — showing the saved summary.",
-)
+_READER_GONE_DEFAULT = ("본문이 없어 목록에서 제거했습니다.",
+                        "No article body — removed from the feed.")
 
 
-def _reader_fallback_from_row(
-    url: str,
-    article_row: dict | None,
-    err: "reader.ExtractError | None" = None,
-) -> dict | None:
-    """Build a reader payload from the stored articles row when live
-    extraction can't reach the publisher. Uses the card summary as the
-    body so the modal shows real text + the "open original" link instead
-    of a hard error. Returns None only when we have literally nothing
-    worth showing (no title)."""
-    if not article_row:
-        return None
-    title = (article_row.get("title") or "").strip()
-    if not title:
-        return None
-    summary = (article_row.get("summary") or "").strip()
-    paras = _split_paragraphs(summary) if summary else []
-    lang = (article_row.get("lang") or _detect_lang(title) or "en")
-    reason = (err.reason if err else "") or "error"
-    ko_copy, en_copy = _READER_FAIL_COPY.get(reason, _READER_FAIL_DEFAULT)
-    note = ko_copy if lang == "ko" else en_copy
+def _gone_payload(url: str, article_row: dict | None, err) -> dict:
+    lang = (article_row or {}).get("lang") or "en"
+    reason = (getattr(err, "reason", "") or "error")
+    ko, en = _READER_GONE_COPY.get(reason, _READER_GONE_DEFAULT)
     return {
+        "gone": True,
         "url": url,
-        "final_url": (err.final_url if err else None) or url,
-        "title": title,
-        "image": article_row.get("image"),
-        "byline": None,
-        "excerpt": summary[:300],
-        "lang": lang,
-        "word_count": len(summary.split()),
-        "paragraphs": paras,
-        "partial": True,
-        "fail_reason": reason,
-        "note": note,
+        "reason": reason,
+        "note": ko if lang == "ko" else en,
     }
 
 
@@ -2346,22 +2372,16 @@ async def article(url: str):
         # it against the outlet so /api/health shows which sources are
         # degrading, then fall back to the stored summary rather than
         # handing the user a dead end.
-        fallback = _reader_fallback_from_row(url, article_row, err)
-        if fallback is not None:
-            await db.bump_counter("reader_fallback_summary")
-            # Cache the fallback for 30 min. Without this, every click on
-            # a paywalled story re-hit the publisher AND logged another
-            # failure, which both hammered the outlet and dragged the
-            # health success-rate down relative to cached successes.
-            # 30 min (not 24 h) so a transient block recovers on its own.
-            cache.set(full_key, fallback, 1800)
-            return await _served(fallback)
-        # Nothing stored either — genuinely nothing to show.
         await db.record_extract_result(outlet, url, False, err.reason if err else "error")
-        return {
-            "error": "could not extract the article body",
-            "reason": err.reason if err else "error",
-        }
+        await db.bump_counter("reader_dropped_no_body")
+        # Take it out of the feed so nobody else clicks it. Archive
+        # rather than hard-delete: the row stays for the lab/archive
+        # views and stops re-entering on the next RSS pass.
+        try:
+            await db.drop_article(url, reason=(err.reason if err else "error"))
+        except Exception as exc:
+            print(f"[reader] drop_article failed for {url[:60]}: {exc!r}", flush=True)
+        return _gone_payload(url, article_row, err)
 
     # No LLM rewrite — show the publisher's body directly, just cleaned
     # of emojis / section headers / photo credits / mojibake. Cheaper,

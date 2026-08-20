@@ -740,6 +740,30 @@ async function silentRefresh() {
   }
 }
 
+// ── Toast ──────────────────────────────────────────────────────
+// One-line, self-dismissing notice. Used when an article is pulled out
+// from under the user, so the card vanishing is explained rather than
+// just happening.
+let TOAST_TIMER = null;
+
+function toast(message, ms = 3600) {
+  if (!message) return;
+  let node = document.getElementById("toast");
+  if (!node) {
+    node = el("div", { id: "toast", class: "toast", role: "status",
+                       "aria-live": "polite" });
+    document.body.appendChild(node);
+  }
+  node.textContent = message;
+  // Restart the animation even if a toast is already on screen.
+  node.classList.remove("show");
+  void node.offsetWidth;
+  node.classList.add("show");
+  clearTimeout(TOAST_TIMER);
+  TOAST_TIMER = setTimeout(() => node.classList.remove("show"), ms);
+}
+
+
 // ── Search ─────────────────────────────────────────────────────
 // A lens over the archive rather than a separate page: results reuse
 // the card renderer, and clearing the box drops straight back to the
@@ -939,6 +963,17 @@ async function openReader(url, item) {
   try {
     const r = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
     const data = await r.json();
+    // The publisher gave us no body, so the backend took the story out
+    // of the feed. Pull the card and get out of the way rather than
+    // showing a headline with nothing under it.
+    if (data.gone) {
+      purgeUrlLocally(url);
+      if (RENDERED) RENDERED = RENDERED.filter((m) => m.url !== url);
+      if (SEARCH_RESULTS) SEARCH_RESULTS = SEARCH_RESULTS.filter((m) => m.url !== url);
+      closeReader();
+      toast(data.note || "No article body — removed from the feed.");
+      return;
+    }
     if (data.error) {
       content.innerHTML =
         `<div class="reader-loading">⚠ ${data.error}<br><br>` +
@@ -1091,15 +1126,6 @@ function renderReader(content, data, item) {
     content.appendChild(heroWrap);
   }
 
-  // Extraction fell back to the stored summary (paywall / bot wall /
-  // dead link). Say so up front, in the article's own language, so the
-  // short body doesn't read like a bug.
-  if (data.partial && data.note) {
-    content.appendChild(el("div", {
-      class: `reader-partial reason-${data.fail_reason || "error"}`,
-      lang,
-    }, data.note));
-  }
 
   // Build the meta strip. Word-count + formal date inherit the same
   // mono-uppercase 10.5px / 0.8px letter-spacing from .reader-meta.
@@ -1228,8 +1254,8 @@ function renderReader(content, data, item) {
       href: data.final_url || data.url || item.url,
       target: "_blank",
       rel: "noopener",
-      class: "reader-original" + (data.partial ? " emphasis" : ""),
-    }, data.partial ? "read the full story ↗" : "open original ↗"),
+      class: "reader-original",
+    }, "open original ↗"),
     delBtn,
   ]));
 }

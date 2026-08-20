@@ -2910,228 +2910,6 @@ footer {
   /* no filter — photo shown in its real colors */
 }
 
-/* Notice shown when the publisher blocked the body and we're serving
-   the stored summary instead. Amber, not red: this is a known
-   limitation of the source, not an app error. */
-.reader-partial {
-  margin: 0 0 20px;
-  padding: 11px 14px;
-  border: 1px solid rgba(255, 190, 60, 0.38);
-  border-left-width: 3px;
-  border-radius: 8px;
-  background: rgba(255, 190, 60, 0.07);
-  color: rgba(255, 214, 140, 0.92);
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-.reader-partial.reason-notfound {
-  border-color: rgba(255, 120, 120, 0.38);
-  background: rgba(255, 120, 120, 0.07);
-  color: rgba(255, 178, 178, 0.92);
-}
-/* When the body is only a summary, the link out is the primary action —
-   give it the weight to match. */
-.reader-original.emphasis {
-  border-color: rgba(255, 190, 60, 0.55);
-  color: rgba(255, 214, 140, 0.95);
-  font-weight: 700;
-}
-
-.reader-meta {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: center;     /* centered to match the title below */
-  flex-wrap: wrap;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin: 4px 0 18px;
-}
-.reader-meta .src { color: var(--text-2); font-weight: 700; }
-.reader-meta .tag {
-  background: rgba(0,225,255,0.14);
-  color: var(--neon-cyan);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 800;
-}
-
-.reader-title {
-  font-family: var(--display);
-  font-weight: 800;
-  font-variation-settings: "opsz" 88, "wdth" 92;
-  font-size: calc(clamp(24px, 2.8vw, 36px) * var(--text-scale, 1));
-  line-height: 1.08;
-  letter-spacing: -1px;
-  /* Centered + tight side margins. Old layout had a giant gap to the
-     left of the title; centering with text-wrap: balance distributes
-     the words evenly across the available width. */
-  text-align: center;
-  text-wrap: balance;
-  margin: 4px auto 22px;
-  max-width: 720px;
-  color: var(--text);
-}
-.reader-title[lang="ko"] {
-  font-family: var(--kr);
-  font-variation-settings: normal;
-  letter-spacing: -0.6px;
-  line-height: 1.22;
-  font-weight: 800;
-  /* keep_all so Korean particles don't dangle alone on a new line */
-  word-break: keep-all;
-}
-
-.reader-tldr {
-  background:
-    linear-gradient(90deg, rgba(255,230,0,0.08), transparent 80%),
-    rgba(255,255,255,0.02);
-  border-left: 3px solid var(--neon-yellow);
-  padding: 16px 20px;
-  border-radius: 10px;
-  margin: 0 0 22px;
-}
-.reader-tldr .tldr-label {
-  display: block;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--neon-yellow);
-  letter-spacing: 2px;
-  margin-bottom: 6px;
-  font-weight: 700;
-  text-shadow: var(--glow-yellow);
-}
-.reader-tldr p {
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.5;
-  font-weight: 500;
-  color: var(--text);
-  font-family: var(--display);
-  font-variation-settings: "opsz" 30, "wdth" 96;
-}
-.reader-tldr p[lang="ko"] { font-family: var(--kr); font-variation-settings: normal; }
-
-.reader-section-label {
-  display: block;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--neon-cyan);
-  letter-spacing: 2px;
-  font-weight: 700;
-  margin: 0 0 10px;
-  text-shadow: var(--glow-cyan);
-}
-
-.reader-points {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.reader-points li {
-  position: relative;
-  padding-left: 22px;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--text-2);
-}
-.reader-points li::before {
-  content: "→";
-  position: absolute;
-  left: 0;
-  top: 0;
-  color: var(--neon-cyan);
-  font-weight: 800;
-  font-family: var(--mono);
-}
-
-.reader-body {
-  max-width: 720px;
-  margin: 0 auto;
-}
-.reader-body p {
-  font-size: 15px;
-  line-height: 1.75;
-  margin: 0 0 16px;
-  color: var(--text-2);
-  letter-spacing: -0.1px;
-}
-.reader-body p[lang="ko"] {
-  font-family: var(--kr);
-  font-size: 15.5px;
-  line-height: 1.72;
-  letter-spacing: -0.3px;
-  word-break: keep-all;
-}
-
-.reader-footer {
-  margin-top: 26px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.reader-footer .badge {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--muted);
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-.reader-original {
-  color: var(--neon-cyan);
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.6px;
-  font-weight: 700;
-}
-.reader-original:hover { text-shadow: var(--glow-cyan); }
-
-/* Permanent-delete button in the reader footer. Subtle red outline at
-   rest so it doesn't compete with the body; warms up on hover so the
-   destructive nature is unmistakable when the user is actually about
-   to commit. Click opens the same reason-picker modal as the × on
-   the card. */
-.reader-delete {
-  background: transparent;
-  border: 1px solid rgba(255,71,87,0.45);
-  color: var(--down);
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.9px;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background 140ms, border-color 140ms, color 140ms,
-              box-shadow 140ms, transform 80ms;
-}
-.reader-delete:hover {
-  background: rgba(255,71,87,0.12);
-  border-color: var(--down);
-  color: #ffd5da;
-  box-shadow: 0 0 16px rgba(255,71,87,0.35);
-}
-.reader-delete:active { transform: scale(0.97); }
-@media (max-width: 500px) {
-  .reader-delete { padding: 6px 12px; font-size: 10px; }
-}
-
-/* NATURE-CAT-COLOR — leafy green to match the 🌿 glyph */
-:root { --c-nature: #5fd4a0; }
-.chip.cat-nature.active { background: var(--c-nature); border-color: var(--c-nature); color: #002a18; box-shadow: 0 0 24px rgba(95,212,160,0.45); }
-.chip.cat-nature { border-color: rgba(95,212,160,0.35); color: var(--c-nature); }
-
 /* ── Reader: related stories ──────────────────────────────────────
    Sits between the body and the footer. Kept typographically quieter
    than the article itself so it reads as an offer, not a continuation
@@ -3313,4 +3091,37 @@ footer {
 #search-btn.on {
   color: var(--neon-mag);
   border-color: rgba(255,43,214,0.6);
+}
+
+/* ── Toast ────────────────────────────────────────────────────────
+   Bottom-centre, self-dismissing. Only used to explain something the
+   app did on its own (an article removed out from under the user), so
+   it is informational rather than an alert. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 200;
+  transform: translate(-50%, 14px);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 12px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: rgba(11, 13, 24, 0.96);
+  backdrop-filter: blur(8px);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms cubic-bezier(0.22,1,0.36,1);
+}
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: opacity 200ms ease; transform: translate(-50%, 0); }
 }

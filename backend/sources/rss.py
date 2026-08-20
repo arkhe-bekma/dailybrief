@@ -635,9 +635,17 @@ async def _enrich_missing_images(articles: list[Article]) -> None:
 
 
 async def _probe_readability(articles: list[Article]) -> None:
-    """Make sure every article has a reader_ok verdict. Articles that
-    were probed by _fetch_og_image already have one; this pass picks
-    up articles that had an RSS image (so we never fetched their page)."""
+    """Decide, for every article, whether we can actually show its body.
+
+    Runs the *same* extractor the reader modal uses rather than a
+    parallel heuristic, so a story can never pass ingest and then fail
+    to open. That also means Google News links get resolved to the
+    publisher first — the old bespoke check fetched the Google shell and
+    marked every Google-sourced article unreadable.
+
+    Extraction results are cached per URL by the reader agent, so the
+    body is already warm by the time the user clicks.
+    """
     todo = [
         a for a in articles
         if cache.get(f"reader_ok:{a.url}") is None and not _is_obviously_dead(a.url)
@@ -646,23 +654,26 @@ async def _probe_readability(articles: list[Article]) -> None:
         return
 
     sem = asyncio.Semaphore(8)
-    async with httpx.AsyncClient(headers=_OG_HEADERS, http2=False) as client:
-        async def _one(article: Article) -> None:
-            async with sem:
-                ok_key = f"reader_ok:{article.url}"
-                try:
-                    r = await client.get(article.url, timeout=8.0, follow_redirects=True)
-                    if r.status_code >= 400:
-                        cache.set(ok_key, False, 3600)
-                        return
-                    ok = _passes_reader_check(
-                        r.text, r.headers.get("content-type", ""), article.url,
-                    )
-                    cache.set(ok_key, ok, 86_400 if ok else 3600)
-                except Exception:
-                    cache.set(ok_key, False, 1800)
 
-        await asyncio.gather(*[_one(a) for a in todo])
+    async def _one(article: Article) -> None:
+        async with sem:
+            ok_key = f"reader_ok:{article.url}"
+            try:
+                reading, _err = await reader_agent.extract_detailed(article.url)
+            except Exception:
+                cache.set(ok_key, False, 1800)
+                return
+            ok = bool(reading)
+            # Success is cached for a day; failure for an hour, so a
+            # transient block doesn't exile an outlet until tomorrow.
+            cache.set(ok_key, ok, 86_400 if ok else 3600)
+            # The extracted body itself stays in the reader agent's own
+            # 24h cache, so the first click serves from memory without
+            # re-fetching. Shaping it into the stored reader payload is
+            # /api/article's job — doing it here would persist a
+            # half-formed row that the reader would then serve verbatim.
+
+    await asyncio.gather(*[_one(a) for a in todo])
 
 
 def _parse_feed(raw_bytes: bytes, outlet: dict) -> list[Article]:
@@ -946,17 +957,37 @@ async def enrich_top(articles: list[dict], top_n: int = 60) -> list[dict]:
     # (Cached per URL → only fresh URLs touch the network.)
     await _probe_readability(boxes)
 
-    # Stage C: relaxed pass. We used to drop unreadable + image-less
-    # items here, which nuked the entire K-Ent category (all Google
-    # News-proxied). Now we keep everything — text-only items naturally
-    # flow into the no-image tier on the frontend, and the sorter +
-    # curator already handle quality control upstream.
+    # Stage C: drop anything whose body we can't actually show.
+    #
+    # This gate was written, then disabled, because the old readability
+    # check fetched Google News shells and so condemned the entire K-Ent
+    # category. _probe_readability now runs the real reader (which
+    # resolves Google News first), so the verdict is trustworthy and the
+    # gate is back on.
+    #
+    # The rule: if there is no article body, the story does not go in
+    # the list. A headline plus a two-line RSS blurb is not an article —
+    # showing one is worse than showing nothing, because the user
+    # clicked expecting to read something.
     keep: list[dict] = []
     dropped_unread = dropped_noimg = 0
+    dropped_by_outlet: dict[str, int] = {}
     for box in boxes:
+        if not _is_readable(box.url):
+            dropped_unread += 1
+            dropped_by_outlet[box.outlet] = dropped_by_outlet.get(box.outlet, 0) + 1
+            continue
         if box.image:
             box._src["image"] = box.image  # propagate newly-scraped image
         keep.append(box._src)
+
+    if dropped_unread:
+        worst = sorted(dropped_by_outlet.items(), key=lambda kv: -kv[1])[:6]
+        print(
+            f"[rss] dropped {dropped_unread} unreadable articles "
+            f"(no body): {worst}",
+            flush=True,
+        )
 
     # Stage D: identify recycled outlet logos (same image used by 2+
     # items from the same outlet) AND known-logo URL patterns.
