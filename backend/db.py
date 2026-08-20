@@ -1153,7 +1153,26 @@ def _repair_bad_images_sync() -> int:
             "WHERE image IS NOT NULL AND image != '' "
             "  AND image NOT LIKE 'http://%' AND image NOT LIKE 'https://%'"
         )
-        return cur.rowcount or 0
+        fixed = cur.rowcount or 0
+        # Cached reader payloads hold their own copy of the image, so a
+        # repaired articles row still renders the broken one from cache.
+        # Drop those rows; the next open re-extracts with the fix in
+        # place. Cheap — reader bodies are re-derivable by design.
+        stale = c.execute(
+            "SELECT url, payload_json FROM reader_results "
+            "WHERE payload_json LIKE '%\"image\"%'"
+        ).fetchall()
+        drop = []
+        for row in stale:
+            try:
+                img = (json.loads(row["payload_json"]) or {}).get("image")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if img and not str(img).startswith(("http://", "https://")):
+                drop.append(row["url"])
+        for url in drop:
+            c.execute("DELETE FROM reader_results WHERE url = ?", (url,))
+        return fixed + len(drop)
 
 
 async def repair_bad_images() -> int:
