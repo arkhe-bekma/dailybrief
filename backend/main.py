@@ -137,6 +137,10 @@ async def _start():
         asyncio.create_task(_ranker_worker())   # 20-min importance + dedup pass
     except Exception as exc:
         print(f"[startup] ranker worker failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_body_sweep_worker())  # 25-min bodyless-article purge
+    except Exception as exc:
+        print(f"[startup] body sweep worker failed to schedule: {exc!r}", flush=True)
     # Prewarm the cache immediately so the very first visitor doesn't
     # see an empty payload.
     try:
@@ -459,6 +463,34 @@ async def _ranker_worker():
             )
         except Exception as exc:
             print(f"[ranker] pass failed: {exc!r}", flush=True)
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
+async def _body_sweep_worker():
+    """The bouncer. Every 25 min it walks the recent active pool and
+    removes anything with no readable body.
+
+    The ingest gate only probes the curator's top-N, so stories from
+    partially-paywalled outlets (Nikkei Asia passes about 30% of the
+    time) still reach the feed unprobed. Without this they sat there
+    until a reader clicked one and got a teaser — which is exactly the
+    experience we are trying to eliminate. Sweeping proactively means
+    the user meets a clean list instead of finding the junk for us.
+
+    Only definitive verdicts remove a story; a timeout leaves it alone.
+    """
+    INTERVAL_SECONDS = 25 * 60
+    await asyncio.sleep(180)      # let ingest + ranker settle first
+    print("[sweep] bouncer armed", flush=True)
+    while True:
+        try:
+            res = await _body_sweep(limit=250, concurrency=6)
+            if res["dropped"]:
+                cache._store.pop("brief:response", None)
+                print(f"[sweep] checked={res['checked']} dropped={res['dropped']} "
+                      f"{list(res['dropped_by_outlet'].items())[:5]}", flush=True)
+        except Exception as exc:
+            print(f"[sweep] pass failed: {exc!r}", flush=True)
         await asyncio.sleep(INTERVAL_SECONDS)
 
 

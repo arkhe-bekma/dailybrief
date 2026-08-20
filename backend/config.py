@@ -169,7 +169,6 @@ OUTLETS: list[dict] = [
     {"name": "Yonhap EN",    "category": "korea", "lang": "en", "url": "https://en.yna.co.kr/RSS/news.xml"},
 
     # Opinion / Columnists (en) — 칼럼
-    {"name": "WaPo Opinion",     "category": "opinion", "lang": "en", "url": "https://feeds.washingtonpost.com/rss/opinions"},
     {"name": "Foreign Affairs",  "category": "opinion", "lang": "en", "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Atlantic",     "category": "opinion", "lang": "en", "url": "https://www.theatlantic.com/feed/all/"},
     {"name": "New Yorker",       "category": "opinion", "lang": "en", "url": "https://www.newyorker.com/feed/everything"},
@@ -259,6 +258,7 @@ OUTLETS: list[dict] = [
 # deleted: if one opens up (or we ever add a headless renderer), moving
 # the line back into OUTLETS is the whole change.
 RETIRED_OUTLETS: list[dict] = [
+    {"name": "WaPo Opinion",     "category": "opinion", "lang": "en", "url": "https://feeds.washingtonpost.com/rss/opinions"},
     {"name": "NYT",          "category": "world", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"},
     {"name": "Reuters",      "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Bloomberg",    "category": "econ",  "lang": "en", "url": "https://news.google.com/rss/search?q=site:bloomberg.com&hl=en-US&gl=US&ceid=US:en"},
