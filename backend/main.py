@@ -2277,6 +2277,11 @@ def _split_paragraphs(text: str) -> list[str]:
         # Lines that are mostly raw HTML attribute fragments
         if _ATTR_FRAG_RE.search(p) and len(_ATTR_FRAG_RE.findall(p)) >= 2:
             continue
+        # Subscription upsell / newsletter promo / ▶ related-link
+        # bullets. Shared with the ingest gate so what we decide is
+        # "substantial" is the same text we actually render.
+        if reader.is_boilerplate_line(p):
+            continue
         # Related-links tail (Yonhap "(LEAD)…", trailing " -" headlines):
         # once we hit one, every line after is usually another link of
         # the same shape. Bail out of the loop entirely.
@@ -2404,6 +2409,24 @@ async def article(url: str):
     raw_title = html.unescape(reading.title or "")
     clean_title = _better_title(raw_title, fallback_title or "")
     paragraphs = _dedup_with_title(_split_paragraphs(reading.text), clean_title)
+
+    # Final say belongs to the rendered body, not the raw extraction.
+    # Nikkei's "body" is a headline plus a photo caption; Nature's is two
+    # sentences and a Nature+ pitch. Both clear the raw-text bar and then
+    # collapse to nothing once the title, captions and boilerplate are
+    # stripped — which is exactly the headline-with-no-article the user
+    # objected to. Judge what the reader will see.
+    if not reader.body_is_substantial("\n".join(paragraphs)):
+        await db.record_extract_result(outlet, url, False, "empty")
+        await db.bump_counter("reader_dropped_no_body")
+        try:
+            await db.drop_article(url, reason="empty")
+        except Exception as exc:
+            print(f"[reader] drop_article failed for {url[:60]}: {exc!r}", flush=True)
+        return _gone_payload(
+            url, article_row,
+            type("E", (), {"reason": "empty", "final_url": reading.final_url})(),
+        )
     result = {
         "url": url,
         # Where the body actually came from — for Google-News-sourced

@@ -13,6 +13,7 @@ outlet-health view can tell "the publisher paywalled us" apart from
 from __future__ import annotations
 
 import json
+import re as _re_
 from dataclasses import dataclass, asdict
 from urllib.parse import urljoin, urlparse
 
@@ -56,6 +57,53 @@ MIN_BODY_WORDS = 60
 MIN_BODY_CHARS_KO = 300
 
 
+# ── Boilerplate that publishers serve *instead of* an article ─────
+# Observed in the wild: Nature returns two sentences then its Nature+
+# upsell, WaPo Opinion returns a newsletter promo, Korean entertainment
+# sites append a block of "▶ related story" bullets. All of it survives
+# trafilatura as ordinary paragraphs, which is how a story with no real
+# body still looked substantial enough to list.
+_BOILERPLATE_RES = [
+    _re_.compile(r"^\s*[-*•]?\s*▶"),                       # ▶ related-link bullets
+    _re_.compile(r"prices may be subject to", _re_.I),
+    _re_.compile(r"click here to get the full newsletter", _re_.I),
+    _re_.compile(r"^\s*access\s+.{0,40}\s+journals\b", _re_.I),
+    _re_.compile(r"\breceive\s+\d+\s+print issues\b", _re_.I),
+    _re_.compile(r"\b(?:get|try)\s+\S+\+?,?\s+our\s+best-value\b", _re_.I),
+    # Generic upsell: a subscription word next to an offer word. Both
+    # halves are required so ordinary prose that merely mentions a
+    # subscription is not stripped.
+    _re_.compile(
+        r"\b(subscri\w+|sign up|log in|register)\b.{0,80}"
+        r"\b(unlimited|full access|online access|per (?:month|year)|"
+        r"best-value|free trial|newsletter)\b", _re_.I,
+    ),
+    _re_.compile(
+        r"\b(unlimited|full access|online access)\b.{0,80}\b(subscri\w+|sign up)\b",
+        _re_.I,
+    ),
+    _re_.compile(r"^\s*(?:이미지 확대|무단[ ]?전재|재배포 금지)", _re_.I),
+]
+
+
+def is_boilerplate_line(line: str) -> bool:
+    """True for subscription upsell / related-link / notice lines that
+    are not part of the article body."""
+    s = (line or "").strip()
+    if not s:
+        return True
+    return any(rx.search(s) for rx in _BOILERPLATE_RES)
+
+
+def strip_boilerplate(text: str) -> str:
+    """Body text with publisher boilerplate lines removed."""
+    if not text:
+        return ""
+    return "\n".join(
+        ln for ln in text.split("\n") if ln.strip() and not is_boilerplate_line(ln)
+    )
+
+
 def _is_korean(text: str) -> bool:
     """True if the text is predominantly Hangul."""
     if not text:
@@ -71,6 +119,11 @@ def body_is_substantial(text: str) -> bool:
     at all. A headline plus a two-line RSS blurb is not an article — the
     user was explicit that showing one is worse than showing nothing.
     """
+    if not text:
+        return False
+    # Judge what would actually be rendered. A page whose "body" is a
+    # subscription pitch must not pass just because the pitch is long.
+    text = strip_boilerplate(text)
     if not text:
         return False
     if _is_korean(text):
