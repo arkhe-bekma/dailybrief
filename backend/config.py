@@ -137,7 +137,7 @@ OUTLETS: list[dict] = [
     {"name": "SBS 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=01"},
     {"name": "연합뉴스",      "category": "korea", "lang": "ko", "url": "https://www.yna.co.kr/rss/news.xml"},
     {"name": "연합 경제",     "category": "korea", "lang": "ko", "url": "https://www.yna.co.kr/rss/economy.xml"},
-    {"name": "한국경제",      "category": "korea", "lang": "ko", "url": "https://www.hankyung.com/feed/all-news"},
+    {"name": "한국경제",      "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "서울신문",      "category": "korea", "lang": "ko", "url": "https://www.seoul.co.kr/xml/rss/rss_economy.xml"},
     # Naver — public RSS retired; use Google News proxy for each section.
     {"name": "네이버 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:n.news.naver.com&hl=ko&gl=KR&ceid=KR:ko"},
@@ -177,7 +177,7 @@ OUTLETS: list[dict] = [
     {"name": "New Yorker",       "category": "opinion", "lang": "en", "url": "https://www.newyorker.com/feed/everything"},
     # Korean opinion / 칼럼
     {"name": "조선 오피니언",   "category": "opinion", "lang": "ko", "url": "https://www.chosun.com/arc/outboundfeeds/rss/category/opinion/?outputType=xml"},
-    {"name": "한경 오피니언",   "category": "opinion", "lang": "ko", "url": "https://www.hankyung.com/feed/opinion"},
+    {"name": "한경 오피니언",   "category": "opinion", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com/opinion&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "동아 오피니언",   "category": "opinion", "lang": "ko", "url": "https://rss.donga.com/editorials.xml"},
 
     # Science (en) — 과학
@@ -245,7 +245,7 @@ OUTLETS: list[dict] = [
     {"name": "BBC Earth",       "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=%22BBC+Earth%22+OR+site:bbc.com/earth&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Mongabay",        "category": "nature", "lang": "en", "url": "https://news.mongabay.com/feed/"},
     {"name": "Smithsonian",     "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=site:smithsonianmag.com+animals+OR+wildlife&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "Guardian Animals","category": "nature", "lang": "en", "url": "https://www.theguardian.com/environment/animals/rss"},
+    {"name": "Guardian Wildlife","category": "nature", "lang": "en", "url": "https://www.theguardian.com/environment/wildlife/rss"},
     {"name": "Nature World",    "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=site:natureworldnews.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "한겨레 동물",       "category": "nature", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hani.co.kr+%EB%8F%99%EB%AC%BC&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "한국일보 자연",     "category": "nature", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankookilbo.com+%EC%9E%90%EC%97%B0+OR+%EB%8F%99%EB%AC%BC&hl=ko&gl=KR&ceid=KR:ko"},

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
@@ -1137,6 +1138,56 @@ async def health_extraction(hours: int = 24):
         else "failing"
     )
     return data
+
+
+@app.get("/api/health/feeds")
+async def health_feeds(request: Request):
+    """Probe every configured RSS feed and report which ones are dead.
+
+    Admin-only and not cached: it fires ~130 outbound requests, so it is
+    a deliberate diagnostic, not something to poll. A feed that 404s or
+    403s silently starves a whole category, and until now that only
+    showed up as a line in journalctl.
+    """
+    await _require_admin(request)
+    outlets = getattr(config, "OUTLETS", [])
+
+    sem = asyncio.Semaphore(12)
+
+    async def probe(o: dict) -> dict:
+        url = o.get("url") or ""
+        name = o.get("name") or "?"
+        if not url:
+            return {"outlet": name, "ok": False, "status": None, "detail": "no url"}
+        async with sem:
+            try:
+                async with httpx.AsyncClient(
+                    headers=reader.BROWSER_HEADERS, follow_redirects=True,
+                ) as client:
+                    r = await client.get(url, timeout=15.0)
+                entries = r.text.count("<item") + r.text.count("<entry")
+                return {
+                    "outlet": name,
+                    "category": o.get("category"),
+                    "ok": r.status_code == 200 and entries > 0,
+                    "status": r.status_code,
+                    "entries": entries,
+                    "detail": "" if r.status_code == 200 else f"HTTP {r.status_code}",
+                }
+            except Exception as exc:
+                return {
+                    "outlet": name, "category": o.get("category"),
+                    "ok": False, "status": None, "entries": 0,
+                    "detail": type(exc).__name__,
+                }
+
+    results = await asyncio.gather(*[probe(o) for o in outlets])
+    failing = [r for r in results if not r["ok"]]
+    return {
+        "total": len(results),
+        "ok": len(results) - len(failing),
+        "failing": sorted(failing, key=lambda r: r["outlet"]),
+    }
 
 
 @app.post("/api/admin/rebuild")
