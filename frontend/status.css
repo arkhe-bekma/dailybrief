@@ -1,0 +1,263 @@
+/* Status page — deliberately calmer than the feed. This is the page you
+   land on when something looks broken, so it reads as an instrument
+   panel, not a neon wall. Shares the app's palette and mono face. */
+:root {
+  --bg-0:   #05060a;
+  --bg-1:   #0b0d18;
+  --bg-2:   #131628;
+  --line:   #2a2f4d;
+  --line-2: #3a4170;
+  --text:   #ffffff;
+  --text-2: #d9def0;
+  --muted:  #8b95b8;
+  --dim:    #5a6285;
+  --ok:     #b6ff3c;
+  --warn:   #ffbe3c;
+  --bad:    #ff4d6d;
+  --accent: #00e1ff;
+  --mono:   "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans:   Inter, "Pretendard Variable", system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(0,225,255,0.05), transparent 60%),
+    var(--bg-0);
+  color: var(--text);
+  font: 14px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.st-head {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 34px 20px 10px;
+}
+.st-back {
+  display: inline-block;
+  margin-bottom: 18px;
+  color: var(--muted);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.st-back:hover { color: var(--accent); }
+.st-head h1 {
+  margin: 0 0 8px;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.st-sub {
+  margin: 0;
+  max-width: 620px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.st-wrap {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 20px 20px 60px;
+}
+
+/* ── Overall banner ─────────────────────────────────────────── */
+.st-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--bg-1);
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 22px;
+}
+.st-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex: none;
+}
+.st-banner[data-state="ok"]        { border-left-color: var(--ok); }
+.st-banner[data-state="ok"] .st-dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.st-banner[data-state="degraded"]  { border-left-color: var(--warn); }
+.st-banner[data-state="degraded"] .st-dot { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+.st-banner[data-state="failing"]   { border-left-color: var(--bad); }
+.st-banner[data-state="failing"] .st-dot { background: var(--bad); box-shadow: 0 0 10px var(--bad); }
+.st-banner[data-state="error"]     { border-left-color: var(--bad); }
+
+/* ── Summary tiles ──────────────────────────────────────────── */
+.st-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.st-card {
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-1);
+}
+.st-card .k {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 7px;
+}
+.st-card .v {
+  font-family: var(--mono);
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1;
+}
+.st-card .v.ok   { color: var(--ok); }
+.st-card .v.warn { color: var(--warn); }
+.st-card .v.bad  { color: var(--bad); }
+
+/* ── Panels ─────────────────────────────────────────────────── */
+.st-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-1);
+  padding: 20px 20px 18px;
+  margin-bottom: 20px;
+}
+.st-panel h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+.st-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.st-panel-head h2 { margin-bottom: 14px; }
+
+.st-range { display: flex; gap: 4px; margin-bottom: 14px; }
+.st-range button {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.8px;
+  cursor: pointer;
+}
+.st-range button:hover { border-color: var(--line-2); color: var(--text-2); }
+.st-range button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0,225,255,0.08);
+}
+
+/* ── Table ──────────────────────────────────────────────────── */
+.st-tablewrap { overflow-x: auto; }
+.st-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 560px;
+}
+.st-table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.st-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(42,47,77,0.5);
+  color: var(--text-2);
+  vertical-align: middle;
+}
+.st-table tr:last-child td { border-bottom: none; }
+.st-table .num { text-align: right; font-family: var(--mono); }
+.st-table .outlet { font-weight: 600; color: var(--text); white-space: nowrap; }
+.st-table .ago { color: var(--muted); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+
+/* Success rate as a value plus an inline bar — the bar is what makes a
+   degrading source obvious at a glance without reading numbers. */
+.st-rate { display: flex; align-items: center; gap: 9px; justify-content: flex-end; }
+.st-rate .pct { font-family: var(--mono); font-size: 12.5px; min-width: 40px; text-align: right; }
+.st-bar { width: 62px; height: 5px; border-radius: 3px; background: var(--bg-2); overflow: hidden; flex: none; }
+.st-bar i { display: block; height: 100%; border-radius: 3px; }
+.rate-ok   .pct { color: var(--ok); }   .rate-ok   .st-bar i { background: var(--ok); }
+.rate-warn .pct { color: var(--warn); } .rate-warn .st-bar i { background: var(--warn); }
+.rate-bad  .pct { color: var(--bad); }  .rate-bad  .st-bar i { background: var(--bad); }
+
+.st-empty { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+
+/* ── Reason chips ───────────────────────────────────────────── */
+.st-reasons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.st-reason {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.st-reason b { color: var(--text); font-weight: 700; }
+.st-reason span { color: var(--muted); letter-spacing: 0.5px; }
+.st-reason.none { color: var(--muted); }
+
+.st-legend {
+  margin: 0;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 7px 14px;
+  font-size: 12.5px;
+}
+.st-legend dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: var(--accent);
+}
+.st-legend dd { margin: 0; color: var(--muted); }
+
+.st-foot {
+  text-align: center;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.st-foot-sep { margin: 0 7px; }
+
+@media (max-width: 560px) {
+  .st-head h1 { font-size: 24px; }
+  .st-legend { grid-template-columns: 1fr; gap: 2px 0; }
+  .st-legend dd { margin-bottom: 8px; }
+}

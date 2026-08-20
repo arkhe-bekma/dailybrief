@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=87" />
+  <link rel="stylesheet" href="/static/style.css?v=88" />
 </head>
 <body>
   <header class="masthead">
@@ -129,6 +129,9 @@
       <span class="settings-account">
         <a class="settings-action" id="settings-account" href="/account" hidden>→ Profile</a>
         <a class="settings-action" id="settings-lab" href="/lab" hidden>→ Lab dashboard</a>
+        <!-- Public, no login needed: this is where you look when
+             articles stop opening. -->
+        <a class="settings-action" id="settings-status" href="/status">→ System status</a>
         <a class="settings-action" id="settings-login" href="/login">→ Sign in / create account</a>
         <a class="settings-action" id="settings-changepw" href="#" hidden>→ Change password</a>
         <a class="settings-action" id="settings-logout" href="#" hidden>→ Sign out</a>
@@ -262,6 +265,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=82"></script>
+  <script src="/static/app.js?v=83"></script>
 </body>
 </html>

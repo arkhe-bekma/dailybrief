@@ -3131,3 +3131,115 @@ footer {
 :root { --c-nature: #5fd4a0; }
 .chip.cat-nature.active { background: var(--c-nature); border-color: var(--c-nature); color: #002a18; box-shadow: 0 0 24px rgba(95,212,160,0.45); }
 .chip.cat-nature { border-color: rgba(95,212,160,0.35); color: var(--c-nature); }
+
+/* ── Reader: related stories ──────────────────────────────────────
+   Sits between the body and the footer. Kept typographically quieter
+   than the article itself so it reads as an offer, not a continuation
+   of the story. */
+.reader-related {
+  margin: 30px 0 4px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.reader-related-h {
+  margin: 0 0 12px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reader-related-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.reader-related-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 10px;
+  margin: 0 -10px;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 140ms ease;
+}
+.reader-related-item:hover { background: rgba(255,43,214,0.07); }
+.reader-related-item .rr-outlet {
+  flex: none;
+  min-width: 74px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--neon-mag);
+  opacity: 0.85;
+}
+.reader-related-item .rr-title {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.reader-related-item:hover .rr-title { color: var(--text); }
+
+/* ── Reader: prev / next ──────────────────────────────────────────
+   Two equal halves so the pair stays balanced even when only one side
+   exists (the empty side renders as an invisible spacer). */
+.reader-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 22px 0 4px;
+}
+.reader-nav-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-decoration: none;
+  background: rgba(255,255,255,0.015);
+  transition: border-color 140ms ease, background 140ms ease;
+  min-height: 62px;
+}
+.reader-nav-btn.empty {
+  border-color: transparent;
+  background: none;
+  pointer-events: none;
+}
+.reader-nav-btn:hover {
+  border-color: rgba(255,43,214,0.5);
+  background: rgba(255,43,214,0.06);
+}
+.reader-nav-btn.next { text-align: right; align-items: flex-end; }
+.reader-nav-btn .rn-dir {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--neon-mag);
+}
+.reader-nav-btn .rn-title {
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  /* Two lines max — a long headline must not stretch the button past
+     its neighbour and break the grid's symmetry. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.reader-nav-btn:hover .rn-title { color: var(--text); }
+
+@media (max-width: 560px) {
+  .reader-nav { grid-template-columns: 1fr; }
+  .reader-nav-btn.empty { display: none; }
+  .reader-related-item { flex-direction: column; gap: 3px; }
+  .reader-related-item .rr-outlet { min-width: 0; }
+}

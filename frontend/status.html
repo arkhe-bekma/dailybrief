@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <title>dailybrief · status</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/status.css?v=1" />
+</head>
+<body>
+  <header class="st-head">
+    <a class="st-back" href="/">‹ dailybrief</a>
+    <h1>System status</h1>
+    <p class="st-sub">
+      Live view of whether articles are opening. Articles that can't be
+      fetched still show the publisher's summary plus a link to the
+      original — they never dead-end.
+    </p>
+  </header>
+
+  <main class="st-wrap">
+    <section class="st-banner" id="banner" data-state="loading">
+      <span class="st-dot"></span>
+      <span class="st-banner-text" id="banner-text">Checking…</span>
+    </section>
+
+    <section class="st-cards" id="summary"></section>
+
+    <section class="st-panel">
+      <div class="st-panel-head">
+        <h2>Article extraction by source</h2>
+        <div class="st-range" id="range">
+          <button type="button" data-h="6">6H</button>
+          <button type="button" data-h="24" class="on">24H</button>
+          <button type="button" data-h="168">7D</button>
+        </div>
+      </div>
+      <div class="st-tablewrap">
+        <table class="st-table" id="outlets">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th class="num">Opened</th>
+              <th class="num">Summary only</th>
+              <th class="num">Success</th>
+              <th>Last full article</th>
+            </tr>
+          </thead>
+          <tbody id="outlet-rows"></tbody>
+        </table>
+      </div>
+      <p class="st-empty" id="outlet-empty" hidden>
+        No reads recorded in this window yet. Open a few articles and
+        this fills in.
+      </p>
+    </section>
+
+    <section class="st-panel">
+      <h2>Why articles fall back to a summary</h2>
+      <div class="st-reasons" id="reasons"></div>
+      <dl class="st-legend">
+        <dt>paywall</dt><dd>Subscriber-only. We show the publisher's own summary and link out.</dd>
+        <dt>blocked</dt><dd>The site refuses automated readers.</dd>
+        <dt>notfound</dt><dd>The original was moved or deleted.</dd>
+        <dt>timeout</dt><dd>The publisher's site was too slow to answer.</dd>
+        <dt>empty</dt><dd>Page loaded but held no article text we could find.</dd>
+      </dl>
+    </section>
+
+    <footer class="st-foot">
+      <span id="updated">—</span>
+      <span class="st-foot-sep">·</span>
+      <span>refreshes every 30s</span>
+    </footer>
+  </main>
+
+  <script src="/static/status.js?v=1"></script>
+</body>
+</html>

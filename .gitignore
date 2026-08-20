@@ -10,3 +10,12 @@ backend/data/
 *.db
 *.db-shm
 *.db-wal
+
+# Editor / agent scratch
+.claude/
+# Pre-git manual snapshots that used to live on the server.
+checkpoints/
+# Stray on-server edit backups — history belongs in git now.
+*.bak
+*.bak.*
+._*

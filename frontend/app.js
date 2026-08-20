@@ -425,6 +425,9 @@ function filteredNews() {
 // Lazy DB-backed pagination: page 1 comes from the in-memory feed
 // (fast, freshly curated). Pages 2+ are pulled from /api/page so the
 // total page count is unbounded — it grows with the archive.
+// Items currently painted, in render order. Backs the reader's
+// prev/next arrows and its related-stories list.
+let RENDERED = [];
 let PAGE_OVERRIDE = null;   // items[] for the current page when >1
 let PAGE_OVERRIDE_N = null; // which page that override belongs to
 let DB_TOTAL_PAGES = 1;
@@ -477,6 +480,10 @@ function paint(scrollTop = true) {
     const startIdx = (PAGE - 1) * PAGE_SIZE;
     slice = all.slice(startIdx, startIdx + PAGE_SIZE);
   }
+
+  // Remember the rendered order so the reader can offer prev/next and
+  // pull related stories without re-deriving the page layout.
+  RENDERED = slice.slice();
 
   const paper = $("#paper");
   const paperNoImg = $("#paper-noimg");
@@ -704,6 +711,58 @@ async function silentRefresh() {
   }
 }
 
+// ── Reader support: reading time, siblings, related ────────────
+
+// Rough read time. Korean is counted by character (Hangul packs far
+// more meaning per whitespace-delimited token than English does), so
+// word-count alone badly under-estimates Korean articles.
+function readingMinutes(paragraphs, lang) {
+  const text = (paragraphs || []).join(" ");
+  if (!text) return 0;
+  if ((lang || "").toLowerCase() === "ko") {
+    const chars = text.replace(/\s/g, "").length;
+    return Math.max(1, Math.round(chars / 450));
+  }
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.round(words / 230));
+}
+
+// Where this article sits in the list the user is actually looking at,
+// so prev/next follow the visible order rather than some server order.
+function readerSiblings(url) {
+  const list = (RENDERED && RENDERED.length ? RENDERED : STATE.mixed) || [];
+  const i = list.findIndex((m) => m.url === url);
+  if (i < 0) return { prev: null, next: null, index: -1, total: list.length };
+  return {
+    prev: i > 0 ? list[i - 1] : null,
+    next: i < list.length - 1 ? list[i + 1] : null,
+    index: i,
+    total: list.length,
+  };
+}
+
+// Up to 3 other stories in the same category. Falls back to same outlet
+// when the category is thin, and returns nothing rather than padding
+// with unrelated items — a bad "related" list is worse than none.
+function relatedItems(item, limit = 3) {
+  const pool = (STATE.mixed || []).concat(RENDERED || []);
+  const seen = new Set([item.url]);
+  const unique = pool.filter((m) => {
+    if (!m || !m.url || seen.has(m.url)) return false;
+    seen.add(m.url);
+    return true;
+  });
+  const sameCat = item.category
+    ? unique.filter((m) => m.category === item.category)
+    : [];
+  if (sameCat.length >= limit) return sameCat.slice(0, limit);
+  const sameOutlet = unique.filter(
+    (m) => m.outlet && m.outlet === item.outlet && m.category !== item.category,
+  );
+  return sameCat.concat(sameOutlet).slice(0, limit);
+}
+
+
 // ── Reader modal ───────────────────────────────────────────────
 // Holds the article currently open + a cached translation if the
 // user has already toggled to the other language during this open.
@@ -863,6 +922,9 @@ function buildTranslateButton() {
 
 function renderReader(content, data, item) {
   const lang = data.lang || item.lang || "en";
+  // The feed URL, not final_url — this is the key everything else in
+  // the app (delete, siblings, saved list) is stored under.
+  const articleUrlForNav = data.url || item.url || READER_STATE.url;
   content.innerHTML = "";   // the static .reader-close button lives OUTSIDE
                             // .reader-content, so this clears only the body.
 
@@ -911,7 +973,15 @@ function renderReader(content, data, item) {
     item.category ? el("span", { class: "tag" }, item.category.toUpperCase()) : null,
     langPip,
     data.byline ? el("span", {}, data.byline) : null,
-    data.word_count ? el("span", { class: "reader-stats" }, `${data.word_count} WORDS`) : null,
+    // Reading time reads better than a raw word count, and it's the
+    // number people actually decide on. Falls back to the word count
+    // when the body is only a stored summary.
+    (() => {
+      const mins = readingMinutes(data.paragraphs, lang);
+      if (!mins) return null;
+      return el("span", { class: "reader-stats" },
+        lang === "ko" ? `${mins}분 읽기` : `${mins} MIN READ`);
+    })(),
     dateLabel ? el("span", { class: "reader-stats" }, dateLabel) : null,
   ]);
   // Translate pill rendered inline at the end of the meta strip.
@@ -945,7 +1015,7 @@ function renderReader(content, data, item) {
   // its URL is added to `blocked_urls` so RSS re-ingest can't bring
   // it back. Close the reader first, then open the picker so the two
   // modals don't fight over body-scroll lock.
-  const articleUrl = data.url || item.url || READER_STATE.url;
+  const articleUrl = articleUrlForNav;
   const articleTitle = data.title || item.title || "";
   const delBtn = el("button", {
     class: "reader-delete",
@@ -958,6 +1028,55 @@ function renderReader(content, data, item) {
     closeReader();
     setTimeout(() => openDeleteModal(articleUrl, articleTitle), 100);
   });
+
+  // ── Related stories ────────────────────────────────────────
+  // Same category first, same outlet as backup. Rendered only when we
+  // actually found something; an empty "Related" heading is noise.
+  const related = relatedItems(item || {});
+  if (related.length) {
+    content.appendChild(el("section", { class: "reader-related" }, [
+      el("h2", { class: "reader-related-h" },
+        lang === "ko" ? "관련 기사" : "Related"),
+      el("ul", { class: "reader-related-list" }, related.map((m) =>
+        el("li", {}, [
+          el("a", {
+            href: m.url,
+            class: "reader-related-item",
+            "data-reader-jump": m.url,
+          }, [
+            el("span", { class: "rr-outlet" }, m.outlet || ""),
+            el("span", { class: "rr-title", lang: m.lang || "en" }, m.title || m.url),
+          ]),
+        ]))),
+    ]));
+  }
+
+  // ── Prev / next ────────────────────────────────────────────
+  // Follows the order of the page the user is looking at, so it behaves
+  // like paging through the feed rather than jumping somewhere random.
+  const sibs = readerSiblings(articleUrlForNav);
+  if (sibs.prev || sibs.next) {
+    content.appendChild(el("nav", { class: "reader-nav" }, [
+      sibs.prev
+        ? el("a", {
+            href: sibs.prev.url, class: "reader-nav-btn prev",
+            "data-reader-jump": sibs.prev.url,
+          }, [
+            el("span", { class: "rn-dir" }, lang === "ko" ? "‹ 이전" : "‹ PREV"),
+            el("span", { class: "rn-title" }, sibs.prev.title || ""),
+          ])
+        : el("span", { class: "reader-nav-btn empty" }),
+      sibs.next
+        ? el("a", {
+            href: sibs.next.url, class: "reader-nav-btn next",
+            "data-reader-jump": sibs.next.url,
+          }, [
+            el("span", { class: "rn-dir" }, lang === "ko" ? "다음 ›" : "NEXT ›"),
+            el("span", { class: "rn-title" }, sibs.next.title || ""),
+          ])
+        : el("span", { class: "reader-nav-btn empty" }),
+    ]));
+  }
 
   content.appendChild(el("div", { class: "reader-footer" }, [
     el("span", { class: "badge" }, "✦ dailybrief reader"),
@@ -1809,6 +1928,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Close-on-button + backdrop + Escape for both modals. The static
   // ×/backdrop in index.html are each wired ONCE here.
+  // Related / prev / next links swap the article in place instead of
+  // navigating away — the reader stays open and scroll resets to the
+  // top, which is what "next article" should feel like.
+  document.querySelector("#reader .reader-content")
+    ?.addEventListener("click", (e) => {
+      const jump = e.target.closest("[data-reader-jump]");
+      if (!jump) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      const url = jump.getAttribute("data-reader-jump");
+      if (!url) return;
+      const next =
+        (RENDERED || []).find((m) => m.url === url) ||
+        (STATE.mixed || []).find((m) => m.url === url) || {};
+      document.querySelector("#reader .reader-card")?.scrollTo({ top: 0 });
+      openReader(url, next);
+    });
+
   document.querySelector("#reader .reader-close")?.addEventListener("click", closeReader);
   document.querySelector("#reader .reader-backdrop")?.addEventListener("click", closeReader);
   // Delete modal — close, reason picker, and ESC.

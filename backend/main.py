@@ -2425,6 +2425,17 @@ async def lab_page(request: Request):
     return FileResponse(FRONTEND_DIR / "lab.html", headers=_NO_STORE_HEADERS)
 
 
+@app.get("/status")
+def status_page():
+    """Public status page — per-source article-extraction health.
+
+    Deliberately unauthenticated: it holds no user data and it is the
+    page to reach for when the app looks broken, which is exactly when
+    a login wall is least welcome.
+    """
+    return FileResponse(FRONTEND_DIR / "status.html", headers=_NO_STORE_HEADERS)
+
+
 @app.get("/login")
 async def login_page():
     """Tiny login page. Standalone HTML so we don't have to inline a
