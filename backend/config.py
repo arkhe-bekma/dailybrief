@@ -225,7 +225,9 @@ OUTLETS: list[dict] = [
     {"name": "엑스포츠뉴스",     "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:xportsnews.com&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "뉴스1 연예",       "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news1.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "뉴시스 연예",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:newsis.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "한경연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
+    # Pinned to the /article path — a bare site: query returns hankyung's
+    # paginated section indexes ("연예 뉴스 183 페이지") alongside stories.
+    {"name": "한경연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com/article+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "MBC 연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:imnews.imbc.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "SBS 연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.sbs.co.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "K-Pop 종합",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=K-Pop+OR+%EC%BC%80%EC%9D%B4%ED%8C%9D&hl=ko&gl=KR&ceid=KR:ko"},

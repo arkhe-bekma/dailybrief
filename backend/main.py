@@ -92,6 +92,12 @@ async def _start():
                       flush=True)
     except Exception as exc:
         print(f"[startup] purge_outlets failed: {exc!r}", flush=True)
+    try:
+        n = await db.purge_listing_pages()
+        if n:
+            print(f"[startup] purged {n} paginated section-index rows", flush=True)
+    except Exception as exc:
+        print(f"[startup] purge_listing_pages failed: {exc!r}", flush=True)
     # Idempotent repair: drop image values that aren't absolute URLs, so
     # cards stop requesting publisher photos from our own domain.
     try:

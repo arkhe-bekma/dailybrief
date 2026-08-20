@@ -887,6 +887,27 @@ def _purge_outlets_sync(names: list[str]) -> dict:
     return {"articles": a, "readers": r}
 
 
+def _purge_listing_pages_sync() -> int:
+    """Delete stored articles whose URL is a paginated section index.
+
+    These extract cleanly — a listing page really does contain twenty
+    paragraphs of real prose, one lede from each linked column — so no
+    body check will ever catch them. The URL is the only tell, and rows
+    ingested before the URL filter existed would otherwise sit in the
+    feed forever. Idempotent.
+    """
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "DELETE FROM articles "
+            "WHERE url LIKE '%?page=%' OR url LIKE '%&page=%'"
+        )
+        return cur.rowcount or 0
+
+
+async def purge_listing_pages() -> int:
+    return await asyncio.to_thread(_purge_listing_pages_sync)
+
+
 async def purge_outlets(names: list[str]) -> dict:
     return await asyncio.to_thread(_purge_outlets_sync, names)
 
