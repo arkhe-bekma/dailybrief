@@ -239,6 +239,16 @@ OUTLETS: list[dict] = [
     {"name": "allkpop",        "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:allkpop.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Hellokpop",      "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=site:hellokpop.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "K-Pop Herald",   "category": "kent", "lang": "en", "url": "https://news.google.com/rss/search?q=K-Pop+Herald&hl=en-US&gl=US&ceid=US:en"},
+
+    # ── Nature / wildlife — 자연 & 동물 ────────────────────────────────
+    {"name": "Nat Geo Animals", "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=site:nationalgeographic.com+animals+OR+wildlife&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "BBC Earth",       "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=%22BBC+Earth%22+OR+site:bbc.com/earth&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Mongabay",        "category": "nature", "lang": "en", "url": "https://news.mongabay.com/feed/"},
+    {"name": "Smithsonian",     "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=site:smithsonianmag.com+animals+OR+wildlife&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Guardian Animals","category": "nature", "lang": "en", "url": "https://www.theguardian.com/environment/animals/rss"},
+    {"name": "Nature World",    "category": "nature", "lang": "en", "url": "https://news.google.com/rss/search?q=site:natureworldnews.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "한겨레 동물",       "category": "nature", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hani.co.kr+%EB%8F%99%EB%AC%BC&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "한국일보 자연",     "category": "nature", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankookilbo.com+%EC%9E%90%EC%97%B0+OR+%EB%8F%99%EB%AC%BC&hl=ko&gl=KR&ceid=KR:ko"},
 ]
 
 

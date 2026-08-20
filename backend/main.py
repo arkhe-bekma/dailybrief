@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import auth, cache, config, db, mixer, tickers
 from backend.agent import (
-    curator, dedup, illustrator, reader, registry, sorter, summary,
+    curator, dedup, illustrator, ranker, reader, registry, sorter, summary,
     translator, validator,
 )
 from backend.sources import politicians, prices, rss, whales, youtube
@@ -110,24 +110,10 @@ async def _start():
         asyncio.create_task(_brief_refresh_worker())  # hourly cache refill
     except Exception as exc:
         print(f"[startup] brief refresh worker failed to schedule: {exc!r}", flush=True)
-    # Re-enabled (gently) so the feed self-cleans without an operator:
-    #   • validation worker  – small batches, flags no-content articles
-    #   • supervisor         – 10-min self-heal: purge junk, reseed a
-    #                          stale feed, top up a thin DB, self-probe
-    # These are the light cousins of the old heavy workers; the batch
-    # sizes / cadences above keep them off the box's back.
     try:
-        asyncio.create_task(_validation_worker())   # continuous quality gate
+        asyncio.create_task(_ranker_worker())   # 20-min importance + dedup pass
     except Exception as exc:
-        print(f"[startup] validation worker failed to schedule: {exc!r}", flush=True)
-    try:
-        asyncio.create_task(_supervisor_worker())   # self-healing loop
-    except Exception as exc:
-        print(f"[startup] supervisor worker failed to schedule: {exc!r}", flush=True)
-    try:
-        asyncio.create_task(_prune_worker())   # daily: drop >60d rows + VACUUM
-    except Exception as exc:
-        print(f"[startup] prune worker failed to schedule: {exc!r}", flush=True)
+        print(f"[startup] ranker worker failed to schedule: {exc!r}", flush=True)
     # Prewarm the cache immediately so the very first visitor doesn't
     # see an empty payload.
     try:
@@ -136,6 +122,7 @@ async def _start():
             try:
                 fast = _brief_db_fallback()
                 if fast is not None:
+                    fast = _polish_mixed(fast)
                     cache.set("brief:response", fast, BRIEF_CACHE_TTL)
                     cache.set("brief:response_stale", fast, BRIEF_STALE_GRACE)
                     print("[startup] brief cache prewarmed (fast path)", flush=True)
@@ -144,12 +131,10 @@ async def _start():
         asyncio.create_task(_prewarm())
     except Exception as exc:
         print(f"[startup] prewarm failed to schedule: {exc!r}", flush=True)
-    # STILL admin-triggered only (heavier / redundant now):
-    #   _resummary_worker    – DB read+rewrite loop; the validator already
-    #                          backfills card deks on pass, so this is
-    #                          mostly redundant. Run from the lab if needed.
-    # (_validation_worker, _supervisor_worker and _prune_worker are all
-    #  scheduled above — the feed now self-cleans end to end.)
+    # DISABLED workers (admin-triggered via lab → ACTIONS):
+    #   _validation_worker   – per-article HTTP fetch every 5 s, network-heavy
+    #   _resummary_worker    – DB read+rewrite loop
+    #   _prune_worker        – once-a-day VACUUM, OK to skip on small box
 
 
 # ── Bad-title detection ─────────────────────────────────────────────
@@ -337,48 +322,42 @@ async def _resummary_worker():
             await asyncio.sleep(1)
 
 
-async def _light_ingest_once() -> int:
-    """One lightweight RSS-only ingest: fetch every feed → drop blocked
-    URLs → upsert into `articles`. No curator, no LLM, no image scrape.
-    Returns the number of rows upserted. Shared by the periodic worker,
-    the self-healing supervisor, and the manual run-cycle endpoint so
-    there's a single definition of "top up the article well cheaply"."""
-    import time as _t
-    articles = await asyncio.wait_for(rss.fetch_all(), timeout=120.0)
-    blocked = await db.blocked_url_set()
-    if blocked:
-        articles = [a for a in articles if a.url not in blocked]
-    if not articles:
-        return 0
-    now_ts = int(_t.time())
-    rows = [{
-        "url": a.url, "title": a.title, "image": a.image,
-        "outlet": a.outlet, "category": a.category, "lang": a.lang,
-        "summary": a.summary, "published_at": a.published,
-        "fetched_at": now_ts,
-    } for a in articles if a.url]
-    if rows:
-        await db.upsert_articles(rows)
-        # Drop the brief response cache so the next /api/brief request
-        # runs the fast path and picks up the new rows.
-        cache._store.pop("brief:response", None)
-    return len(rows)
-
-
 async def _rss_ingest_worker():
     """LIGHTWEIGHT periodic RSS ingest. Runs every 30 min and ONLY
-    fetches feeds → drops blocked URLs → upserts. This guarantees the DB
-    stays populated with fresh articles even when the heavy curator
-    chain fails. The fast-path query (_brief_db_fallback) then has new
-    rows to serve on the next /api/brief tick.
+    does: fetch every RSS feed → drop blocked URLs → upsert into the
+    articles table. No curator, no LLM, no image scrape — those are
+    what made _brief_build_full time out at 60 s.
+
+    This guarantees the DB stays populated with fresh articles even
+    when the heavy curator chain fails. The fast-path query
+    (_brief_db_fallback) then has new rows to serve on the next
+    /api/brief tick.
     """
     INTERVAL_SECONDS = 30 * 60   # 30 min
     await asyncio.sleep(60)
     while True:
         try:
-            n = await _light_ingest_once()
-            if n:
-                print(f"[rss-ingest] upserted {n} rows", flush=True)
+            articles = await asyncio.wait_for(rss.fetch_all(), timeout=120.0)
+            blocked = await db.blocked_url_set()
+            if blocked:
+                articles = [a for a in articles if a.url not in blocked]
+            if articles:
+                now_ts = int(__import__("time").time())
+                rows = [{
+                    "url": a.url, "title": a.title, "image": a.image,
+                    "outlet": a.outlet, "category": a.category, "lang": a.lang,
+                    "summary": a.summary, "published_at": a.published,
+                    "fetched_at": now_ts,
+                } for a in articles if a.url]
+                await db.upsert_articles(rows)
+                # Drop the brief response cache so the next /api/brief
+                # request runs the fast path and picks up the new rows.
+                cache._store.pop("brief:response", None)
+                print(
+                    f"[rss-ingest] pulled {len(articles)} articles, "
+                    f"upserted {len(rows)} rows",
+                    flush=True,
+                )
         except asyncio.TimeoutError:
             print("[rss-ingest] timed out at 120 s", flush=True)
         except Exception as exc:
@@ -431,6 +410,35 @@ async def _archive_worker():
         await asyncio.sleep(INTERVAL_SECONDS)
 
 
+async def _ranker_worker():
+    """The ranking department. Every 20 min it re-scores the recent
+    active pool: tags outlet authority, clusters same-story-across-outlets,
+    collapses each cluster to one, and writes an importance score driven
+    by authority + corroboration + slow recency. The feed serving path
+    already orders by (premium, score) and hides dup_of rows, so this is
+    what makes the wall read like a real front page. Runs in a thread
+    (rank_active is sync + CPU-bound, ~1.5s over 6k rows) so it never
+    blocks the event loop. First pass runs soon after boot."""
+    INTERVAL_SECONDS = 20 * 60
+    await asyncio.sleep(50)   # let startup settle
+    print("[ranker] department armed", flush=True)
+    while True:
+        try:
+            stats = await asyncio.to_thread(ranker.rank_active)
+            # New scores / collapses → refresh the public feed cache.
+            cache._store.pop("brief:response", None)
+            print(
+                f"[ranker] examined={stats['examined']} "
+                f"clusters={stats['clusters_multi']} "
+                f"collapsed={stats['collapsed_dupes']} "
+                f"took={stats['took_s']}s",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"[ranker] pass failed: {exc!r}", flush=True)
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
 async def _prune_worker():
     """Daily maintenance: drops articles older than 60 days, caps the
     reader_results cache at 6000 rows, VACUUMs the file to actually
@@ -461,8 +469,8 @@ async def _prune_worker():
 #
 # Runs as a background task — never blocks /api/brief. Lab page polls
 # /api/ingest/status for the live progress dashboard.
-_INGEST_BATCH = 3           # how many articles per cycle (was 6 — Lightsail 512MB)
-_INGEST_PAUSE_BUSY = 5.0    # seconds between batches while there's work (was 2)
+_INGEST_BATCH = 8
+_INGEST_PAUSE_BUSY = 1.5
 _INGEST_PAUSE_IDLE = 60.0   # seconds between polls when queue is empty (was 30)
 
 
@@ -480,8 +488,16 @@ async def _validate_one(article: dict) -> tuple[int, str]:
         try:
             reading = await reader.extract(url)
         except Exception as exc:
+            try:
+                await db.delete_article_by_user(url, reason="extract-error", note=type(exc).__name__)
+            except Exception:
+                pass
             return -1, f"extract-error:{type(exc).__name__}"
         if not reading or not (reading.text or reading.excerpt):
+            try:
+                await db.delete_article_by_user(url, reason="extract-failed")
+            except Exception:
+                pass
             return -1, "extract-failed"
         body_payload = {
             "url": url,
@@ -555,208 +571,17 @@ async def _validation_worker():
             else:
                 status, reason = res
             try:
-                await db.set_article_validated(url, status, reason)
+                if status == -1 and reason and reason.startswith("extract"):
+                    # Row was already deleted by _validate_one; just count it.
+                    pass
+                else:
+                    await db.set_article_validated(url, status, reason)
                 await db.bump_counter(
                     "ingest_pass" if status == 1 else "ingest_fail",
                 )
             except Exception as exc:
                 print(f"[ingest] mark failed for {url[:60]}: {exc!r}", flush=True)
         await asyncio.sleep(_INGEST_PAUSE_BUSY)
-
-
-# ── Self-healing supervisor ──────────────────────────────────────────
-# A single, gentle loop that plays the role the user asked for: "make a
-# self learning loop where it will go thru troubleshooting itself and
-# fix itself." It periodically LOOKS AT THE LIVE SITE the way a browser
-# ("chrome view") would — over the loopback port Caddy proxies to —
-# checks that a real visitor is being served a non-empty feed, and then
-# takes the minimal set of corrective actions to fix whatever it found:
-# purge no-content articles, feed the validation queue, reseed/rebuild a
-# stale feed, and top up a thin DB. One loop, small bounded batches, so
-# the 512MB box is never thrashed the way the old 5-worker setup did.
-SUPERVISOR_INTERVAL = 600          # 10 min between self-heal passes
-SUPERVISOR_MIN_ARTICLES = 30       # below this, pull a fresh RSS ingest
-SUPERVISOR_VALIDATE_BATCH = 6      # articles validated per pass (gentle)
-
-
-async def _self_probe() -> dict:
-    """Fetch our own public surface — the index shell + the feed payload
-    — exactly as a browser would, and report what a visitor is actually
-    being served right now. This is the 'periodically check the chrome
-    view to check server status' requirement, done in-process (no
-    headless browser) so it fits the small box and needs no extra infra."""
-    import os as _os, time as _t
-    port = _os.environ.get("PORT", "8000")
-    base = f"http://127.0.0.1:{port}"
-    out: dict = {
-        "checked_at": int(_t.time()),
-        "ok": False, "index_ok": False, "brief_ok": False,
-        "brief_items": 0, "brief_loading": False, "errors": [],
-    }
-    try:
-        import httpx as _httpx
-        async with _httpx.AsyncClient(timeout=8.0) as client:
-            # The actual HTML shell the browser renders.
-            try:
-                r = await client.get(base + "/")
-                out["index_ok"] = (
-                    r.status_code == 200 and "<body" in r.text.lower()
-                )
-                if not out["index_ok"]:
-                    out["errors"].append(f"index HTTP {r.status_code}")
-            except Exception as exc:
-                out["errors"].append(f"index:{type(exc).__name__}")
-            # The feed the article wall is built from.
-            try:
-                r = await client.get(base + "/api/brief")
-                if r.status_code == 200:
-                    body = r.json()
-                    out["brief_ok"] = True
-                    out["brief_items"] = len(body.get("mixed") or [])
-                    out["brief_loading"] = bool(body.get("_loading"))
-                else:
-                    out["errors"].append(f"brief HTTP {r.status_code}")
-            except Exception as exc:
-                out["errors"].append(f"brief:{type(exc).__name__}")
-    except Exception as exc:
-        out["errors"].append(f"probe:{type(exc).__name__}")
-    out["ok"] = out["index_ok"] and out["brief_ok"] and not out["errors"]
-    return out
-
-
-async def _supervisor_tick() -> dict:
-    """One self-healing pass. Diagnoses via _self_probe + DB stats, then
-    takes only the corrective actions the diagnosis calls for. Every step
-    is guarded + bounded so a single tick can never wedge the box. The
-    resulting status dict is persisted to `settings.supervisor_status` so
-    /lab and the manual button can show what it saw and did."""
-    import time as _t
-    actions: list[str] = []
-    problems: list[str] = []
-
-    probe = await _self_probe()
-    if not probe.get("ok"):
-        problems.extend(probe.get("errors") or ["probe not ok"])
-
-    try:
-        vstats = await db.validation_stats()   # {pending, validated, failed}
-    except Exception:
-        vstats = {"pending": 0, "validated": 0, "failed": 0}
-    try:
-        active = await db.count_articles()     # active, non-failed rows
-    except Exception:
-        active = 0
-
-    # 1. Auto-delete — permanently drop everything the validator flagged
-    #    as having no distinct content (validated = -1). This is the
-    #    "자동으로 지우는 로직" the user wanted actually running.
-    if vstats.get("failed", 0) > 0:
-        try:
-            purged = await db.purge_failed_articles()
-            if purged:
-                actions.append(f"purged {purged} no-content articles")
-                cache._store.pop("brief:response", None)
-        except Exception as exc:
-            problems.append(f"purge:{type(exc).__name__}")
-
-    # 2. Keep the validation queue moving so junk keeps getting flagged
-    #    (and good articles get their body persisted). Small batch only.
-    if vstats.get("pending", 0) > 0:
-        try:
-            batch = await db.list_unvalidated(limit=SUPERVISOR_VALIDATE_BATCH)
-            if batch:
-                results = await asyncio.gather(
-                    *[_validate_one(a) for a in batch], return_exceptions=True,
-                )
-                passed = failed = 0
-                for art, res in zip(batch, results):
-                    u = art.get("url")
-                    if not u:
-                        continue
-                    if isinstance(res, Exception):
-                        status, reason = -1, f"crash:{type(res).__name__}"
-                    else:
-                        status, reason = res
-                    try:
-                        await db.set_article_validated(u, status, reason)
-                        if status == 1:
-                            passed += 1
-                        else:
-                            failed += 1
-                    except Exception:
-                        pass
-                actions.append(f"validated {len(batch)} (+{passed}/-{failed})")
-        except Exception as exc:
-            problems.append(f"validate:{type(exc).__name__}")
-
-    # 3. Feed empty/loading but the DB has rows → the cache is cold or
-    #    stale. Reseed from the DB fast-path immediately, then kick one
-    #    controlled full rebuild for the next request.
-    feed_empty = probe.get("brief_ok") and (
-        probe.get("brief_items", 0) == 0 or probe.get("brief_loading")
-    )
-    if feed_empty and active > 0:
-        problems.append("feed empty despite DB rows")
-        try:
-            cache._store.pop("brief:response", None)
-            fast = _brief_db_fallback()
-            if fast is not None:
-                cache.set("brief:response", fast, BRIEF_CACHE_TTL)
-                cache.set("brief:response_stale", fast, BRIEF_STALE_GRACE)
-                actions.append("reseeded brief cache from DB")
-            asyncio.create_task(_kickoff_brief_rebuild())
-            actions.append("kicked off brief rebuild")
-        except Exception as exc:
-            problems.append(f"reseed:{type(exc).__name__}")
-
-    # 4. DB running dry → pull a fresh lightweight RSS ingest so the well
-    #    never empties. Bounded by _light_ingest_once's 120s timeout.
-    if active < SUPERVISOR_MIN_ARTICLES:
-        problems.append(f"only {active} active articles")
-        try:
-            got = await _light_ingest_once()
-            if got:
-                actions.append(f"ingested {got} fresh articles")
-        except Exception as exc:
-            problems.append(f"ingest:{type(exc).__name__}")
-
-    status = {
-        "ran_at": int(_t.time()),
-        "probe": probe,
-        "validation": vstats,
-        "active_articles": active,
-        "problems": problems,
-        "actions": actions,
-        "healthy": bool(probe.get("ok")) and not problems,
-    }
-    try:
-        await db.set_setting("supervisor_status", status)
-        await db.bump_counter("supervisor_ticks")
-        if actions:
-            await db.bump_counter("supervisor_actions", by=len(actions))
-    except Exception:
-        pass
-    if actions or problems:
-        print(
-            f"[supervisor] problems={problems or '-'} actions={actions or '-'}",
-            flush=True,
-        )
-    return status
-
-
-async def _supervisor_worker():
-    """The self-healing loop. Runs a tick every SUPERVISOR_INTERVAL,
-    forever, never raising."""
-    await asyncio.sleep(45)   # let startup settle before first probe
-    print("[supervisor] self-healing loop armed", flush=True)
-    while True:
-        try:
-            await asyncio.wait_for(_supervisor_tick(), timeout=180.0)
-        except asyncio.TimeoutError:
-            print("[supervisor] tick hit 180s timeout, skipped", flush=True)
-        except Exception as exc:
-            print(f"[supervisor] tick failed: {exc!r}", flush=True)
-        await asyncio.sleep(SUPERVISOR_INTERVAL)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -979,6 +804,18 @@ async def admin_delete_key(provider: str, request: Request):
     if provider == "gemini":
         _os.environ.pop("GOOGLE_API_KEY", None)
     return {"ok": True}
+
+
+@app.post("/api/admin/rank-now")
+async def admin_rank_now(request: Request):
+    """Run the ranking department once, right now: re-score importance,
+    cluster same-story-across-outlets, collapse duplicates. Same pass the
+    background worker runs every 20 min — this is the manual button.
+    Admin-only. Returns the pass stats."""
+    await _require_admin(request)
+    stats = await asyncio.to_thread(ranker.rank_active)
+    cache._store.pop("brief:response", None)
+    return {"ok": True, **stats}
 
 
 @app.get("/api/usage")
@@ -1426,86 +1263,6 @@ async def admin_purge_failed(request: Request):
     return {"purged": purged}
 
 
-@app.get("/api/admin/self-heal/status")
-async def self_heal_status(request: Request):
-    """Last self-healing pass: what the supervisor saw on the live site
-    and what it did about it. Powers the lab health card. Admin-only."""
-    await _require_admin(request)
-    status = await db.get_setting("supervisor_status", None)
-    return {
-        "status": status,
-        "interval_seconds": SUPERVISOR_INTERVAL,
-    }
-
-
-@app.post("/api/admin/self-heal")
-async def self_heal_now(request: Request):
-    """Run one self-healing pass on demand (probe → diagnose → fix) and
-    return the result. Same code the background loop runs every 10 min —
-    this is just the manual button for it. Admin-only."""
-    await _require_admin(request)
-    return await _supervisor_tick()
-
-
-@app.post("/api/admin/run-cycle")
-async def admin_run_cycle(request: Request, validate: int = 40):
-    """One full maintenance cycle, inline: fresh RSS ingest → validate a
-    backlog chunk → purge no-content articles → rebuild the feed cache.
-    The clickable 'do everything now' button. Bounded so it returns
-    within request limits; `validate` caps how many articles get checked
-    this pass (the supervisor keeps chewing the rest). Admin-only."""
-    await _require_admin(request)
-    report: dict = {}
-
-    # 1. Top up the article well.
-    try:
-        report["ingested"] = await _light_ingest_once()
-    except Exception as exc:
-        report["ingest_error"] = f"{type(exc).__name__}"
-
-    # 2. Validate a bounded backlog chunk.
-    validate = max(0, min(int(validate or 0), 120))
-    passed = failed = 0
-    if validate:
-        try:
-            batch = await db.list_unvalidated(limit=validate)
-            if batch:
-                results = await asyncio.gather(
-                    *[_validate_one(a) for a in batch], return_exceptions=True,
-                )
-                for art, res in zip(batch, results):
-                    u = art.get("url")
-                    if not u:
-                        continue
-                    if isinstance(res, Exception):
-                        status, reason = -1, f"crash:{type(res).__name__}"
-                    else:
-                        status, reason = res
-                    try:
-                        await db.set_article_validated(u, status, reason)
-                        if status == 1:
-                            passed += 1
-                        else:
-                            failed += 1
-                    except Exception:
-                        pass
-            report["validated"] = {"examined": len(batch), "passed": passed, "failed": failed}
-        except Exception as exc:
-            report["validate_error"] = f"{type(exc).__name__}"
-
-    # 3. Purge everything flagged as no-content.
-    try:
-        report["purged"] = await db.purge_failed_articles()
-    except Exception as exc:
-        report["purge_error"] = f"{type(exc).__name__}"
-
-    # 4. Rebuild the feed so the changes show immediately.
-    cache.clear()
-    asyncio.create_task(_kickoff_brief_rebuild())
-    report["rebuild"] = "kicked off"
-    return {"ok": True, **report}
-
-
 _STRICT_RUNNING = False
 
 
@@ -1598,6 +1355,61 @@ BRIEF_STALE_GRACE = 6 * 3600   # 6h: serve stale for 6 hours if rebuild fails
 _brief_rebuilding = False
 
 
+# ── Brief response scrubbers ────────────────────────────────────────
+# Some legacy DB rows still carry raw RSS <description> markup in the
+# summary column (Hankyoreh's image-thumbnail <table>, etc.) — those
+# predate the rss._clean_summary scrub. We re-strip at the API boundary
+# so even old rows render clean. Also enforces a final global per-outlet
+# ceiling so the feed user never sees the same newspaper five times in
+# a row, regardless of how it got past the earlier passes.
+_API_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_API_WS_RE = re.compile(r"\s+")
+_FEED_FIELDS_TO_SCRUB = ("title", "dek", "summary", "title_ko", "dek_ko")
+# Maximum copies of the same outlet allowed in the final mixed list.
+# Belt-and-suspenders next to sorter.GLOBAL_PER_OUTLET_CAP — the sorter
+# only runs in _brief_build_full; the fast path (_brief_db_fallback)
+# bypasses it, so this enforces the cap there too.
+_API_GLOBAL_PER_OUTLET_CAP = 3
+
+
+def _scrub_text(s: str | None) -> str:
+    if not s:
+        return ""
+    out = _API_HTML_TAG_RE.sub(" ", s)
+    out = html.unescape(out)
+    out = _API_HTML_TAG_RE.sub(" ", out)
+    return _API_WS_RE.sub(" ", out).strip()
+
+
+def _polish_mixed(payload: dict) -> dict:
+    """In-place: strip HTML out of every text field on every mixed item,
+    then drop duplicate-outlet pile-ups past _API_GLOBAL_PER_OUTLET_CAP.
+    Idempotent — safe to call on a cached payload."""
+    mixed = payload.get("mixed") or []
+    if not isinstance(mixed, list):
+        return payload
+    per_outlet: dict[str, int] = {}
+    out_list: list[dict] = []
+    for it in mixed:
+        if not isinstance(it, dict):
+            continue
+        for k in _FEED_FIELDS_TO_SCRUB:
+            v = it.get(k)
+            if isinstance(v, str) and ("<" in v or "&" in v):
+                it[k] = _scrub_text(v)
+        outlet = (it.get("outlet") or "").strip()
+        if outlet:
+            n = per_outlet.get(outlet, 0)
+            if n >= _API_GLOBAL_PER_OUTLET_CAP:
+                continue
+            per_outlet[outlet] = n + 1
+        out_list.append(it)
+    if len(out_list) != len(mixed):
+        payload["mixed"] = out_list
+        payload["total_mixed"] = len(out_list)
+    return payload
+
+
 def _brief_db_fallback() -> dict | None:
     """Synchronously build a tiny brief payload from SQLite only — no
     RSS fetch, no LLM headline, no image scraping. Used as the first
@@ -1624,7 +1436,13 @@ def _brief_db_fallback() -> dict | None:
                     premium, weight, fetched_at,
                     ROW_NUMBER() OVER (
                       PARTITION BY category
-                      ORDER BY premium DESC, score DESC, fetched_at DESC
+                      -- Importance first, then recency as the tiebreak.
+                      -- The ranker persists premium/score (authority +
+                      -- cross-outlet corroboration), so the biggest
+                      -- stories lead each desk and DON'T reshuffle every
+                      -- ingest — only when their importance actually
+                      -- changes. published_at (ISO-8601) breaks ties.
+                      ORDER BY premium DESC, score DESC, published_at DESC
                     ) AS cat_rank,
                     CASE category
                       WHEN 'world'   THEN 1
@@ -1641,15 +1459,25 @@ def _brief_db_fallback() -> dict | None:
                       ELSE 99
                     END AS cat_order
                   FROM articles
+                  -- Prefer clean, body-backed articles but NEVER starve
+                  -- to a blank feed. The old strict gate required
+                  -- validated=1 OR a persisted reader body; once the
+                  -- archive worker drained every validated row out of the
+                  -- active pool (and validation wasn't running to refill
+                  -- it), that gate matched zero rows and /api/brief served
+                  -- an empty "Loading feed…" payload for weeks. Relaxed
+                  -- 2026-07-05 to just active + non-failed, which matches
+                  -- what /api/page already shows on the category tabs.
                   WHERE archived = 0 AND validated != -1
+                    AND (dup_of IS NULL OR dup_of = '')
                 )
                 SELECT url, title, image, outlet, category, lang, summary,
                        score, title_ko, dek_ko, translated_at, published_at,
                        premium, weight
                 FROM ranked
-                WHERE cat_rank <= 4
+                WHERE cat_rank <= 10
                 ORDER BY cat_rank ASC, cat_order ASC
-                LIMIT 24
+                LIMIT 120
                 """
             ).fetchall()
             if not rows:
@@ -1705,16 +1533,24 @@ async def _kickoff_brief_rebuild():
         return
     _brief_rebuilding = True
     try:
-        # 5 min budget — the full chain on a small Lightsail box can
-        # take 90-180 s under load (RSS fetch + image scraping + LLM
-        # headline). 60s was too tight, causing every rebuild to fail
-        # silently and stranding the cache at the prewarm snapshot.
-        payload = await asyncio.wait_for(_brief_build_full(), timeout=300.0)
+        # Body-first ops mode: rebuild from the DB fast-path, NOT from the
+        # full RSS→curator→LLM chain. The full chain pulls fresh articles
+        # that are validated=0 with no body, so its post-gate result is
+        # almost empty (~10 items). The fast-path queries the DB for rows
+        # that already have validated=1 OR a stored body — i.e. the only
+        # articles users can actually open. _polish_mixed strips HTML and
+        # caps per outlet. This is the same data path /api/brief uses on
+        # cache miss, so the cache and the cache-miss response stay
+        # consistent.
+        fast = _brief_db_fallback()
+        if fast is None:
+            print("[brief-bg-refresh] fast-path returned None, skipping", flush=True)
+            return
+        payload = _polish_mixed(fast)
         cache.set("brief:response", payload, BRIEF_CACHE_TTL)
         cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
-        print("[brief-bg-refresh] cache repopulated", flush=True)
-    except asyncio.TimeoutError:
-        print("[brief-bg-refresh] hit 300s timeout, abandoned", flush=True)
+        news = sum(1 for m in (payload.get("mixed") or []) if m.get("kind") == "news")
+        print(f"[brief-bg-refresh] cache repopulated (news={news})", flush=True)
     except Exception as exc:
         print(f"[brief-bg-refresh] failed: {exc!r}", flush=True)
     finally:
@@ -1746,10 +1582,11 @@ async def brief():
     30 s upstream cap never sit on a hanging request.
     """
     try:
-        # Fresh cache → ship it.
+        # Fresh cache → ship it. Polish first so legacy cached payloads
+        # (built before the HTML scrubber) get cleaned on the way out.
         cached = cache.get("brief:response")
         if cached is not None:
-            return cached
+            return _polish_mixed(dict(cached))
 
         # No fresh cache. Try the stale grace bucket.
         # NOT triggering a rebuild here either — see comment below.
@@ -1757,7 +1594,7 @@ async def brief():
         if stale is not None:
             out = dict(stale)
             out["_stale"] = True
-            return out
+            return _polish_mixed(out)
 
         # No cache at all. Serve the cheap DB-only payload — and
         # DO NOT kick off a background rebuild here. On a 512MB
@@ -1767,7 +1604,7 @@ async def brief():
         try:
             fast = _brief_db_fallback()
             if fast is not None:
-                return fast
+                return _polish_mixed(fast)
         except Exception as exc:
             print(f"[brief] fast-path crashed: {exc!r}", flush=True)
 
@@ -1777,6 +1614,7 @@ async def brief():
         # request. Better than 502.
         try:
             payload = await asyncio.wait_for(_brief_build_full(), timeout=10.0)
+            payload = _polish_mixed(payload)
             cache.set("brief:response", payload, BRIEF_CACHE_TTL)
             cache.set("brief:response_stale", payload, BRIEF_STALE_GRACE)
             return payload
@@ -1864,18 +1702,36 @@ async def _brief_build_full() -> dict:
     # balanced page that the curator could never produce alone.
     top = sorter.balance(top, target_total=config.TOP_K)
 
-    # Quality gate: drop anything the validation worker has already
-    # marked as failing (validated=-1) so the feed never shows articles
-    # that can't actually be opened. Pending (validated=0) and passing
-    # (validated=1) items still flow through; the worker chips through
-    # the backlog within minutes after a fresh deploy.
+    # Body-first quality gate. The user-facing rule: every article on the
+    # main page must already have its body persisted to reader_results.
+    # Drop an item unless:
+    #   - validated=1  (worker confirmed extraction + validator passed), OR
+    #   - validated=0  AND a real body exists in reader_results (a prior
+    #                  worker pass / user click warmed it).
+    # validated=-1 is always dropped. This keeps the feed clean of "could
+    # not extract the article body" surprises and is the body-first
+    # invariant the spec asks for.
     try:
         top_urls = [t.get("url") for t in top if t.get("url")]
         states = await db.get_validation_states(top_urls)
-        rejected = {u for u, v in states.items() if v == -1}
-        if rejected:
-            top = [t for t in top if t.get("url") not in rejected]
-            print(f"[gate] dropped {len(rejected)} validated=-1 items", flush=True)
+        body_present = await db.reader_urls_present(top_urls)
+
+        def _keep(item):
+            url = item.get("url")
+            if not url:
+                return False
+            v = states.get(url, 0)
+            if v == -1:
+                return False
+            if v == 1:
+                return True
+            return url in body_present
+
+        before = len(top)
+        top = [t for t in top if _keep(t)]
+        dropped = before - len(top)
+        if dropped:
+            print(f"[gate] dropped {dropped} items (no validated=1 / no body)", flush=True)
     except Exception as exc:
         print(f"[gate] validation lookup failed: {exc!r}", flush=True)
 
@@ -2268,39 +2124,6 @@ def _split_paragraphs(text: str) -> list[str]:
     return out
 
 
-def _reader_fallback_from_row(url: str, article_row: dict | None) -> dict | None:
-    """Build a minimal reader payload from the stored articles row when
-    live extraction can't reach the publisher. Uses the card summary as
-    the body so the modal shows real text + the "open original" link
-    instead of a hard error. Returns None only when we have literally
-    nothing worth showing (no title)."""
-    if not article_row:
-        return None
-    title = (article_row.get("title") or "").strip()
-    if not title:
-        return None
-    summary = (article_row.get("summary") or "").strip()
-    paras = _split_paragraphs(summary) if summary else []
-    lang = (article_row.get("lang") or _detect_lang(title) or "en")
-    note = (
-        "본문을 불러오지 못했습니다 — 저장된 요약만 표시합니다. 아래에서 원문을 확인하세요."
-        if lang == "ko"
-        else "Couldn't load the full article — showing the saved summary. Open the original below for the complete story."
-    )
-    return {
-        "url": url,
-        "title": title,
-        "image": article_row.get("image"),
-        "byline": None,
-        "excerpt": summary[:300],
-        "lang": lang,
-        "word_count": len(summary.split()),
-        "paragraphs": paras,
-        "partial": True,
-        "note": note,
-    }
-
-
 @app.get("/api/article")
 async def article(url: str):
     """Reader-mode view of an external article.
@@ -2344,14 +2167,6 @@ async def article(url: str):
 
     reading = await reader.extract(url)
     if not reading:
-        # Live extraction failed (publisher blocked us / JS wall / dead
-        # URL). Rather than a dead-end error, test whether we already
-        # hold usable content for this story — a stored card summary is
-        # enough to show the reader *something* plus the original link.
-        fallback = _reader_fallback_from_row(url, article_row)
-        if fallback is not None:
-            await db.bump_counter("reader_fallback_summary")
-            return fallback
         return {"error": "could not extract the article body"}
 
     # No LLM rewrite — show the publisher's body directly, just cleaned
@@ -2527,11 +2342,9 @@ async def api_page(
     )
     pages = max(1, (total + size - 1) // size)
     n = min(n, pages)
-    # ALL tab (no category, no premium filter) reads the round-robin
-    # view so page 1..N mirror the chip-ordered balance of the DB —
-    # exactly the same rows the fast-path fallback would show, just
-    # paginated. Category / premium pages keep the flat premium→score
-    # ordering. Both read straight from SQLite: no separate ALL dataset.
+    # ALL tab (no category, no premium filter) stays round-robin balanced
+    # on every page so the Korean firehose can't bury the other channels
+    # past page 1. Category / premium pages keep the flat ordering.
     if cat_clean is None and not premium_only:
         items = await db.list_articles_roundrobin(
             offset=(n - 1) * size, limit=size,

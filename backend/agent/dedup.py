@@ -33,11 +33,15 @@ from collections import defaultdict
 from backend import config
 
 
-SIMILARITY_THRESHOLD = 0.42      # 42% — verb stem variation (launch / launches /
-                                 # launched) often costs ~5% Jaccard, so 0.42
-                                 # catches the obvious dupes the user complained
-                                 # about without clustering distinct stories.
-MAX_PER_CLUSTER = 2              # tightest one + one backup
+SIMILARITY_THRESHOLD = 0.30      # 30% — more aggressive than the prior 0.42.
+                                 # The user explicitly reported same-story
+                                 # repeats slipping through; this widens the
+                                 # net to catch "Trump says X" / "Trump's X
+                                 # remarks" / "Trump comments on X" clusters
+                                 # that 0.42 was missing.
+MAX_PER_CLUSTER = 1              # Keep only the single best per cluster.
+                                 # Spec: "같은 내용의 기사들 제발 좀 쳐내줘"
+                                 # — drop, don't keep a backup.
 MIN_SIGNATURE_TOKENS = 3         # don't dedup ultra-short titles
 
 

@@ -154,6 +154,14 @@ def _init_sync() -> None:
             # and the modal still serves them from reader_results.
             "ALTER TABLE articles ADD COLUMN archived INTEGER DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN archived_at INTEGER",
+            # Ranking-department fields (backend/agent/ranker.py):
+            #   dup_of        = survivor URL this row was collapsed into
+            #                   (NULL = survivor / not yet ranked → visible)
+            #   corroboration = how many outlets carried the same story
+            #   ranked_at     = last time the ranker scored this row
+            "ALTER TABLE articles ADD COLUMN dup_of TEXT",
+            "ALTER TABLE articles ADD COLUMN corroboration INTEGER DEFAULT 0",
+            "ALTER TABLE articles ADD COLUMN ranked_at INTEGER",
         ):
             try:
                 c.execute(stmt)
@@ -210,7 +218,11 @@ def _upsert_article_sync(row: dict) -> None:
             row.get("url"), row.get("title"), row.get("image"),
             row.get("outlet"), row.get("category"), row.get("lang"),
             row.get("summary"), int(row.get("score") or 0),
-            row.get("why"), row.get("image_source"), row.get("tier"),
+            # tier is NOT NULL DEFAULT 'hot' in the schema, but the
+            # default only fires when the column is omitted from the
+            # INSERT list — passing None still violates the constraint.
+            # rss-ingest never sets tier, so fall back to 'hot' here.
+            row.get("why"), row.get("image_source"), row.get("tier") or "hot",
             int(bool(row.get("premium"))),
             float(row.get("weight") or 1.0),
             row.get("premium_body"),
@@ -236,6 +248,9 @@ def _list_articles_sync(
         args.append(cat)
     if premium_only:
         where_parts.append("premium = 1")
+    # Hide cross-outlet duplicates the ranker collapsed. Unranked rows
+    # have dup_of NULL, so nothing disappears before the first rank pass.
+    where_parts.append("(dup_of IS NULL OR dup_of = '')")
     if validated_only:
         # Default mode: hide articles the validator has confirmed
         # broken (validated = -1). Pending (0) and passed (1) both
@@ -259,7 +274,7 @@ def _list_articles_sync(
 
 def _count_articles_sync(cat: str | None, include_archived: bool = False) -> int:
     args: list = []
-    where_parts: list[str] = []
+    where_parts: list[str] = ["(dup_of IS NULL OR dup_of = '')"]
     if not include_archived:
         where_parts.append("archived = 0")
     if cat:
@@ -281,11 +296,14 @@ async def list_articles(
 
 
 # ── ALL-feed round-robin listing ────────────────────────────────────
-# The ALL tab must "just link the articles from the DB and display
-# them" — no separate materialised dataset. This is the paginated twin
-# of main._brief_db_fallback: rank each article within its category,
-# then emit rank-1 of every category (in chip order) before any rank-2,
-# so no single category dominates the wall. Active + non-failed only.
+# The ALL tab must stay category-balanced on EVERY page, not just page 1.
+# Flat ordering let the Korean firehose (14k+ 'korea' rows) bury every
+# other category from page 2 on. This paginates a round-robin: rank each
+# article within its category, then emit rank-1 of every category (in
+# chip order) before any rank-2. Ordering WITHIN a category is
+# premium → score → published_at, so it's stable across refreshes AND
+# becomes importance-first automatically once the ranker populates
+# premium/score (today they're all 0, so it's newest-first per cat).
 def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
     with closing(_conn()) as c:
         rows = c.execute(
@@ -297,7 +315,7 @@ def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
                      fetched_at,
                      ROW_NUMBER() OVER (
                        PARTITION BY category
-                       ORDER BY premium DESC, score DESC, fetched_at DESC
+                       ORDER BY premium DESC, score DESC, published_at DESC
                      ) AS cat_rank,
                      CASE category
                        WHEN 'world'   THEN 1
@@ -315,6 +333,7 @@ def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
                      END AS cat_order
               FROM articles
               WHERE archived = 0 AND validated != -1
+                AND (dup_of IS NULL OR dup_of = '')
             )
             SELECT url, title, image, outlet, category, lang, summary, score,
                    why, image_source, tier, premium, weight, premium_body,
@@ -335,9 +354,10 @@ async def list_articles_roundrobin(offset: int, limit: int) -> list[dict]:
 
 
 def _count_articles_validated_sync(cat: str | None, include_archived: bool = False) -> int:
-    # Same semantics as the listing path: hide validated=-1 + archived.
+    # Same semantics as the listing path: hide validated=-1 + archived +
+    # collapsed duplicates.
     args: list = []
-    where_parts = ["validated != -1"]
+    where_parts = ["validated != -1", "(dup_of IS NULL OR dup_of = '')"]
     if not include_archived:
         where_parts.append("archived = 0")
     if cat:
@@ -412,7 +432,12 @@ def _upsert_articles_batch_sync(rows: list[dict]) -> int:
                     row.get("url"), row.get("title"), row.get("image"),
                     row.get("outlet"), row.get("category"), row.get("lang"),
                     row.get("summary"), int(row.get("score") or 0),
-                    row.get("why"), row.get("image_source"), row.get("tier"),
+                    # tier NOT NULL DEFAULT 'hot': passing None violates the
+                    # constraint (the DEFAULT only fires if the column is
+                    # omitted). Caller never sets tier on the rss-ingest path
+                    # → batch was crashing every 30 min, blocking ALL new
+                    # article fetches. Fall back here.
+                    row.get("why"), row.get("image_source"), row.get("tier") or "hot",
                     int(bool(row.get("premium"))),
                     float(row.get("weight") or 1.0),
                     row.get("premium_body"),
@@ -917,6 +942,37 @@ def _get_reader_sync(url: str) -> dict | None:
 
 async def get_reader(url: str) -> dict | None:
     return await asyncio.to_thread(_get_reader_sync, url)
+
+
+def _reader_urls_present_sync(urls: list[str]) -> set[str]:
+    """For the body-first feed gate: return the subset of `urls` that
+    already have a row in reader_results — i.e. trafilatura extraction
+    has succeeded at least once and the cleaned body is on disk. URLs
+    without a row are dropped from /api/brief so users never click into
+    a "could not extract the article body" error.
+    Skips empty/whitespace payloads so a stub reader row doesn't pass."""
+    if not urls:
+        return set()
+    out: set[str] = set()
+    with closing(_conn()) as c:
+        for i in range(0, len(urls), 200):
+            chunk = urls[i:i + 200]
+            placeholders = ",".join("?" * len(chunk))
+            rows = c.execute(
+                f"SELECT url, payload_json FROM reader_results "
+                f"WHERE url IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for r in rows:
+                payload = r["payload_json"] or ""
+                if not payload.strip() or payload.strip() in ("{}", "null"):
+                    continue
+                out.add(r["url"])
+    return out
+
+
+async def reader_urls_present(urls: list[str]) -> set[str]:
+    return await asyncio.to_thread(_reader_urls_present_sync, urls)
 
 
 def _save_reader_sync(url: str, payload: dict) -> None:

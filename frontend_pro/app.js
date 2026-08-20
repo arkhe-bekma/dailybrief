@@ -382,10 +382,7 @@ let PENDING_REFRESH = false;  // set true when silentRefresh is deferred
 // committee" feel — one tidy page at a time, not a 158-page wall.
 // 13 = HERO (1) + 12 of the rest, which packs cleanly into the
 // 2-per-row tiers below the hero.
-// User-tuned: 20 cards per page. 6 felt too sparse, 30 produced single-
-// page-only states when the body-first gate trimmed the pool. 20 is
-// the sweet spot — 37 validated articles → 2 pages, 60 → 3, etc.
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 30;
 const AUTO_REFRESH_MS = 2 * 60 * 1000;  // 2 minutes — near-real-time
 
 // User-tunable interests — categories the user wants boosted in the
@@ -509,20 +506,21 @@ function paint(scrollTop = true) {
 function renderPager(totalPages) {
   const p = $("#pager");
   p.innerHTML = "";
-  // The pager is ALWAYS painted — even with one page — so the bottom of
-  // the page never looks blank or "missing" on mobile or web. Prev/next
-  // disabled at the boundary; the numeric strip collapses to "page X of
-  // Y" when there's nowhere to jump to.
-  const safeTotal = Math.max(1, totalPages || 1);
+  if (totalPages <= 1) return;
   const go = async (n) => {
-    PAGE = Math.max(1, Math.min(safeTotal, n));
+    PAGE = Math.max(1, Math.min(totalPages, n));
     await fetchPage(PAGE);
     paint();
   };
-  const narrow = window.matchMedia("(max-width: 800px)").matches;
-  const WINDOW = narrow ? 3 : 5;
+  // Page numbers are shown in WINDOWS of 5. Current page anchors the
+  // window — windowStart = floor((PAGE - 1) / 5) * 5 + 1. PREV / NEXT
+  // step ONE page at a time (so the window slides naturally as the
+  // user clicks). The 5 numeric buttons let the user jump within the
+  // current window directly. « FIRST and LAST » bookends give quick
+  // access to the archive boundaries.
+  const WINDOW = 5;
   const windowStart = Math.floor((PAGE - 1) / WINDOW) * WINDOW + 1;
-  const windowEnd = Math.min(windowStart + WINDOW - 1, safeTotal);
+  const windowEnd = Math.min(windowStart + WINDOW - 1, totalPages);
 
   // « FIRST — only show when we're past the first window.
   if (windowStart > 1) {
@@ -531,41 +529,41 @@ function renderPager(totalPages) {
     p.appendChild(first);
   }
 
-  // ‹ PREV — step back one page.
+  // ‹ PREV — step back one page (window slides automatically when
+  // PAGE drops below windowStart).
   const prev = el("button", { type: "button", class: "pg-arrow" }, "‹ PREV");
-  prev.disabled = PAGE <= 1;
+  prev.disabled = PAGE === 1;
   prev.onclick = () => go(PAGE - 1);
   p.appendChild(prev);
 
-  if (safeTotal <= 1) {
-    p.appendChild(el("span", { class: "label" }, `page ${PAGE} of ${safeTotal}`));
-  } else {
-    for (let n = windowStart; n <= windowEnd; n++) {
-      const btn = el("button", {
-        type: "button",
-        class: "pg-num" + (n === PAGE ? " pg-active" : ""),
-      }, String(n));
-      btn.onclick = () => go(n);
-      p.appendChild(btn);
-    }
-    if (windowEnd < safeTotal) {
-      const dots = el("span", { class: "pg-dots" }, "…");
-      p.appendChild(dots);
-    }
+  // Numeric buttons for the current window of 5.
+  for (let n = windowStart; n <= windowEnd; n++) {
+    const btn = el("button", {
+      type: "button",
+      class: "pg-num" + (n === PAGE ? " pg-active" : ""),
+    }, String(n));
+    btn.onclick = () => go(n);
+    p.appendChild(btn);
+  }
+
+  // Ellipsis when there are more windows ahead.
+  if (windowEnd < totalPages) {
+    const dots = el("span", { class: "pg-dots" }, "…");
+    p.appendChild(dots);
   }
 
   // NEXT › — step forward one page.
   const next = el("button", { type: "button", class: "pg-arrow" }, "NEXT ›");
-  next.disabled = PAGE >= safeTotal;
+  next.disabled = PAGE === totalPages;
   next.onclick = () => go(PAGE + 1);
   p.appendChild(next);
 
   // LAST » — quick jump to the final page.
-  if (windowEnd < safeTotal) {
+  if (windowEnd < totalPages) {
     const last = el("button",
       { type: "button", class: "pg-arrow", title: "last page" },
-      `${safeTotal} »`);
-    last.onclick = () => go(safeTotal);
+      `${totalPages} »`);
+    last.onclick = () => go(totalPages);
     p.appendChild(last);
   }
 }
@@ -635,7 +633,7 @@ async function load() {
 
   // 2. Fetch fresh and swap in.
   try {
-    const r = await fetch("/api/brief");
+    const r = await fetch("https://nkoe4u56vg.execute-api.us-east-1.amazonaws.com/api/brief");
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     STATE = await r.json();
     STATE.mixed.forEach((m) => { if (m.dek) m.dek = stripHtml(m.dek); });
@@ -663,7 +661,7 @@ async function silentRefresh() {
     return;
   }
   try {
-    const r = await fetch("/api/brief");
+    const r = await fetch("https://nkoe4u56vg.execute-api.us-east-1.amazonaws.com/api/brief");
     if (!r.ok) return;
     const fresh = await r.json();
     fresh.mixed.forEach((m) => { if (m.dek) m.dek = stripHtml(m.dek); });

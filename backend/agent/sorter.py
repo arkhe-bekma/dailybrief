@@ -43,8 +43,15 @@ CATEGORY_QUOTAS: dict[str, int] = {
 }
 
 # Hard cap on how many items a single outlet can contribute to a
-# category. Stops "조선일보 spammed 30 stories" outcomes.
-PER_OUTLET_CAP = 4
+# category. Stops "조선일보 spammed 30 stories" outcomes inside one chip.
+PER_OUTLET_CAP = 2
+
+# Global cap on how many items a single outlet can take across the
+# entire feed (sum across all categories). Without this, an outlet that
+# publishes in many categories (Yonhap, Hankyoreh, Reuters) can quietly
+# take 4×N slots = 30+ cards. Hard ceiling — applied after the per-
+# category cap.
+GLOBAL_PER_OUTLET_CAP = 3
 
 
 def _quality_score(item: dict) -> float:
@@ -97,10 +104,13 @@ def balance(
     # in best-first order.
     sorted_items = sorted(items, key=lambda x: x.get("quality", 0), reverse=True)
 
-    # Pass 1: fill each category up to its quota, respecting per-outlet cap.
+    # Pass 1: fill each category up to its quota, respecting per-outlet
+    # cap (per category) AND a global per-outlet cap so a single outlet
+    # can't dominate the entire feed by publishing across many chips.
     chosen: list[dict] = []
     cat_count: dict[str, int] = defaultdict(int)
     outlet_count_in_cat: dict[tuple[str, str], int] = defaultdict(int)
+    outlet_count_global: dict[str, int] = defaultdict(int)
     used_urls: set[str] = set()
     leftover: list[dict] = []
 
@@ -117,17 +127,21 @@ def balance(
         if outlet_count_in_cat[(cat, outlet)] >= per_outlet_cap:
             leftover.append(it)
             continue
+        if outlet and outlet_count_global[outlet] >= GLOBAL_PER_OUTLET_CAP:
+            leftover.append(it)
+            continue
         chosen.append(it)
         used_urls.add(url)
         cat_count[cat] += 1
         outlet_count_in_cat[(cat, outlet)] += 1
+        outlet_count_global[outlet] += 1
 
     # Pass 2: top-up from leftover. Any category that fell short of its
-    # quota AFTER pass 1 gets refilled from the pool. We also fill empty
-    # categories proportionally so the user always sees some variety.
+    # quota AFTER pass 1 gets refilled — but the GLOBAL per-outlet cap
+    # still applies (the per-category cap is the only one that relaxes,
+    # so we'd rather have a story than a hole *inside* a chip). Without
+    # this the dominant outlet would refill all the empty chips too.
     if len(chosen) < target_total and leftover:
-        # Top up under-filled categories first, ignoring per-outlet cap
-        # this time (we'd rather have a story than a hole).
         deficit_cats = [c for c, q in qmap.items() if cat_count[c] < q]
         deficit_cats.sort(key=lambda c: qmap[c] - cat_count[c], reverse=True)
         for it in list(leftover):
@@ -138,25 +152,34 @@ def balance(
                 continue
             if cat_count[cat] >= qmap.get(cat, 12):
                 continue
+            outlet = it.get("outlet") or ""
+            if outlet and outlet_count_global[outlet] >= GLOBAL_PER_OUTLET_CAP:
+                continue
             url = it.get("url") or ""
             if url in used_urls:
                 continue
             chosen.append(it)
             used_urls.add(url)
             cat_count[cat] += 1
+            outlet_count_global[outlet] += 1
             leftover.remove(it)
 
     # Pass 3: if we still have room, pull the best leftover regardless
-    # of category. Caps the page at target_total.
+    # of category — global per-outlet cap still applies. Caps the page
+    # at target_total.
     if len(chosen) < target_total:
         for it in leftover:
             if len(chosen) >= target_total:
                 break
+            outlet = it.get("outlet") or ""
+            if outlet and outlet_count_global[outlet] >= GLOBAL_PER_OUTLET_CAP:
+                continue
             url = it.get("url") or ""
             if url in used_urls:
                 continue
             chosen.append(it)
             used_urls.add(url)
+            outlet_count_global[outlet] += 1
 
     # Final global re-sort by quality so HERO position is meaningful.
     chosen.sort(key=lambda x: x.get("quality", 0), reverse=True)
