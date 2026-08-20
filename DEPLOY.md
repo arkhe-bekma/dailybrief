@@ -87,6 +87,27 @@ nano ~/dailybrief/.env
 sudo systemctl restart dailybrief
 ```
 
+## Edge config (Caddy)
+
+The live Caddy config is checked in at `scripts/Caddyfile.production` —
+it is the file that runs at `/etc/caddy/Caddyfile`. Edit it in the repo,
+then apply:
+
+```bash
+sudo cp scripts/Caddyfile.production /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo systemctl reload caddy
+```
+
+`scripts/Caddyfile` is still the generic `__DOMAIN__` template that
+`deploy.sh` uses on a fresh box.
+
+**`/pro` is currently closed** — both `/pro` and `/pro/*` 302 to `/`. To
+re-open, uncomment the `handle_path /pro/*` block in
+`scripts/Caddyfile.production` and drop the two `@pro` redirect lines.
+The static build lives in `frontend_pro/` and on the box at
+`/srv/dailybrief_pro`.
+
 ## Auto-deploy (optional, recommended)
 
 To have the Lightsail box pull every new commit on `main` automatically:
@@ -100,8 +121,16 @@ chmod +x ~/dailybrief/scripts/auto-update.sh
 ```
 
 Every minute, root checks `origin/main` for a new SHA. If there's one,
-it pulls + restarts the service. No restart unless the SHA actually
+it syncs + restarts the service. No restart unless the SHA actually
 changed, so there's no needless downtime.
+
+**Never edit files directly on the box.** The box drifted out of git
+once because someone did, and the old `git pull --rebase` then refused
+to run — deploys silently froze for weeks while the repo and production
+diverged in both directions. `auto-update.sh` now stashes any local
+edits into a timestamped stash and hard-syncs to `origin/main`, so a
+stray edit can't block a deploy again. Recover one with `git stash list`
+/ `git stash show -p`.
 
 Watch deploys land:
 
@@ -113,6 +142,7 @@ sudo tail -f /var/log/dailybrief-deploy.log
 
 | Need | Command |
 |---|---|
+| Is the app healthy? | open `https://your.domain.com/status` |
 | Tail app logs | `sudo journalctl -u dailybrief -f` |
 | Tail proxy/TLS logs | `sudo journalctl -u caddy -f` |
 | Restart app | `sudo systemctl restart dailybrief` |
