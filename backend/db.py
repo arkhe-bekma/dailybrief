@@ -289,6 +289,56 @@ def _list_articles_sync(
         return [dict(r) for r in rows]
 
 
+def _search_articles_sync(q: str, limit: int, offset: int) -> tuple[list[dict], int]:
+    """Substring search over headline, dek and outlet.
+
+    LIKE rather than FTS5 on purpose: the corpus is a few thousand rows,
+    the box is a 1 GB instance, and FTS5 tokenisation splits Korean badly
+    enough that 한글 queries would miss. LIKE with NOCASE handles both
+    scripts and needs no extra table to keep in sync.
+
+    Ranking is deliberate: a title hit beats a dek hit beats an outlet
+    hit, then by recency — so searching an outlet name doesn't bury the
+    story that's actually about it.
+    """
+    needle = f"%{q}%"
+    args = [needle, needle, needle]
+    where = (
+        "WHERE archived = 0 AND (dup_of IS NULL OR dup_of = '') "
+        "AND validated != -1 "
+        "AND (title LIKE ? COLLATE NOCASE "
+        "  OR summary LIKE ? COLLATE NOCASE "
+        "  OR outlet LIKE ? COLLATE NOCASE)"
+    )
+    with closing(_conn()) as c:
+        total = c.execute(
+            f"SELECT COUNT(*) AS n FROM articles {where}", args
+        ).fetchone()["n"]
+        rows = c.execute(
+            f"SELECT url, title, image, outlet, category, lang, summary, score, "
+            f"why, image_source, tier, premium, weight, premium_body, quality, "
+            f"title_ko, dek_ko, translated_at, published_at, fetched_at, "
+            f"CASE WHEN title LIKE ? COLLATE NOCASE THEN 0 "
+            f"     WHEN summary LIKE ? COLLATE NOCASE THEN 1 "
+            f"     ELSE 2 END AS match_rank "
+            f"FROM articles {where} "
+            f"ORDER BY match_rank ASC, premium DESC, fetched_at DESC "
+            f"LIMIT ? OFFSET ?",
+            [needle, needle] + args + [limit, offset],
+        ).fetchall()
+    return [dict(r) for r in rows], total
+
+
+async def search_articles(
+    q: str, limit: int = 40, offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Search headlines/deks/outlets. Returns (rows, total_matches)."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return [], 0
+    return await asyncio.to_thread(_search_articles_sync, q, limit, offset)
+
+
 def _count_articles_sync(cat: str | None, include_archived: bool = False) -> int:
     args: list = []
     where_parts: list[str] = ["(dup_of IS NULL OR dup_of = '')"]

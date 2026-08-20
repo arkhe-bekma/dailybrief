@@ -2236,6 +2236,19 @@ async def article(url: str):
     # trafilatura title like "Editor's choice".
     article_row = await db.get_article(url) if hasattr(db, "get_article") else None
     fallback_title = (article_row or {}).get("title") if article_row else None
+    outlet = (article_row or {}).get("outlet") or ""
+
+    # /status answers "did this article open with a real body?", so every
+    # return path below logs — including cache hits. Logging only the
+    # cache-miss path made the success rate meaningless: successes get
+    # cached and stop being counted, while fallbacks keep re-logging.
+    async def _served(payload: dict) -> dict:
+        await db.record_extract_result(
+            outlet, url,
+            not payload.get("partial"),
+            payload.get("fail_reason") or "",
+        )
+        return payload
 
     full_key = f"article_reader:{url}"
     cached = cache.get(full_key)
@@ -2244,7 +2257,7 @@ async def article(url: str):
         cached = _scrub_cached_paragraphs(cached)
         if fallback_title and _is_bad_title(cached.get("title") or ""):
             cached = {**cached, "title": fallback_title}
-        return cached
+        return await _served(cached)
 
     # SQLite second-level cache — survives restart. Keeps trafilatura
     # work that's already been paid for.
@@ -2258,16 +2271,14 @@ async def article(url: str):
             saved = {**saved, "title": fallback_title}
         cache.set(full_key, saved, 86400)
         await db.bump_counter("reader_cache_hits_disk")
-        return saved
+        return await _served(saved)
 
     reading, err = await reader.extract_detailed(url)
-    outlet = (article_row or {}).get("outlet") or ""
     if not reading:
         # Live extraction failed (paywall / bot wall / dead URL). Record
         # it against the outlet so /api/health shows which sources are
         # degrading, then fall back to the stored summary rather than
         # handing the user a dead end.
-        await db.record_extract_result(outlet, url, False, err.reason if err else "error")
         fallback = _reader_fallback_from_row(url, article_row, err)
         if fallback is not None:
             await db.bump_counter("reader_fallback_summary")
@@ -2277,12 +2288,13 @@ async def article(url: str):
             # health success-rate down relative to cached successes.
             # 30 min (not 24 h) so a transient block recovers on its own.
             cache.set(full_key, fallback, 1800)
-            return fallback
+            return await _served(fallback)
+        # Nothing stored either — genuinely nothing to show.
+        await db.record_extract_result(outlet, url, False, err.reason if err else "error")
         return {
             "error": "could not extract the article body",
             "reason": err.reason if err else "error",
         }
-    await db.record_extract_result(outlet, url, True, "")
 
     # No LLM rewrite — show the publisher's body directly, just cleaned
     # of emojis / section headers / photo credits / mojibake. Cheaper,
@@ -2331,7 +2343,7 @@ async def article(url: str):
     except Exception as exc:
         print(f"[supervisor] image backfill failed: {exc!r}", flush=True)
     await db.bump_counter("reader_extracts_ok")
-    return result
+    return await _served(result)
 
 
 # ── /api/lab — dashboard data ────────────────────────────────────────
@@ -2453,6 +2465,67 @@ async def account_page(request: Request):
     return FileResponse(FRONTEND_DIR / "account.html", headers=_NO_STORE_HEADERS)
 
 
+def _row_to_card(r: dict) -> dict:
+    """One `articles` row → the card shape the frontend renders.
+
+    Single definition shared by /api/page and /api/search, so a new card
+    field only has to be added in one place — the two used to drift.
+    """
+    return {
+        "kind": "news",
+        "url": r.get("url"),
+        "title": r.get("title"),
+        "image": r.get("image"),
+        "image_source": r.get("image_source"),
+        "outlet": r.get("outlet"),
+        "category": r.get("category"),
+        "lang": r.get("lang"),
+        "dek": r.get("summary"),
+        "why": r.get("why"),
+        "tier": r.get("tier"),
+        "premium": bool(r.get("premium")),
+        "weight": float(r.get("weight") or 1.0),
+        "quality": float(r.get("quality") or 0),
+        "premium_body": r.get("premium_body"),
+        # Card-level translation — populated on /api/translate success.
+        # Presence drives the neon border + ✦한 badge.
+        "title_ko": r.get("title_ko"),
+        "dek_ko": r.get("dek_ko"),
+        "translated_at": r.get("translated_at"),
+        "ts": r.get("published_at"),
+        "score": r.get("score") or 0,
+        "tickers": [], "sparks": {},
+    }
+
+
+@app.get("/api/search")
+async def api_search(q: str = "", n: int = 1, size: int = 24):
+    """Search the archive by headline, dek or outlet.
+
+    Returns the same card shape as /api/page so the frontend can render
+    results with the existing card renderer instead of a parallel one.
+    """
+    q = (q or "").strip()
+    n = max(1, n)
+    size = max(1, min(size, 60))
+    if len(q) < 2:
+        return {
+            "q": q, "page": n, "size": size,
+            "total_pages": 1, "total_items": 0, "items": [],
+            "error": "query too short" if q else None,
+        }
+    rows, total = await db.search_articles(q, limit=size, offset=(n - 1) * size)
+    pages = max(1, (total + size - 1) // size)
+    return {
+        "q": q,
+        "page": n,
+        "size": size,
+        "total_pages": pages,
+        "total_items": total,
+        "items": [_row_to_card(r) for r in rows],
+    }
+
+
 @app.get("/api/page")
 async def api_page(
     n: int = 1, size: int = 13,
@@ -2486,34 +2559,7 @@ async def api_page(
             cat=cat_clean,
             premium_only=premium_only,
         )
-    converted = [
-        {
-            "kind": "news",
-            "url": r.get("url"),
-            "title": r.get("title"),
-            "image": r.get("image"),
-            "image_source": r.get("image_source"),
-            "outlet": r.get("outlet"),
-            "category": r.get("category"),
-            "lang": r.get("lang"),
-            "dek": r.get("summary"),
-            "why": r.get("why"),
-            "tier": r.get("tier"),
-            "premium": bool(r.get("premium")),
-            "weight": float(r.get("weight") or 1.0),
-            "quality": float(r.get("quality") or 0),
-            "premium_body": r.get("premium_body"),
-            # Card-level translation — populated on /api/translate
-            # success. Presence drives the neon border + ✦한 badge.
-            "title_ko": r.get("title_ko"),
-            "dek_ko": r.get("dek_ko"),
-            "translated_at": r.get("translated_at"),
-            "ts": r.get("published_at"),
-            "score": r.get("score") or 0,
-            "tickers": [], "sparks": {},
-        }
-        for r in items
-    ]
+    converted = [_row_to_card(r) for r in items]
     return {"page": n, "size": size, "total_pages": pages, "total_items": total, "items": converted}
 
 

@@ -428,6 +428,15 @@ function filteredNews() {
 // Items currently painted, in render order. Backs the reader's
 // prev/next arrows and its related-stories list.
 let RENDERED = [];
+// Search mode. When SEARCH_Q is set, paint() renders SEARCH_RESULTS
+// instead of the category feed; clearing the query drops straight back
+// to whatever category was active, so search is a lens over the feed
+// rather than a separate screen to escape from.
+let SEARCH_Q = "";
+let SEARCH_RESULTS = null;
+let SEARCH_TOTAL = 0;
+let SEARCH_SEQ = 0;          // guards against out-of-order responses
+
 let PAGE_OVERRIDE = null;   // items[] for the current page when >1
 let PAGE_OVERRIDE_N = null; // which page that override belongs to
 let DB_TOTAL_PAGES = 1;
@@ -471,6 +480,26 @@ function paint(scrollTop = true) {
   const totalPages = Math.max(memPages, DB_TOTAL_PAGES || 1);
 
   let slice;
+  // Search mode short-circuits the whole paging path: results are
+  // already the full set we want to show.
+  if (SEARCH_Q && SEARCH_RESULTS) {
+    slice = SEARCH_RESULTS;
+    RENDERED = slice.slice();
+    const paperS = $("#paper");
+    const paperNoImgS = $("#paper-noimg");
+    paperS.innerHTML = "";
+    paperNoImgS.innerHTML = "";
+    buildPage(slice).forEach(({ item, tier }) => {
+      const card = renderNewsCard(item, tier);
+      if (tier === "headline" || tier === "flash") paperNoImgS.appendChild(card);
+      else paperS.appendChild(card);
+    });
+    renderSearchMeta();
+    $("#pager").innerHTML = "";
+    if (scrollTop) window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
   // Use the DB-served override when present (page 2+, or any category
   // filter). Otherwise use the in-memory mixed slice.
   if (PAGE_OVERRIDE && PAGE_OVERRIDE_N === PAGE) {
@@ -710,6 +739,118 @@ async function silentRefresh() {
     console.warn("auto-refresh failed:", e);
   }
 }
+
+// ── Search ─────────────────────────────────────────────────────
+// A lens over the archive rather than a separate page: results reuse
+// the card renderer, and clearing the box drops straight back to the
+// category the user was already on.
+
+function renderSearchMeta() {
+  const meta = $("#search-meta");
+  if (!meta) return;
+  if (!SEARCH_Q) {
+    meta.classList.add("hidden");
+    meta.textContent = "";
+    return;
+  }
+  meta.classList.remove("hidden");
+  const shown = (SEARCH_RESULTS || []).length;
+  if (!shown) {
+    meta.textContent = `No results for “${SEARCH_Q}”`;
+    return;
+  }
+  meta.textContent = SEARCH_TOTAL > shown
+    ? `${SEARCH_TOTAL} results for “${SEARCH_Q}” · showing first ${shown}`
+    : `${shown} result${shown === 1 ? "" : "s"} for “${SEARCH_Q}”`;
+}
+
+async function runSearch(q) {
+  q = (q || "").trim();
+  SEARCH_Q = q;
+  const clearBtn = $("#search-clear");
+  if (clearBtn) clearBtn.hidden = !q;
+
+  if (q.length < 2) {
+    // Too short to be meaningful — drop back to the normal feed rather
+    // than showing every article that happens to contain one letter.
+    SEARCH_RESULTS = null;
+    SEARCH_TOTAL = 0;
+    if (!q) { SEARCH_Q = ""; paint(false); }
+    renderSearchMeta();
+    return;
+  }
+
+  const seq = ++SEARCH_SEQ;
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&size=40`);
+    const d = await r.json();
+    // A slower earlier request must not overwrite a newer one's results.
+    if (seq !== SEARCH_SEQ) return;
+    SEARCH_RESULTS = d.items || [];
+    SEARCH_TOTAL = d.total_items || 0;
+    paint(false);
+  } catch (e) {
+    if (seq !== SEARCH_SEQ) return;
+    SEARCH_RESULTS = [];
+    SEARCH_TOTAL = 0;
+    paint(false);
+  }
+}
+
+function exitSearch() {
+  SEARCH_Q = "";
+  SEARCH_RESULTS = null;
+  SEARCH_TOTAL = 0;
+  const input = $("#search-input");
+  if (input) input.value = "";
+  const clearBtn = $("#search-clear");
+  if (clearBtn) clearBtn.hidden = true;
+  renderSearchMeta();
+  paint(false);
+}
+
+function wireSearch() {
+  const bar = $("#searchbar");
+  const input = $("#search-input");
+  const btn = $("#search-btn");
+  const clearBtn = $("#search-clear");
+  if (!bar || !input || !btn) return;
+
+  btn.addEventListener("click", () => {
+    const opening = bar.classList.contains("hidden");
+    bar.classList.toggle("hidden", !opening);
+    btn.classList.toggle("on", opening);
+    if (opening) input.focus();
+    else exitSearch();
+  });
+
+  clearBtn?.addEventListener("click", () => {
+    exitSearch();
+    input.focus();
+  });
+
+  // Debounced so typing doesn't fire a query per keystroke.
+  let debounce = null;
+  input.addEventListener("input", () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => runSearch(input.value), 220);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      exitSearch();
+      bar.classList.add("hidden");
+      btn.classList.remove("on");
+      input.blur();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(debounce);
+      runSearch(input.value);
+    }
+  });
+}
+
 
 // ── Reader support: reading time, siblings, related ────────────
 
@@ -1838,11 +1979,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Escape") toggleSettings(false);
   });
 
+  wireSearch();
+
   $("#chips").addEventListener("click", async (e) => {
     // The ▾ expand toggle lives inside the nav but isn't a chip.
     if (e.target.closest("#chip-toggle")) return;
     const chip = e.target.closest(".chip");
     if (!chip) return;
+    // Picking a category is an explicit "show me the feed" — leave
+    // search mode rather than filtering results the user can't see.
+    if (SEARCH_Q) exitSearch();
     CAT = chip.dataset.cat;
     PAGE = 1;
     document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));

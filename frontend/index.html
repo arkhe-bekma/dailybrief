@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=88" />
+  <link rel="stylesheet" href="/static/style.css?v=89" />
 </head>
 <body>
   <header class="masthead">
@@ -23,6 +23,8 @@
       <!-- Account button — same 22×22 square as the ⚙ next to it. JS
            swaps the glyph + color based on /api/auth/whoami:
              ◌ anonymous · ◉ logged-in user · ◈ admin -->
+      <button id="search-btn" class="account-chip" type="button"
+              title="search" aria-label="search">⌕</button>
       <button id="account-btn" class="account-chip account-anon" type="button"
               title="account" aria-label="account">◌</button>
       <button id="settings-btn" title="settings" aria-label="settings">⚙</button>
@@ -142,6 +144,18 @@
   <div class="tape" id="tape"></div>
 
   <div class="headline" id="headline"></div>
+
+  <!-- Search bar. Hidden until the ⌕ in the masthead is pressed, so it
+       costs nothing visually until it's wanted. -->
+  <div class="searchbar hidden" id="searchbar">
+    <span class="search-glyph" aria-hidden="true">⌕</span>
+    <input id="search-input" class="search-input" type="search"
+           autocomplete="off" spellcheck="false"
+           placeholder="Search headlines, sources… / 기사 검색" />
+    <button id="search-clear" class="search-clear" type="button"
+            title="clear" aria-label="clear search" hidden>×</button>
+  </div>
+  <div class="search-meta hidden" id="search-meta"></div>
 
   <nav class="chips" id="chips">
     <button class="chip active" data-cat="all">◎ ALL</button>
@@ -265,6 +279,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=83"></script>
+  <script src="/static/app.js?v=84"></script>
 </body>
 </html>

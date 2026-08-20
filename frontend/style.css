@@ -3243,3 +3243,74 @@ footer {
   .reader-related-item { flex-direction: column; gap: 3px; }
   .reader-related-item .rr-outlet { min-width: 0; }
 }
+
+/* ── Search ───────────────────────────────────────────────────────
+   Sits between the headline and the category chips. Hidden until the
+   ⌕ in the masthead is pressed so it costs nothing until wanted. */
+.searchbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 620px;
+  margin: 4px auto 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-1);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.searchbar.hidden { display: none; }
+.searchbar:focus-within {
+  border-color: rgba(255,43,214,0.6);
+  box-shadow: 0 0 22px rgba(255,43,214,0.18);
+}
+.search-glyph {
+  color: var(--neon-mag);
+  font-size: 15px;
+  line-height: 1;
+  flex: none;
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: 500 14px/1.4 var(--sans);
+}
+.search-input::placeholder { color: var(--dim); }
+/* Kill Safari/Chrome's own search decorations — they don't match the
+   dark chrome and can't be themed. */
+.search-input::-webkit-search-decoration,
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-results-button { -webkit-appearance: none; }
+
+.search-clear {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.search-clear:hover { color: var(--text); }
+
+.search-meta {
+  max-width: 620px;
+  margin: -6px auto 14px;
+  padding: 0 16px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.search-meta.hidden { display: none; }
+
+#search-btn.on {
+  color: var(--neon-mag);
+  border-color: rgba(255,43,214,0.6);
+}
