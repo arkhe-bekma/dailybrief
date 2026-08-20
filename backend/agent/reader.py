@@ -186,6 +186,21 @@ def _absolutize(image: str | None, base_url: str) -> str | None:
     return image if image.startswith(("http://", "https://")) else None
 
 
+# Paginated section indexes. These extract cleanly — a listing page
+# really does hold twenty paragraphs of prose, one lede per linked
+# column — so no body check will ever reject one. The URL is the only
+# tell, and for Google-News-sourced feeds it is only visible *after*
+# resolution: the stored URL is the news.google.com link.
+_LISTING_URL_RES = [
+    _re_.compile(r"[?&]page=\d+", _re_.I),
+    _re_.compile(r"/page/\d+/?$", _re_.I),
+]
+
+
+def is_listing_url(url: str) -> bool:
+    return bool(url) and any(rx.search(url) for rx in _LISTING_URL_RES)
+
+
 def _reason_for_status(status: int) -> str:
     if status in (401, 402):
         return "paywall"
@@ -260,6 +275,17 @@ async def extract_detailed(url: str) -> tuple[Reading | None, ExtractError | Non
                 resolved = await _resolve_gnews_url(client, url)
                 if resolved and resolved != url:
                     fetch_url = resolved
+
+            # Check after resolving, not before — for Google News items
+            # the listing-page shape is invisible until then.
+            if is_listing_url(fetch_url):
+                err = ExtractError(
+                    reason="empty", status=None,
+                    detail="section index, not an article",
+                    final_url=fetch_url,
+                )
+                cache.set(cache_key, err, 86_400)
+                return None, err
 
             r = await client.get(fetch_url, follow_redirects=True, timeout=15.0)
             if r.status_code >= 400:
