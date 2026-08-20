@@ -555,7 +555,15 @@ def _is_readable(article_url: str) -> bool:
 # proxy). Now we KEEP them: the user can still click through (Google
 # redirects to the publisher) and the title/dek work fine. We only drop
 # completely empty URLs.
-_DEAD_URL_PATTERNS: tuple[str, ...] = ()
+# Pages that are never articles, matched on URL so we never spend a
+# fetch on them. Al Jazeera's /video/newsfeed/ entries come through the
+# same RSS feed as its reporting but are video players — the "body" is
+# the headline twice and a one-line caption.
+_DEAD_URL_PATTERNS: tuple[str, ...] = (
+    "aljazeera.com/video/",
+    "/gallery/",
+    "/photos/",
+)
 
 
 def _is_obviously_dead(url: str) -> bool:

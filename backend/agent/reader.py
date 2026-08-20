@@ -121,14 +121,17 @@ def body_is_substantial(text: str) -> bool:
     """
     if not text:
         return False
-    # Judge what would actually be rendered. A page whose "body" is a
-    # subscription pitch must not pass just because the pitch is long.
-    text = strip_boilerplate(text)
-    if not text:
-        return False
-    if _is_korean(text):
-        return len(text.replace(" ", "")) >= MIN_BODY_CHARS_KO
-    return len(text.split()) >= MIN_BODY_WORDS
+    # Approximate the render — same line filters /api/article applies —
+    # and then apply the identical paragraph standard. Ingest and the
+    # reader used to disagree here: raw text counted the headline,
+    # subhead and photo caption toward length, so Nikkei and HBR teasers
+    # passed ingest and were only caught (one click at a time) at read
+    # time, which meant fresh ones kept arriving every cycle.
+    paras = [
+        ln.strip() for ln in text.split("\n")
+        if ln.strip() and len(ln.strip()) >= 30
+    ]
+    return paragraphs_are_substantial(paras)
 
 
 @dataclass
@@ -202,7 +205,11 @@ def _reason_for_status(status: int) -> str:
 # sits inside the gap rather than on top of anything genuine.
 MIN_RENDERED_PARAS = 3
 MIN_RENDERED_CHARS_EN = 700
-MIN_RENDERED_CHARS_KO = 350
+# Hangul carries roughly 2.5x the information per character that Latin
+# script does, so the Korean floor is scaled rather than shared. At 350
+# this was rejecting genuine SBS/연합 news briefs — real three-paragraph
+# reports of ~290 characters, which is a full story in Korean.
+MIN_RENDERED_CHARS_KO = 250
 
 
 def paragraphs_are_substantial(paragraphs: list[str]) -> bool:
