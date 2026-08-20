@@ -2413,6 +2413,12 @@ async def article(url: str):
         boilerplate filters existed would keep serving a headline with
         an upsell under it.
         """
+        # A section index passes every body check by construction, so it
+        # has to be caught by URL — including here, where the payload may
+        # have been cached before the URL check existed and so never goes
+        # near extract_detailed.
+        if reader.is_listing_url(payload.get("final_url") or url):
+            return await _drop("empty")
         if not reader.paragraphs_are_substantial(payload.get("paragraphs") or []):
             return await _drop("empty")
         await db.record_extract_result(outlet, url, True, "")
