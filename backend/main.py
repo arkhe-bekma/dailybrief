@@ -2375,7 +2375,7 @@ async def article(url: str):
         boilerplate filters existed would keep serving a headline with
         an upsell under it.
         """
-        if not reader.body_is_substantial("\n".join(payload.get("paragraphs") or [])):
+        if not reader.paragraphs_are_substantial(payload.get("paragraphs") or []):
             return await _drop("empty")
         await db.record_extract_result(outlet, url, True, "")
         return payload

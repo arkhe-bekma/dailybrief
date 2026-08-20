@@ -193,6 +193,36 @@ def _reason_for_status(status: int) -> str:
     return "error"
 
 
+# Minimum shape of a *rendered* article body. Chosen from the live
+# distribution rather than picked out of the air: across 140 articles
+# the English median was ~3,500 characters over 16 paragraphs, and
+# everything below ~700 characters or 3 paragraphs was a paywall teaser
+# — the lede, then the headline, subhead, photo caption or an abstract.
+# The first real short articles start around 1,150 characters, so this
+# sits inside the gap rather than on top of anything genuine.
+MIN_RENDERED_PARAS = 3
+MIN_RENDERED_CHARS_EN = 700
+MIN_RENDERED_CHARS_KO = 350
+
+
+def paragraphs_are_substantial(paragraphs: list[str]) -> bool:
+    """Is the body we are about to render an actual article?
+
+    The authoritative check. Raw extraction gets a cheap pre-vote via
+    body_is_substantial; this one judges what the reader will see, after
+    the title, captions and boilerplate have been stripped out.
+    """
+    kept = [
+        p for p in (paragraphs or [])
+        if p and p.strip() and not is_boilerplate_line(p)
+    ]
+    if len(kept) < MIN_RENDERED_PARAS:
+        return False
+    body = "\n".join(kept)
+    floor = MIN_RENDERED_CHARS_KO if _is_korean(body) else MIN_RENDERED_CHARS_EN
+    return len(body) >= floor
+
+
 async def extract_detailed(url: str) -> tuple[Reading | None, ExtractError | None]:
     """Same as `extract`, but also reports the failure reason.
 
