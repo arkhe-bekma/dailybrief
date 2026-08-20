@@ -1229,6 +1229,18 @@ def _extract_health_sync(hours: int) -> dict:
             "GROUP BY reason ORDER BY n DESC",
             (since,),
         ).fetchall()
+        # Per-outlet failure reasons, so the health view can tell a
+        # permanent paywall apart from a source that actually broke.
+        per_outlet = c.execute(
+            "SELECT outlet, reason, COUNT(*) AS n FROM extract_log "
+            "WHERE ts > ? AND ok = 0 AND reason <> '' "
+            "GROUP BY outlet, reason",
+            (since,),
+        ).fetchall()
+
+    by_outlet_reason: dict[str, dict[str, int]] = {}
+    for r in per_outlet:
+        by_outlet_reason.setdefault(r["outlet"] or "", {})[r["reason"]] = r["n"]
 
     outlets = []
     tot_att = tot_ok = 0
@@ -1237,6 +1249,8 @@ def _extract_health_sync(hours: int) -> dict:
         ok = r["ok"] or 0
         tot_att += attempts
         tot_ok += ok
+        rmap = by_outlet_reason.get(r["outlet"] or "", {})
+        top_reason = max(rmap, key=rmap.get) if rmap else ""
         outlets.append({
             "outlet": r["outlet"] or "(unknown)",
             "attempts": attempts,
@@ -1245,6 +1259,8 @@ def _extract_health_sync(hours: int) -> dict:
             "success_rate": round(ok / attempts, 3) if attempts else 0.0,
             "last_ok": r["last_ok"],
             "last_try": r["last_try"],
+            "reason": top_reason,
+            "reasons": rmap,
         })
     return {
         "window_hours": hours,

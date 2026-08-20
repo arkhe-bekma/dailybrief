@@ -261,3 +261,25 @@ html, body {
   .st-legend { grid-template-columns: 1fr; gap: 2px 0; }
   .st-legend dd { margin-bottom: 8px; }
 }
+
+/* Per-row failure reason. Paywall is neutral grey, not red: it's the
+   expected state for a subscriber-only outlet, not a fault. */
+.st-tag {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: middle;
+}
+.st-tag.tag-paywall  { border-color: var(--line-2); color: var(--muted); }
+.st-tag.tag-blocked,
+.st-tag.tag-timeout,
+.st-tag.tag-error,
+.st-tag.tag-empty    { border-color: rgba(255,190,60,0.45); color: var(--warn); }
+.st-tag.tag-notfound { border-color: rgba(255,77,109,0.45); color: var(--bad); }

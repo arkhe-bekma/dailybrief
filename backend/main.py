@@ -1123,14 +1123,22 @@ async def health_extraction(hours: int = 24):
     hours = min(max(hours, 1), 24 * 30)
     data = await db.extract_health(hours)
     outlets = data.get("outlets") or []
-    # Anything with real traffic and a sub-50% success rate is worth
-    # shouting about; ignore outlets with only a couple of attempts,
-    # where the rate is noise.
-    degraded = [
+
+    # A subscription-only outlet failing is not a fault — NYT, FT,
+    # Reuters and MarketWatch will paywall us forever, and counting them
+    # as "degraded" would leave the page permanently red and therefore
+    # ignorable. Split them out: `subscription` is expected behaviour,
+    # `degraded` is something that might actually be fixable.
+    struggling = [
         o for o in outlets
         if o["attempts"] >= 3 and o["success_rate"] < 0.5
     ]
-    degraded.sort(key=lambda o: (o["success_rate"], -o["attempts"]))
+    subscription = [o for o in struggling if o.get("reason") == "paywall"]
+    degraded = [o for o in struggling if o.get("reason") != "paywall"]
+    for group in (subscription, degraded):
+        group.sort(key=lambda o: (o["success_rate"], -o["attempts"]))
+
+    data["subscription"] = subscription
     data["degraded"] = degraded
     data["status"] = (
         "ok" if not degraded

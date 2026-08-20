@@ -43,24 +43,32 @@ function renderBanner(data) {
   const banner = $("banner");
   const text = $("banner-text");
   const degraded = data.degraded || [];
-  const state = data.status || "ok";
-  banner.dataset.state = state;
+  const subscription = data.subscription || [];
+  banner.dataset.state = data.status || "ok";
 
   if (!data.attempts) {
     banner.dataset.state = "ok";
     text.textContent = "No article reads recorded in this window yet.";
     return;
   }
-  const pct = Math.round((data.success_rate || 0) * 100);
-  if (state === "ok") {
+  // Subscriber-only outlets are expected to fall back, so they're
+  // mentioned but never drive the banner colour — a permanently red
+  // page is a page nobody reads.
+  const subNote = subscription.length
+    ? ` ${subscription.length} subscriber-only source` +
+      `${subscription.length === 1 ? " is" : "s are"} showing summaries, as expected.`
+    : "";
+
+  if (!degraded.length) {
+    const pct = Math.round((data.success_rate || 0) * 100);
     text.textContent =
-      `All sources healthy — ${pct}% of articles opened with the full body.`;
+      `All sources working — ${pct}% of articles opened with the full body.` + subNote;
   } else {
     const names = degraded.slice(0, 3).map((o) => o.outlet).join(", ");
     const more = degraded.length > 3 ? ` +${degraded.length - 3} more` : "";
     text.textContent =
       `${degraded.length} source${degraded.length === 1 ? "" : "s"} degraded ` +
-      `(${names}${more}). Their articles show the publisher's summary instead.`;
+      `(${names}${more}).` + subNote;
   }
 }
 
@@ -101,7 +109,12 @@ function renderOutlets(data) {
           el("span", { class: "st-bar" }, el("i", { style: `width:${pct}%` })),
         ]),
       ]),
-      el("td", { class: "ago" }, ago(o.last_ok)),
+      el("td", {}, [
+        o.reason
+          ? el("span", { class: `st-tag tag-${o.reason}` }, o.reason)
+          : null,
+        el("span", { class: "ago" }, ago(o.last_ok)),
+      ]),
     ]);
   }));
 }
