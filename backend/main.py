@@ -78,6 +78,20 @@ async def _start():
         await auth.init()  # creates users/sessions tables + seeds admin/admin
     except Exception as exc:
         print(f"[startup] auth.init failed: {exc!r}", flush=True)
+    # Retired outlets can never produce a readable body, so their stored
+    # articles are dead weight in the feed. Purging by outlet at boot is
+    # instant (no fetches) and idempotent, and it stops leftovers from
+    # the archive surfacing until someone clicks one.
+    try:
+        retired = [o["name"] for o in getattr(config, "RETIRED_OUTLETS", [])]
+        if retired:
+            res = await db.purge_outlets(retired)
+            if res["articles"]:
+                print(f"[startup] purged {res['articles']} articles + "
+                      f"{res['readers']} bodies from {len(retired)} retired outlets",
+                      flush=True)
+    except Exception as exc:
+        print(f"[startup] purge_outlets failed: {exc!r}", flush=True)
     # Idempotent repair: drop image values that aren't absolute URLs, so
     # cards stop requesting publisher photos from our own domain.
     try:

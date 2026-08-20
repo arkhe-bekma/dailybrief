@@ -856,6 +856,41 @@ def _drop_article_sync(url: str, reason: str) -> dict:
     return _delete_article_by_user_sync(url, f"nobody:{(reason or 'error')[:16]}")
 
 
+def _purge_outlets_sync(names: list[str]) -> dict:
+    """Delete every article belonging to the given outlets.
+
+    Used for outlets retired because they never yield a readable body.
+    No network involved — membership alone is the verdict, so this can
+    run at boot without a fetch budget. Their URLs are NOT added to
+    blocked_urls: the outlets are gone from OUTLETS so nothing will
+    re-ingest them, and if one is ever un-retired we want a clean slate.
+    """
+    if not names:
+        return {"articles": 0, "readers": 0}
+    marks = ",".join("?" for _ in names)
+    with closing(_conn()) as c:
+        urls = [
+            r["url"] for r in c.execute(
+                f"SELECT url FROM articles WHERE outlet IN ({marks})", names
+            ).fetchall()
+        ]
+        a = c.execute(
+            f"DELETE FROM articles WHERE outlet IN ({marks})", names
+        ).rowcount or 0
+        r = 0
+        for i in range(0, len(urls), 400):
+            chunk = urls[i:i + 400]
+            m2 = ",".join("?" for _ in chunk)
+            r += c.execute(
+                f"DELETE FROM reader_results WHERE url IN ({m2})", chunk
+            ).rowcount or 0
+    return {"articles": a, "readers": r}
+
+
+async def purge_outlets(names: list[str]) -> dict:
+    return await asyncio.to_thread(_purge_outlets_sync, names)
+
+
 async def drop_article(url: str, reason: str = "error") -> dict:
     return await asyncio.to_thread(_drop_article_sync, url, reason)
 
