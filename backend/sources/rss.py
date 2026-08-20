@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -244,6 +245,10 @@ _CANONICAL_RE = re.compile(
 _JS_REDIRECT_RE = re.compile(
     r'(?:location\.replace|location\.href|window\.location)\s*=\s*["\']([^"\']+)["\']',
 )
+# The modern Google News article shell carries the signature + timestamp
+# needed by the batchexecute RPC (see _gnews_rpc_resolve).
+_GN_SIG_RE = re.compile(r'data-n-a-sg="([^"]+)"')
+_GN_TS_RE  = re.compile(r'data-n-a-ts="([^"]+)"')
 
 
 def _decode_gnews_article_url(url: str) -> str | None:
@@ -270,6 +275,101 @@ def _decode_gnews_article_url(url: str) -> str | None:
     return None
 
 
+_GNEWS_RPC_ENDPOINT = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
+
+
+def _gnews_article_id(url: str) -> str | None:
+    """The opaque `CBMi…` article id out of any Google News URL shape."""
+    m = _GNEWS_ARTICLE_RE.search(url)
+    return m.group(1) if m else None
+
+
+async def _gnews_rpc_resolve(
+    client: httpx.AsyncClient, gnews_url: str,
+) -> str | None:
+    """Resolve a Google News link via Google's own batchexecute RPC.
+
+    Google retired the old interstitial in 2025: the article id is now an
+    encrypted blob (so base64-decoding it yields no URL), and the page no
+    longer carries data-n-au / canonical / meta-refresh pointing at the
+    publisher. The only route left is the `Fbv4je` RPC that the Google
+    News SPA itself calls.
+
+    Two steps:
+      1. GET the article shell **with `?oc=5`** — without that parameter
+         Google answers 400 Bad Request, which is exactly why every
+         Google-News-sourced card started failing to open. The shell
+         carries `data-n-a-sg` (signature) + `data-n-a-ts` (timestamp).
+      2. POST id/ts/signature to batchexecute; the response embeds the
+         real publisher URL.
+    """
+    art_id = _gnews_article_id(gnews_url)
+    if not art_id:
+        return None
+
+    try:
+        shell = await client.get(
+            f"https://news.google.com/rss/articles/{art_id}?oc=5",
+            timeout=10.0, follow_redirects=True, headers=_OG_HEADERS,
+        )
+        if shell.status_code != 200:
+            return None
+        body = shell.text
+        sig = _GN_SIG_RE.search(body)
+        ts = _GN_TS_RE.search(body)
+        if not sig or not ts:
+            return None
+    except Exception:
+        return None
+
+    inner = json.dumps(
+        [
+            "garturlreq",
+            [
+                ["X", "X", ["X", "X"], None, None, 1, 1, "US:en",
+                 None, 1, None, None, None, None, None, 0, 1],
+                "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0,
+            ],
+            art_id,
+            int(ts.group(1)),
+            sig.group(1),
+        ],
+        separators=(",", ":"),
+    )
+    payload = json.dumps([[["Fbv4je", inner, None, "generic"]]], separators=(",", ":"))
+
+    try:
+        resp = await client.post(
+            _GNEWS_RPC_ENDPOINT,
+            data={"f.req": payload},
+            timeout=10.0,
+            headers={
+                **_OG_HEADERS,
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            },
+        )
+        if resp.status_code != 200:
+            return None
+        # Response is JSONP-guarded ()]}'\n) newline-delimited JSON arrays.
+        for line in resp.text.splitlines():
+            if "Fbv4je" not in line:
+                continue
+            try:
+                frames = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            for frame in frames:
+                if (isinstance(frame, list) and len(frame) > 2
+                        and frame[1] == "Fbv4je" and frame[2]):
+                    parsed = json.loads(frame[2])
+                    # ["garturlres", "<real url>", 1]
+                    if len(parsed) > 1 and str(parsed[1]).startswith("http"):
+                        return parsed[1]
+    except Exception:
+        return None
+    return None
+
+
 async def _resolve_gnews_url(
     client: httpx.AsyncClient, gnews_url: str,
 ) -> str:
@@ -283,7 +383,15 @@ async def _resolve_gnews_url(
     if cached is not None:
         return cached or gnews_url
 
-    # Strategy 1: HTTP fetch with browser UA, follow redirects.
+    # Strategy 1: the batchexecute RPC. This is the only one that still
+    # works on post-2025 Google News links, so it goes first.
+    rpc = await _gnews_rpc_resolve(client, gnews_url)
+    if rpc and "news.google.com" not in rpc:
+        cache.set(ckey, rpc, 86_400)
+        return rpc
+
+    # Strategy 2: plain redirect / interstitial scrape. Still catches the
+    # older `/articles/` links that predate the RPC-only scheme.
     try:
         r = await client.get(
             gnews_url, timeout=8.0, follow_redirects=True, headers=_OG_HEADERS,
@@ -303,7 +411,8 @@ async def _resolve_gnews_url(
     except Exception:
         pass
 
-    # Strategy 2: base64-decode the article ID.
+    # Strategy 3: base64-decode the article ID. Only works on the legacy
+    # plaintext payloads; kept as a last resort for old cached links.
     decoded = _decode_gnews_article_url(gnews_url)
     if decoded:
         cache.set(ckey, decoded, 86_400)

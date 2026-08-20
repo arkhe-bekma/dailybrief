@@ -1,0 +1,50 @@
+# Live Caddy config for dailybrief.fun.
+#
+# This is the file that actually runs on the Lightsail box at
+# /etc/caddy/Caddyfile. It lives in the repo so the edge config is
+# reviewable and restorable instead of existing only on the server.
+#
+# Apply with:  sudo cp scripts/Caddyfile.production /etc/caddy/Caddyfile \
+#              && sudo systemctl reload caddy
+
+{
+    auto_https disable_redirects
+}
+
+dailybrief.fun, www.dailybrief.fun {
+    encode gzip
+
+    # ── /pro — CLOSED ────────────────────────────────────────────
+    # DailyBrief Pro is off for now. Both /pro and /pro/* redirect to
+    # the main app (302, not 301 — a permanent redirect would get
+    # cached by browsers and make re-opening /pro painful).
+    #
+    # To re-open: delete the two lines below and uncomment the block
+    # underneath. The static build is still on disk at
+    # /srv/dailybrief_pro and in the repo at frontend_pro/.
+    @pro path /pro /pro/*
+    redir @pro / 302
+
+    # @pro_root path /pro
+    # redir @pro_root /pro/ permanent
+    #
+    # handle_path /pro/* {
+    #     root * /srv/dailybrief_pro
+    #     try_files {path} /index.html
+    #     file_server
+    # }
+
+    reverse_proxy 127.0.0.1:8000
+}
+
+# Backup URL — works without the custom domain.
+35-90-60-42.sslip.io {
+    encode gzip
+    reverse_proxy 127.0.0.1:8000
+}
+
+# Plain HTTP via IP (needs Chrome HTTPS-Only mode off).
+:80 {
+    encode gzip
+    reverse_proxy 127.0.0.1:8000
+}

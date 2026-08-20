@@ -112,6 +112,23 @@ def _init_sync() -> None:
                 outlet     TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_blocked_at ON blocked_urls(blocked_at DESC);
+
+            -- Per-attempt log of reader extractions. One row per
+            -- /api/article miss-path attempt, so the health view can
+            -- answer "which outlets stopped opening, and since when".
+            -- `reason` is a stable slug from reader.ExtractError:
+            -- paywall / blocked / notfound / timeout / empty / error,
+            -- empty string on success.
+            CREATE TABLE IF NOT EXISTS extract_log (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts      INTEGER NOT NULL,
+                outlet  TEXT NOT NULL DEFAULT '',
+                url     TEXT NOT NULL,
+                ok      INTEGER NOT NULL,
+                reason  TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_extract_ts ON extract_log(ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_extract_outlet ON extract_log(outlet, ts DESC);
         """)
 
         # Phase 2: migrations. Each ALTER is idempotent — ignore the
@@ -1065,6 +1082,89 @@ def _bump_counter_sync(key: str, by: int = 1) -> None:
 
 async def bump_counter(key: str, by: int = 1) -> None:
     await asyncio.to_thread(_bump_counter_sync, key, by)
+
+
+# ── extraction health ─────────────────────────────────────────────
+# Trimmed to the most recent EXTRACT_LOG_KEEP rows on write so the table
+# can't grow without bound on a 1 GB box. That's ~2 weeks of traffic at
+# current volume, which is all the health view looks at anyway.
+EXTRACT_LOG_KEEP = 5000
+
+
+def _record_extract_result_sync(outlet: str, url: str, ok: bool, reason: str) -> None:
+    with closing(_conn()) as c:
+        c.execute(
+            "INSERT INTO extract_log(ts, outlet, url, ok, reason) VALUES(?,?,?,?,?)",
+            (int(time.time()), outlet or "", url, 1 if ok else 0, reason or ""),
+        )
+        # Cheap trim: only bother when we're plausibly over the cap.
+        n = c.execute("SELECT COUNT(*) AS n FROM extract_log").fetchone()["n"]
+        if n > EXTRACT_LOG_KEEP * 1.2:
+            c.execute(
+                "DELETE FROM extract_log WHERE id NOT IN ("
+                "  SELECT id FROM extract_log ORDER BY id DESC LIMIT ?)",
+                (EXTRACT_LOG_KEEP,),
+            )
+
+
+async def record_extract_result(outlet: str, url: str, ok: bool, reason: str) -> None:
+    """Log one reader extraction attempt. Never raises — health telemetry
+    must not be able to break article rendering."""
+    try:
+        await asyncio.to_thread(_record_extract_result_sync, outlet, url, ok, reason)
+    except Exception as exc:      # pragma: no cover - telemetry only
+        print(f"[db] record_extract_result failed: {exc!r}", flush=True)
+
+
+def _extract_health_sync(hours: int) -> dict:
+    since = int(time.time()) - hours * 3600
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT outlet,"
+            "       COUNT(*) AS attempts,"
+            "       SUM(ok) AS ok,"
+            "       MAX(CASE WHEN ok=1 THEN ts END) AS last_ok,"
+            "       MAX(ts) AS last_try "
+            "FROM extract_log WHERE ts > ? GROUP BY outlet ORDER BY attempts DESC",
+            (since,),
+        ).fetchall()
+        reasons = c.execute(
+            "SELECT reason, COUNT(*) AS n FROM extract_log "
+            "WHERE ts > ? AND ok = 0 AND reason <> '' "
+            "GROUP BY reason ORDER BY n DESC",
+            (since,),
+        ).fetchall()
+
+    outlets = []
+    tot_att = tot_ok = 0
+    for r in rows:
+        attempts = r["attempts"] or 0
+        ok = r["ok"] or 0
+        tot_att += attempts
+        tot_ok += ok
+        outlets.append({
+            "outlet": r["outlet"] or "(unknown)",
+            "attempts": attempts,
+            "ok": ok,
+            "failed": attempts - ok,
+            "success_rate": round(ok / attempts, 3) if attempts else 0.0,
+            "last_ok": r["last_ok"],
+            "last_try": r["last_try"],
+        })
+    return {
+        "window_hours": hours,
+        "attempts": tot_att,
+        "ok": tot_ok,
+        "failed": tot_att - tot_ok,
+        "success_rate": round(tot_ok / tot_att, 3) if tot_att else None,
+        "outlets": outlets,
+        "reasons": {r["reason"]: r["n"] for r in reasons},
+    }
+
+
+async def extract_health(hours: int = 24) -> dict:
+    """Per-outlet reader success rate over the last `hours`."""
+    return await asyncio.to_thread(_extract_health_sync, hours)
 
 
 # ── stats (for /api/lab) ───────────────────────────────────────────

@@ -1103,6 +1103,34 @@ async def health():
     return {"ok": True}
 
 
+@app.get("/api/health/extraction")
+async def health_extraction(hours: int = 24):
+    """Per-outlet reader success rate.
+
+    Public on purpose: this is the view that answers "why won't articles
+    open", and it holds no user data. Degrading outlets sort to the top
+    so the problem is the first thing on screen.
+    """
+    hours = min(max(hours, 1), 24 * 30)
+    data = await db.extract_health(hours)
+    outlets = data.get("outlets") or []
+    # Anything with real traffic and a sub-50% success rate is worth
+    # shouting about; ignore outlets with only a couple of attempts,
+    # where the rate is noise.
+    degraded = [
+        o for o in outlets
+        if o["attempts"] >= 3 and o["success_rate"] < 0.5
+    ]
+    degraded.sort(key=lambda o: (o["success_rate"], -o["attempts"]))
+    data["degraded"] = degraded
+    data["status"] = (
+        "ok" if not degraded
+        else "degraded" if len(degraded) < 4
+        else "failing"
+    )
+    return data
+
+
 @app.post("/api/admin/rebuild")
 async def admin_rebuild(request: Request, purge_now: int = 0):
     await _require_admin(request)
@@ -2124,6 +2152,73 @@ def _split_paragraphs(text: str) -> list[str]:
     return out
 
 
+# ── Reader failure handling ──────────────────────────────────────
+# Publishers block us for reasons we cannot (and should not try to)
+# route around: hard paywalls, bot walls, geo gates. When live
+# extraction can't reach the body we still hold the outlet's own RSS
+# summary for that story, so the reader shows that plus a prominent
+# link to the original instead of a dead end.
+_READER_FAIL_COPY = {
+    "paywall": (
+        "이 기사는 유료 구독자 전용입니다 — 저장된 요약만 표시합니다.",
+        "This story is behind the publisher's paywall — showing the saved summary.",
+    ),
+    "blocked": (
+        "매체가 본문 접근을 차단했습니다 — 저장된 요약만 표시합니다.",
+        "The publisher blocked automated access — showing the saved summary.",
+    ),
+    "notfound": (
+        "원문이 삭제되었거나 이동했습니다 — 저장된 요약만 표시합니다.",
+        "The original article has moved or been removed — showing the saved summary.",
+    ),
+    "timeout": (
+        "매체 응답이 너무 느립니다 — 저장된 요약만 표시합니다.",
+        "The publisher's site timed out — showing the saved summary.",
+    ),
+}
+_READER_FAIL_DEFAULT = (
+    "본문을 불러오지 못했습니다 — 저장된 요약만 표시합니다.",
+    "Couldn't load the full article — showing the saved summary.",
+)
+
+
+def _reader_fallback_from_row(
+    url: str,
+    article_row: dict | None,
+    err: "reader.ExtractError | None" = None,
+) -> dict | None:
+    """Build a reader payload from the stored articles row when live
+    extraction can't reach the publisher. Uses the card summary as the
+    body so the modal shows real text + the "open original" link instead
+    of a hard error. Returns None only when we have literally nothing
+    worth showing (no title)."""
+    if not article_row:
+        return None
+    title = (article_row.get("title") or "").strip()
+    if not title:
+        return None
+    summary = (article_row.get("summary") or "").strip()
+    paras = _split_paragraphs(summary) if summary else []
+    lang = (article_row.get("lang") or _detect_lang(title) or "en")
+    reason = (err.reason if err else "") or "error"
+    ko_copy, en_copy = _READER_FAIL_COPY.get(reason, _READER_FAIL_DEFAULT)
+    note = ko_copy if lang == "ko" else en_copy
+    return {
+        "url": url,
+        "final_url": (err.final_url if err else None) or url,
+        "title": title,
+        "image": article_row.get("image"),
+        "byline": None,
+        "excerpt": summary[:300],
+        "lang": lang,
+        "word_count": len(summary.split()),
+        "paragraphs": paras,
+        "partial": True,
+        "fail_reason": reason,
+        "note": note,
+    }
+
+
 @app.get("/api/article")
 async def article(url: str):
     """Reader-mode view of an external article.
@@ -2165,9 +2260,29 @@ async def article(url: str):
         await db.bump_counter("reader_cache_hits_disk")
         return saved
 
-    reading = await reader.extract(url)
+    reading, err = await reader.extract_detailed(url)
+    outlet = (article_row or {}).get("outlet") or ""
     if not reading:
-        return {"error": "could not extract the article body"}
+        # Live extraction failed (paywall / bot wall / dead URL). Record
+        # it against the outlet so /api/health shows which sources are
+        # degrading, then fall back to the stored summary rather than
+        # handing the user a dead end.
+        await db.record_extract_result(outlet, url, False, err.reason if err else "error")
+        fallback = _reader_fallback_from_row(url, article_row, err)
+        if fallback is not None:
+            await db.bump_counter("reader_fallback_summary")
+            # Cache the fallback for 30 min. Without this, every click on
+            # a paywalled story re-hit the publisher AND logged another
+            # failure, which both hammered the outlet and dragged the
+            # health success-rate down relative to cached successes.
+            # 30 min (not 24 h) so a transient block recovers on its own.
+            cache.set(full_key, fallback, 1800)
+            return fallback
+        return {
+            "error": "could not extract the article body",
+            "reason": err.reason if err else "error",
+        }
+    await db.record_extract_result(outlet, url, True, "")
 
     # No LLM rewrite — show the publisher's body directly, just cleaned
     # of emojis / section headers / photo credits / mojibake. Cheaper,
@@ -2178,6 +2293,10 @@ async def article(url: str):
     paragraphs = _dedup_with_title(_split_paragraphs(reading.text), clean_title)
     result = {
         "url": url,
+        # Where the body actually came from — for Google-News-sourced
+        # items this is the publisher, not the Google interstitial, so
+        # "open original" lands somewhere useful.
+        "final_url": reading.final_url or url,
         "title": clean_title,
         "image": reading.image,
         "byline": reading.byline,

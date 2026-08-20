@@ -2878,15 +2878,63 @@ footer {
   .reader-loading { animation: none; }
 }
 
-.reader-img {
+/* Hero photo — a real <img>, not a background box.
+   Full-bleed width; height follows the photo's own ratio so nothing is
+   cropped and the subject stays where the photographer put it. The
+   wrapper holds the rounded corner + the pre-load placeholder so the
+   layout doesn't jump when the image lands. */
+.reader-img-wrap {
   width: 100%;
-  aspect-ratio: 16/9;
-  background-size: cover;
-  background-position: center;
-  background-color: var(--bg-2);
-  border-radius: 12px;
   margin-bottom: 22px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-2);
+  /* Placeholder ratio only until the real image reports its own; once
+     .loaded lands the height is whatever the photo needs. */
+  min-height: 120px;
+  display: flex;
+  align-items: center;      /* photo sits centred while it loads */
+  justify-content: center;
+  transition: min-height 200ms ease;
+}
+.reader-img-wrap.loaded { min-height: 0; }
+
+.reader-img {
+  display: block;
+  width: 100%;
+  height: auto;             /* ← the box auto-fits the photo */
+  max-height: 70vh;         /* very tall portraits can't eat the screen */
+  object-fit: contain;
+  object-position: center;  /* centred, both axes, if ever constrained */
+  border-radius: 12px;
   /* no filter — photo shown in its real colors */
+}
+
+/* Notice shown when the publisher blocked the body and we're serving
+   the stored summary instead. Amber, not red: this is a known
+   limitation of the source, not an app error. */
+.reader-partial {
+  margin: 0 0 20px;
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 190, 60, 0.38);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(255, 190, 60, 0.07);
+  color: rgba(255, 214, 140, 0.92);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.reader-partial.reason-notfound {
+  border-color: rgba(255, 120, 120, 0.38);
+  background: rgba(255, 120, 120, 0.07);
+  color: rgba(255, 178, 178, 0.92);
+}
+/* When the body is only a summary, the link out is the primary action —
+   give it the weight to match. */
+.reader-original.emphasis {
+  border-color: rgba(255, 190, 60, 0.55);
+  color: rgba(255, 214, 140, 0.95);
+  font-weight: 700;
 }
 
 .reader-meta {

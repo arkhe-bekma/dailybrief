@@ -866,12 +866,36 @@ function renderReader(content, data, item) {
   content.innerHTML = "";   // the static .reader-close button lives OUTSIDE
                             // .reader-content, so this clears only the body.
 
+  // Hero photo. A real <img> rather than a background-image div so the
+  // box takes the photo's own aspect ratio: full-bleed width, height
+  // follows the source, nothing cropped off the top or bottom. A fixed
+  // 16/9 background box chopped the subject out of portrait and square
+  // press photos. If the publisher's CDN 404s we drop the element
+  // entirely instead of leaving an empty grey slab.
   const imgSrc = data.image || item.image;
   if (imgSrc) {
-    content.appendChild(el("div", {
+    const heroWrap = el("div", { class: "reader-img-wrap" });
+    const hero = el("img", {
       class: "reader-img",
-      style: `background-image:url('${imgSrc}')`,
-    }));
+      src: imgSrc,
+      alt: "",
+      loading: "eager",
+      decoding: "async",
+    });
+    hero.addEventListener("error", () => heroWrap.remove());
+    hero.addEventListener("load", () => heroWrap.classList.add("loaded"));
+    heroWrap.appendChild(hero);
+    content.appendChild(heroWrap);
+  }
+
+  // Extraction fell back to the stored summary (paywall / bot wall /
+  // dead link). Say so up front, in the article's own language, so the
+  // short body doesn't read like a bug.
+  if (data.partial && data.note) {
+    content.appendChild(el("div", {
+      class: `reader-partial reason-${data.fail_reason || "error"}`,
+      lang,
+    }, data.note));
   }
 
   // Build the meta strip. Word-count + formal date inherit the same
@@ -938,11 +962,14 @@ function renderReader(content, data, item) {
   content.appendChild(el("div", { class: "reader-footer" }, [
     el("span", { class: "badge" }, "✦ dailybrief reader"),
     el("a", {
-      href: data.url || item.url,
+      // final_url is the publisher URL after unwrapping Google News —
+      // without it this button dumped the user back on a Google
+      // interstitial for every Google-sourced story.
+      href: data.final_url || data.url || item.url,
       target: "_blank",
       rel: "noopener",
-      class: "reader-original",
-    }, "open original ↗"),
+      class: "reader-original" + (data.partial ? " emphasis" : ""),
+    }, data.partial ? "read the full story ↗" : "open original ↗"),
     delBtn,
   ]));
 }
