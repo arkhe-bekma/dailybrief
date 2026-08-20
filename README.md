@@ -4,9 +4,10 @@ Personalized daily news reader — a multi-source aggregator with an LLM
 curator on top, running at **[dailybrief.fun](https://dailybrief.fun)**.
 
 Articles open in an in-app reader rather than bouncing you to the
-publisher. When a publisher blocks the body (paywall, bot wall, dead
-link) the reader shows that outlet's own summary plus a link to the
-original — it never dead-ends.
+publisher. **If there is no article body, the story is not listed.** A
+headline with a two-line blurb under it is not an article, so stories
+whose body we cannot show are dropped at ingest, swept out of the feed
+every 25 minutes, and removed on sight if one slips through.
 
 ## What it pulls
 
@@ -23,9 +24,17 @@ original — it never dead-ends.
 | opinion | NYT Opinion, WaPo Opinion, 조선/한경/동아 오피니언 |
 | korea / kent | 한겨레, 매일경제, 한국경제, 경향신문, Soompi, 엑스포츠뉴스 |
 
-Outlets with no usable public feed (Reuters, Bloomberg, HBR, hankyung)
-route through Google News search and are unwrapped back to the publisher
-URL — see *Google News* below.
+Outlets with no usable public feed (HBR, hankyung, K-ent) route through
+Google News search and are unwrapped back to the publisher URL — see
+*Google News* below. Pin such queries to the publisher's **article
+path** (`site:hankyung.com/article`): a bare `site:` or section-path
+query makes Google return paginated section indexes, which extract
+cleanly as twenty paragraphs of prose and are only detectable by URL.
+
+`config.RETIRED_OUTLETS` holds 24 outlets removed because they never
+yield a readable body — hard paywalls (NYT, Reuters, Bloomberg, FT,
+Economist, MarketWatch) and sites that render the body in JS (조선일보,
+JTBC). Each was measured, not assumed. Restoring one is a single line.
 
 Also on the page: a price tape, large on-chain transfers, disclosed
 politician trades, and a YouTube strip.
@@ -92,6 +101,7 @@ Open <http://localhost:8000>.
 | `GET /api/health` | Liveness |
 | `GET /api/health/extraction?hours=` | Per-source reader success rate |
 | `GET /api/health/feeds` | Probe every feed (admin, uncached) |
+| `POST /api/admin/sweep-bodies` | Drop active articles with no body |
 
 ## Google News
 
@@ -111,5 +121,8 @@ affected outlets drop to a 0% success rate.
 - **Never edit files directly on the server.** Push to `main`; the box
   syncs within a minute. See DEPLOY.md.
 - `/status` answers "why won't articles open" without a login.
-- Paywalled sources showing 0% is expected, not a regression — those
-  articles serve the publisher's summary plus a link out.
+- A source at 0% means its articles are being dropped, not shown badly.
+  Check whether it belongs in `RETIRED_OUTLETS`.
+- Adding an outlet? Verify it extracts first — fetch its feed, run
+  `reader.extract_detailed` over four articles, and only add it if they
+  come back with a body. Every outlet added this way was measured.
