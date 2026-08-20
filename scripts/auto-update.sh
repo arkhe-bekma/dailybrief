@@ -13,9 +13,16 @@ cd "$(dirname "$0")/.."
 APP_DIR="$(pwd)"
 LOG_TAG="[auto-update] $(date -u +%FT%TZ)"
 
-git fetch -q origin main || exit 0
-LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/main)
+# Cron runs this as root while the checkout is owned by `ubuntu`, and
+# git refuses that as "dubious ownership" — which silently broke every
+# cron deploy while manual `sudo` runs worked (sudo keeps HOME, so it
+# picked up ubuntu's gitconfig). Pin the exception per-invocation rather
+# than relying on root having it configured.
+GIT="git -c safe.directory=$APP_DIR"
+
+$GIT fetch -q origin main || exit 0
+LOCAL=$($GIT rev-parse HEAD)
+REMOTE=$($GIT rev-parse origin/main)
 
 [ "$LOCAL" = "$REMOTE" ] && exit 0
 
@@ -24,13 +31,13 @@ REMOTE=$(git rev-parse origin/main)
 # freezing deploys for weeks. Stash anything local into a timestamped
 # branch (never discarded, never in the way) and hard-sync instead, so a
 # stray on-server edit can't block a deploy again.
-if ! git diff --quiet || ! git diff --cached --quiet; then
+if ! $GIT diff --quiet || ! $GIT diff --cached --quiet; then
   SNAP="server-edits-$(date -u +%Y%m%d-%H%M%S)"
-  git stash push -q -u -m "$SNAP" || true
+  $GIT stash push -q -u -m "$SNAP" || true
   echo "$LOG_TAG stashed local server edits as '$SNAP' (git stash list)"
 fi
 
-git reset -q --hard "$REMOTE"
+$GIT reset -q --hard "$REMOTE"
 
 # Pick up any new Python deps (e.g. aiosqlite, trafilatura updates).
 if [ -x "$APP_DIR/.venv/bin/pip" ]; then
