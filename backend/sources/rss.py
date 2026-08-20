@@ -9,6 +9,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
+from urllib.parse import urljoin, urlparse
 
 import feedparser
 import httpx
@@ -89,6 +90,7 @@ def _parse_date(entry) -> str:
 
 
 _IMG_TAG_SRC_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
+_IMG_EXT_RE = re.compile(r"\.(?:jpe?g|png|gif|webp|avif|bmp|svg)(?:$|[?#])", re.IGNORECASE)
 # Bigger pattern that pulls width/height attrs alongside src — used by
 # _find_body_hero_image to pick the largest in-body photo when the og:image
 # turns out to be a generic brand logo.
@@ -111,27 +113,73 @@ _TWITTER_IMAGE_RE = re.compile(
 )
 
 
+def _clean_image_url(raw: str | None, base: str | None = None) -> str | None:
+    """Validate + absolutise an image URL pulled out of an RSS entry.
+
+    The feeds lie constantly: unquoted/short-circuited <img> markup makes
+    the src regex capture things like "border=0", Hacker News hands back
+    bare filenames ("NewAvatar_64.png"), and Korean dailies emit
+    entity-encoded root-relative paths. Anything that isn't a real
+    absolute http(s) URL after cleaning is dropped — a missing image
+    falls back to the category gradient, which looks fine, whereas a
+    junk one renders as a broken-image 404 against our own domain.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    url = unescape(raw.strip()).replace("&#x2F;", "/").replace("&#47;", "/")
+    if not url or url.startswith("data:"):
+        return None
+    if url.startswith("//"):
+        url = "https:" + url
+    elif not url.startswith(("http://", "https://")):
+        if not base:
+            return None
+        # Before joining, sanity-check that this even looks like a path.
+        # A capture like "border=0" is a stray attribute the src regex
+        # picked up, not a URL, and joining it would happily produce
+        # https://outlet.example/border=0.
+        looks_like_path = "/" in url or _IMG_EXT_RE.search(url)
+        if not looks_like_path or ("=" in url.split("?", 1)[0] and "/" not in url):
+            return None
+        url = urljoin(base, url)
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    # A real host has a dot and no whitespace/= sign — that alone throws
+    # out every observed junk value.
+    host = parsed.netloc
+    if not host or "." not in host or any(ch in host for ch in " ="):
+        return None
+    return url
+
+
 def _extract_image(entry) -> str | None:
     """First pass — look at every place an RSS feed can stash an image."""
+    # Relative paths in a feed are relative to the article, so keep the
+    # entry link around as the base for _clean_image_url.
+    base = entry.get("link") or ""
+
     # 1. media:content / media:thumbnail
     for key in ("media_content", "media_thumbnail"):
         media = entry.get(key)
         if media and isinstance(media, list) and media:
-            url = media[0].get("url")
-            if url:
-                return url
+            got = _clean_image_url(media[0].get("url"), base)
+            if got:
+                return got
 
     # 2. enclosure / link with image type
     for link in entry.get("links", []):
         if link.get("type", "").startswith("image/") and link.get("href"):
-            return link["href"]
+            got = _clean_image_url(link["href"], base)
+            if got:
+                return got
 
     # 3. itunes:image (some podcast-y feeds)
     itunes_img = entry.get("itunes_image") or entry.get("image")
     if isinstance(itunes_img, dict):
-        href = itunes_img.get("href") or itunes_img.get("url")
-        if href:
-            return href
+        got = _clean_image_url(itunes_img.get("href") or itunes_img.get("url"), base)
+        if got:
+            return got
 
     # 4. First <img src="…"> inside any HTML content field
     for field in ("content", "summary_detail", "summary", "description"):
@@ -141,9 +189,10 @@ def _extract_image(entry) -> str | None:
         if isinstance(val, dict):
             val = val.get("value", "")
         if isinstance(val, str) and val:
-            m = _IMG_TAG_SRC_RE.search(val)
-            if m:
-                return unescape(m.group(1))
+            for m in _IMG_TAG_SRC_RE.finditer(val):
+                got = _clean_image_url(m.group(1), base)
+                if got:
+                    return got
 
     return None
 

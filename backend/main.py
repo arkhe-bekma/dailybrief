@@ -77,6 +77,14 @@ async def _start():
         await auth.init()  # creates users/sessions tables + seeds admin/admin
     except Exception as exc:
         print(f"[startup] auth.init failed: {exc!r}", flush=True)
+    # Idempotent repair: drop image values that aren't absolute URLs, so
+    # cards stop requesting publisher photos from our own domain.
+    try:
+        fixed = await db.repair_bad_images()
+        if fixed:
+            print(f"[startup] cleared {fixed} non-absolute article images", flush=True)
+    except Exception as exc:
+        print(f"[startup] repair_bad_images failed: {exc!r}", flush=True)
     # Restore any API keys the admin previously set via the settings
     # popover. Settings rows survive restarts; os.environ does not.
     try:

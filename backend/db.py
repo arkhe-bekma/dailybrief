@@ -1134,6 +1134,32 @@ async def bump_counter(key: str, by: int = 1) -> None:
     await asyncio.to_thread(_bump_counter_sync, key, by)
 
 
+# ── one-off repairs ───────────────────────────────────────────────
+def _repair_bad_images_sync() -> int:
+    """Null out stored image values that aren't absolute http(s) URLs.
+
+    RSS feeds fed us junk for a long time — stray attribute fragments
+    ("border=0"), bare filenames, entity-encoded relative paths. A
+    relative value makes the browser request it from *our* domain, so
+    the card renders a broken image and logs a 404. Nulling it drops the
+    card back to the category gradient, and the next reader open
+    backfills a real absolute URL via update_article_image.
+
+    Idempotent — safe to run on every boot.
+    """
+    with closing(_conn()) as c:
+        cur = c.execute(
+            "UPDATE articles SET image = NULL "
+            "WHERE image IS NOT NULL AND image != '' "
+            "  AND image NOT LIKE 'http://%' AND image NOT LIKE 'https://%'"
+        )
+        return cur.rowcount or 0
+
+
+async def repair_bad_images() -> int:
+    return await asyncio.to_thread(_repair_bad_images_sync)
+
+
 # ── extraction health ─────────────────────────────────────────────
 # Trimmed to the most recent EXTRACT_LOG_KEEP rows on write so the table
 # can't grow without bound on a 1 GB box. That's ~2 weeks of traffic at

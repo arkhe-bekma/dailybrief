@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import trafilatura
@@ -79,6 +80,28 @@ class ExtractError:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def _absolutize(image: str | None, base_url: str) -> str | None:
+    """Make an extracted image URL absolute against the page it came from.
+
+    trafilatura hands back whatever the markup held, which is often a
+    root-relative path ("/resources/images/x.jpg"). Stored raw, the
+    browser resolves it against *our* domain and 404s — HBR photos were
+    being requested from dailybrief.fun. Anything that isn't http(s)
+    after joining (data:, blank) is dropped rather than stored broken.
+    """
+    if not image:
+        return None
+    image = image.strip()
+    if not image or image.startswith("data:"):
+        return None
+    if image.startswith("//"):
+        scheme = urlparse(base_url).scheme or "https"
+        return f"{scheme}:{image}"
+    if not image.startswith(("http://", "https://")):
+        image = urljoin(base_url, image)
+    return image if image.startswith(("http://", "https://")) else None
 
 
 def _reason_for_status(status: int) -> str:
@@ -166,7 +189,7 @@ async def extract_detailed(url: str) -> tuple[Reading | None, ExtractError | Non
         try:
             data = json.loads(data_json)
             title   = (data.get("title") or "").strip()
-            image   = data.get("image")
+            image   = _absolutize(data.get("image"), fetch_url)
             byline  = data.get("author")
             text    = (data.get("text") or data.get("raw_text") or "").strip()
             excerpt = (data.get("description") or "").strip()[:300]
