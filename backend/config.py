@@ -86,10 +86,8 @@ OUTLETS: list[dict] = [
     # World / general (en)
     {"name": "BBC",          "category": "world", "lang": "en", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
     {"name": "CNN",          "category": "world", "lang": "en", "url": "http://rss.cnn.com/rss/cnn_topstories.rss"},
-    {"name": "NYT",          "category": "world", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"},
     {"name": "Guardian",     "category": "world", "lang": "en", "url": "https://www.theguardian.com/world/rss"},
     {"name": "Al Jazeera",   "category": "world", "lang": "en", "url": "https://www.aljazeera.com/xml/rss/all.xml"},
-    {"name": "Reuters",      "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "WaPo",         "category": "world", "lang": "en", "url": "https://feeds.washingtonpost.com/rss/world"},
     {"name": "ABC News",     "category": "world", "lang": "en", "url": "https://abcnews.go.com/abcnews/topstories"},
     {"name": "NBC News",     "category": "world", "lang": "en", "url": "https://feeds.nbcnews.com/nbcnews/public/news"},
@@ -98,10 +96,14 @@ OUTLETS: list[dict] = [
 
     # USA economics / business (en)
     {"name": "WSJ",          "category": "econ",  "lang": "en", "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml"},
-    {"name": "Bloomberg",    "category": "econ",  "lang": "en", "url": "https://news.google.com/rss/search?q=site:bloomberg.com&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "FT",           "category": "econ",  "lang": "en", "url": "https://www.ft.com/?format=rss"},
     {"name": "CNBC",         "category": "econ",  "lang": "en", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},
-    {"name": "MarketWatch",  "category": "econ",  "lang": "en", "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories"},
+    # Added 2026-08-20 to refill econ after Bloomberg/FT/MarketWatch were
+    # retired. Each verified 4/4 readable before being added here.
+    {"name": "Yahoo Finance", "category": "econ",  "lang": "en", "url": "https://finance.yahoo.com/news/rssindex"},
+    {"name": "Fortune",       "category": "econ",  "lang": "en", "url": "https://fortune.com/feed/fortune-feeds/?id=3230629"},
+    {"name": "Guardian Business", "category": "econ", "lang": "en", "url": "https://www.theguardian.com/uk/business/rss"},
+    {"name": "NPR Business",  "category": "econ",  "lang": "en", "url": "https://feeds.npr.org/1006/rss.xml"},
+    {"name": "Semafor Business", "category": "econ", "lang": "en", "url": "https://www.semafor.com/rss.xml"},
 
     # General tech (en)
     {"name": "The Verge",    "category": "tech",  "lang": "en", "url": "https://www.theverge.com/rss/index.xml"},
@@ -115,20 +117,22 @@ OUTLETS: list[dict] = [
     {"name": "9to5Mac",      "category": "tech",  "lang": "en", "url": "https://9to5mac.com/feed/"},
 
     # AI / LLM (en)
-    {"name": "OpenAI",       "category": "ai",    "lang": "en", "url": "https://openai.com/news/rss.xml"},
     {"name": "Hugging Face", "category": "ai",    "lang": "en", "url": "https://huggingface.co/blog/feed.xml"},
     {"name": "MIT Tech Rev", "category": "ai",    "lang": "en", "url": "https://www.technologyreview.com/feed/"},
     {"name": "VentureBeat AI","category": "ai",   "lang": "en", "url": "https://venturebeat.com/category/ai/feed/"},
     {"name": "SemiWiki",     "category": "ai",    "lang": "en", "url": "https://semiwiki.com/feed/"},
 
     # Crypto (en)
-    {"name": "CoinDesk",     "category": "crypto","lang": "en", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"},
     {"name": "Decrypt",      "category": "crypto","lang": "en", "url": "https://decrypt.co/feed"},
-    {"name": "The Block",    "category": "crypto","lang": "en", "url": "https://news.google.com/rss/search?q=site:theblock.co&hl=en-US&gl=US&ceid=US:en"},
     {"name": "Cointelegraph","category": "crypto","lang": "en", "url": "https://cointelegraph.com/rss"},
+    # Added 2026-08-20 to refill crypto after CoinDesk/The Block were
+    # retired. Blockworks, Bitcoin Magazine and The Defiant were tested
+    # too and all 403 — not added.
+    {"name": "CryptoSlate",  "category": "crypto","lang": "en", "url": "https://cryptoslate.com/feed/"},
+    {"name": "BeInCrypto",   "category": "crypto","lang": "en", "url": "https://beincrypto.com/feed/"},
+    {"name": "DL News",      "category": "crypto","lang": "en", "url": "https://www.dlnews.com/arc/outboundfeeds/rss/"},
 
     # Korea — native (ko)
-    {"name": "조선일보",      "category": "korea", "lang": "ko", "url": "https://www.chosun.com/arc/outboundfeeds/rss/?outputType=xml"},
     {"name": "한겨레",        "category": "korea", "lang": "ko", "url": "https://www.hani.co.kr/rss/"},
     {"name": "동아일보",      "category": "korea", "lang": "ko", "url": "https://www.donga.com/news/rss"},
     {"name": "경향신문",      "category": "korea", "lang": "ko", "url": "https://www.khan.co.kr/rss/rssdata/total_news.xml"},
@@ -148,7 +152,6 @@ OUTLETS: list[dict] = [
     {"name": "네이버 세계",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:n.news.naver.com+%EC%84%B8%EA%B3%84&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "네이버 생활",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:n.news.naver.com+%EC%83%9D%ED%99%9C&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "네이버 스포츠",   "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:sports.news.naver.com&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "네이버 부동산",   "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:land.naver.com+OR+site:n.news.naver.com+%EB%B6%80%EB%8F%99%EC%82%B0&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "ZDNet Korea",  "category": "korea", "lang": "ko", "url": "https://feeds.feedburner.com/zdkorea"},
     {"name": "전자신문",      "category": "korea", "lang": "ko", "url": "https://rss.etnews.com/Section902.xml"},
     # Additional Korean mainstream + economic dailies (round out the roster
@@ -162,43 +165,33 @@ OUTLETS: list[dict] = [
     {"name": "파이낸셜뉴스",  "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:fnnews.com&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "KBS 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.kbs.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "MBC 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:imnews.imbc.com&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "JTBC 뉴스",    "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.jtbc.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "YTN",          "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:ytn.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "Yonhap EN",    "category": "korea", "lang": "en", "url": "https://en.yna.co.kr/RSS/news.xml"},
 
     # Opinion / Columnists (en) — 칼럼
-    {"name": "NYT Opinion",      "category": "opinion", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Opinion.xml"},
     {"name": "WaPo Opinion",     "category": "opinion", "lang": "en", "url": "https://feeds.washingtonpost.com/rss/opinions"},
-    {"name": "Bloomberg Op-Ed",  "category": "opinion", "lang": "en", "url": "https://news.google.com/rss/search?q=site:bloomberg.com/opinion&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "FT Opinion",       "category": "opinion", "lang": "en", "url": "https://www.ft.com/opinion?format=rss"},
-    {"name": "Economist",        "category": "opinion", "lang": "en", "url": "https://www.economist.com/the-world-this-week/rss.xml"},
     {"name": "Foreign Affairs",  "category": "opinion", "lang": "en", "url": "https://www.foreignaffairs.com/rss.xml"},
     {"name": "The Atlantic",     "category": "opinion", "lang": "en", "url": "https://www.theatlantic.com/feed/all/"},
     {"name": "New Yorker",       "category": "opinion", "lang": "en", "url": "https://www.newyorker.com/feed/everything"},
     # Korean opinion / 칼럼
-    {"name": "조선 오피니언",   "category": "opinion", "lang": "ko", "url": "https://www.chosun.com/arc/outboundfeeds/rss/category/opinion/?outputType=xml"},
     {"name": "한경 오피니언",   "category": "opinion", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com/opinion&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "동아 오피니언",   "category": "opinion", "lang": "ko", "url": "https://rss.donga.com/editorials.xml"},
 
     # Science (en) — 과학
     {"name": "Quanta",           "category": "science", "lang": "en", "url": "https://www.quantamagazine.org/feed/"},
     {"name": "Nature",           "category": "science", "lang": "en", "url": "https://www.nature.com/nature.rss"},
-    {"name": "Science Magazine", "category": "science", "lang": "en", "url": "https://www.science.org/rss/news_current.xml"},
     {"name": "ScienceDaily",     "category": "science", "lang": "en", "url": "https://www.sciencedaily.com/rss/all.xml"},
     {"name": "Ars Science",      "category": "science", "lang": "en", "url": "https://feeds.arstechnica.com/arstechnica/science"},
 
     # Business (en) — 비즈니스 (벤처/창업/매니지먼트, econ과 분리)
     {"name": "Forbes",           "category": "biz", "lang": "en", "url": "https://www.forbes.com/business/feed/"},
     {"name": "Business Insider", "category": "biz", "lang": "en", "url": "https://feeds.businessinsider.com/custom/all"},
-    {"name": "Fast Company",     "category": "biz", "lang": "en", "url": "https://www.fastcompany.com/latest/rss"},
-    {"name": "Inc.",             "category": "biz", "lang": "en", "url": "https://news.google.com/rss/search?q=site:inc.com&hl=en-US&gl=US&ceid=US:en"},
     {"name": "HBR",              "category": "biz", "lang": "en", "url": "https://news.google.com/rss/search?q=site:hbr.org&hl=en-US&gl=US&ceid=US:en"},
 
     # Geopolitics (en) — 지정학 / 외교 / 안보
     {"name": "Foreign Policy",   "category": "geo", "lang": "en", "url": "https://foreignpolicy.com/feed/"},
     {"name": "War on the Rocks", "category": "geo", "lang": "en", "url": "https://warontherocks.com/feed/"},
     {"name": "Defense One",      "category": "geo", "lang": "en", "url": "https://www.defenseone.com/rss/all/"},
-    {"name": "The Diplomat",     "category": "geo", "lang": "en", "url": "https://thediplomat.com/feed/"},
     {"name": "Nikkei Asia",      "category": "geo", "lang": "en", "url": "https://asia.nikkei.com/rss/feed/nar"},
 
     # Korean entertainment — 한국 연예 (kent)
@@ -223,10 +216,8 @@ OUTLETS: list[dict] = [
     {"name": "뉴스1 연예",       "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news1.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "뉴시스 연예",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:newsis.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "한경연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "조선연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:chosun.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "MBC 연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:imnews.imbc.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "SBS 연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.sbs.co.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "JTBC 연예",       "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.jtbc.co.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "K-Pop 종합",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=K-Pop+OR+%EC%BC%80%EC%9D%B4%ED%8C%9D&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "K-드라마 종합",    "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=%ED%95%9C%EA%B5%AD%EB%93%9C%EB%9D%BC%EB%A7%88+OR+K-Drama&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "K-영화 종합",      "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=%ED%95%9C%EA%B5%AD%EC%98%81%ED%99%94+OR+%EC%98%81%ED%99%94%EA%B3%84&hl=ko&gl=KR&ceid=KR:ko"},
@@ -250,6 +241,48 @@ OUTLETS: list[dict] = [
     {"name": "한겨레 동물",       "category": "nature", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hani.co.kr+%EB%8F%99%EB%AC%BC&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "한국일보 자연",     "category": "nature", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankookilbo.com+%EC%9E%90%EC%97%B0+OR+%EB%8F%99%EB%AC%BC&hl=ko&gl=KR&ceid=KR:ko"},
 ]
+
+# ── Retired: no readable article body ────────────────────────────
+# Measured 2026-08-20 by running the reader over a sample from each
+# outlet's live articles. Every one of these returned zero extractable
+# body, every time:
+#
+#   * hard paywall / bot wall — NYT, Reuters, Bloomberg, FT, Economist,
+#     MarketWatch, CoinDesk, The Block, The Diplomat, Fast Company,
+#     Inc., Science Magazine, OpenAI
+#   * body rendered client-side in JS — 조선일보, 조선연예, 조선 오피니언,
+#     JTBC 뉴스, JTBC 연예, 네이버 부동산
+#
+# The ingest gate would drop their stories anyway, so keeping them in
+# OUTLETS only burns fetches and crowds readable stories out of the
+# per-cycle probe budget. They stay here as data rather than being
+# deleted: if one opens up (or we ever add a headless renderer), moving
+# the line back into OUTLETS is the whole change.
+RETIRED_OUTLETS: list[dict] = [
+    {"name": "NYT",          "category": "world", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"},
+    {"name": "Reuters",      "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Bloomberg",    "category": "econ",  "lang": "en", "url": "https://news.google.com/rss/search?q=site:bloomberg.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "FT",           "category": "econ",  "lang": "en", "url": "https://www.ft.com/?format=rss"},
+    {"name": "MarketWatch",  "category": "econ",  "lang": "en", "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories"},
+    {"name": "OpenAI",       "category": "ai",    "lang": "en", "url": "https://openai.com/news/rss.xml"},
+    {"name": "CoinDesk",     "category": "crypto","lang": "en", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"},
+    {"name": "The Block",    "category": "crypto","lang": "en", "url": "https://news.google.com/rss/search?q=site:theblock.co&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "조선일보",      "category": "korea", "lang": "ko", "url": "https://www.chosun.com/arc/outboundfeeds/rss/?outputType=xml"},
+    {"name": "네이버 부동산",   "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:land.naver.com+OR+site:n.news.naver.com+%EB%B6%80%EB%8F%99%EC%82%B0&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "JTBC 뉴스",    "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.jtbc.co.kr&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "NYT Opinion",      "category": "opinion", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Opinion.xml"},
+    {"name": "Bloomberg Op-Ed",  "category": "opinion", "lang": "en", "url": "https://news.google.com/rss/search?q=site:bloomberg.com/opinion&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "FT Opinion",       "category": "opinion", "lang": "en", "url": "https://www.ft.com/opinion?format=rss"},
+    {"name": "Economist",        "category": "opinion", "lang": "en", "url": "https://www.economist.com/the-world-this-week/rss.xml"},
+    {"name": "조선 오피니언",   "category": "opinion", "lang": "ko", "url": "https://www.chosun.com/arc/outboundfeeds/rss/category/opinion/?outputType=xml"},
+    {"name": "Science Magazine", "category": "science", "lang": "en", "url": "https://www.science.org/rss/news_current.xml"},
+    {"name": "Fast Company",     "category": "biz", "lang": "en", "url": "https://www.fastcompany.com/latest/rss"},
+    {"name": "Inc.",             "category": "biz", "lang": "en", "url": "https://news.google.com/rss/search?q=site:inc.com&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "The Diplomat",     "category": "geo", "lang": "en", "url": "https://thediplomat.com/feed/"},
+    {"name": "조선연예",        "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:chosun.com+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "JTBC 연예",       "category": "kent", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:news.jtbc.co.kr+%EC%97%B0%EC%98%88&hl=ko&gl=KR&ceid=KR:ko"},
+]
+
 
 
 # ── Category labels — used by the chip nav, the curator prompt, and as
