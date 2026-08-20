@@ -2234,7 +2234,7 @@ def _scrub_cached_paragraphs(payload: dict) -> dict:
     cleaned: list[str] = []
     for p in paras:
         s = _scrub_paragraph(p)
-        if s and len(s) >= 30:
+        if s and len(s) >= 30 and not reader.is_boilerplate_line(s):
             cleaned.append(s)
     cleaned = _dedup_with_title(cleaned, payload.get("title") or "")
     if cleaned != paras:
@@ -2354,12 +2354,30 @@ async def article(url: str):
     # return path below logs — including cache hits. Logging only the
     # cache-miss path made the success rate meaningless: successes get
     # cached and stop being counted, while fallbacks keep re-logging.
-    async def _served(payload: dict) -> dict:
-        await db.record_extract_result(
-            outlet, url,
-            not payload.get("partial"),
-            payload.get("fail_reason") or "",
+    async def _drop(reason: str) -> dict:
+        await db.record_extract_result(outlet, url, False, reason)
+        await db.bump_counter("reader_dropped_no_body")
+        try:
+            await db.drop_article(url, reason=reason)
+        except Exception as exc:
+            print(f"[reader] drop_article failed for {url[:60]}: {exc!r}", flush=True)
+        cache.delete(full_key)
+        return _gone_payload(
+            url, article_row, type("E", (), {"reason": reason, "final_url": url})(),
         )
+
+    async def _served(payload: dict) -> dict:
+        """Single exit point for a successful read.
+
+        Every path lands here — memory cache, SQLite cache, fresh
+        extraction — so the "is this actually an article" verdict is
+        applied uniformly. Without this, a payload cached before the
+        boilerplate filters existed would keep serving a headline with
+        an upsell under it.
+        """
+        if not reader.body_is_substantial("\n".join(payload.get("paragraphs") or [])):
+            return await _drop("empty")
+        await db.record_extract_result(outlet, url, True, "")
         return payload
 
     full_key = f"article_reader:{url}"
@@ -2391,16 +2409,7 @@ async def article(url: str):
         # it against the outlet so /api/health shows which sources are
         # degrading, then fall back to the stored summary rather than
         # handing the user a dead end.
-        await db.record_extract_result(outlet, url, False, err.reason if err else "error")
-        await db.bump_counter("reader_dropped_no_body")
-        # Take it out of the feed so nobody else clicks it. Archive
-        # rather than hard-delete: the row stays for the lab/archive
-        # views and stops re-entering on the next RSS pass.
-        try:
-            await db.drop_article(url, reason=(err.reason if err else "error"))
-        except Exception as exc:
-            print(f"[reader] drop_article failed for {url[:60]}: {exc!r}", flush=True)
-        return _gone_payload(url, article_row, err)
+        return await _drop(err.reason if err else "error")
 
     # No LLM rewrite — show the publisher's body directly, just cleaned
     # of emojis / section headers / photo credits / mojibake. Cheaper,
@@ -2410,23 +2419,7 @@ async def article(url: str):
     clean_title = _better_title(raw_title, fallback_title or "")
     paragraphs = _dedup_with_title(_split_paragraphs(reading.text), clean_title)
 
-    # Final say belongs to the rendered body, not the raw extraction.
-    # Nikkei's "body" is a headline plus a photo caption; Nature's is two
-    # sentences and a Nature+ pitch. Both clear the raw-text bar and then
-    # collapse to nothing once the title, captions and boilerplate are
-    # stripped — which is exactly the headline-with-no-article the user
-    # objected to. Judge what the reader will see.
-    if not reader.body_is_substantial("\n".join(paragraphs)):
-        await db.record_extract_result(outlet, url, False, "empty")
-        await db.bump_counter("reader_dropped_no_body")
-        try:
-            await db.drop_article(url, reason="empty")
-        except Exception as exc:
-            print(f"[reader] drop_article failed for {url[:60]}: {exc!r}", flush=True)
-        return _gone_payload(
-            url, article_row,
-            type("E", (), {"reason": "empty", "final_url": reading.final_url})(),
-        )
+
     result = {
         "url": url,
         # Where the body actually came from — for Google-News-sourced

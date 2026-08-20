@@ -24,5 +24,11 @@ def set(key: str, value: Any, ttl_seconds: int) -> None:
     _store[key] = (time.time() + ttl_seconds, value)
 
 
+def delete(key: str) -> bool:
+    """Forget one key. Used when a cached payload turns out to be
+    unservable, so the next request re-derives instead of re-serving it."""
+    return _store.pop(key, None) is not None
+
+
 def clear() -> None:
     _store.clear()
