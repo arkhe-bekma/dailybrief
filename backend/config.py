@@ -141,7 +141,11 @@ OUTLETS: list[dict] = [
     {"name": "SBS 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=01"},
     {"name": "연합뉴스",      "category": "korea", "lang": "ko", "url": "https://www.yna.co.kr/rss/news.xml"},
     {"name": "연합 경제",     "category": "korea", "lang": "ko", "url": "https://www.yna.co.kr/rss/economy.xml"},
-    {"name": "한국경제",      "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com&hl=ko&gl=KR&ceid=KR:ko"},
+    # hankyung.com 403s datacenter IPs, so this routes via Google News.
+    # Keep the query at site:hankyung.com — narrowing it to a section
+    # path (as 한경 오피니언 did) makes Google return paginated section
+    # indexes instead of articles.
+    {"name": "한국경제",      "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com/article&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "서울신문",      "category": "korea", "lang": "ko", "url": "https://www.seoul.co.kr/xml/rss/rss_economy.xml"},
     # Naver — public RSS retired; use Google News proxy for each section.
     {"name": "네이버 뉴스",     "category": "korea", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:n.news.naver.com&hl=ko&gl=KR&ceid=KR:ko"},
@@ -173,7 +177,14 @@ OUTLETS: list[dict] = [
     {"name": "The Atlantic",     "category": "opinion", "lang": "en", "url": "https://www.theatlantic.com/feed/all/"},
     {"name": "New Yorker",       "category": "opinion", "lang": "en", "url": "https://www.newyorker.com/feed/everything"},
     # Korean opinion / 칼럼
-    {"name": "한경 오피니언",   "category": "opinion", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com/opinion&hl=ko&gl=KR&ceid=KR:ko"},
+    # Added 2026-08-20 to refill opinion after the paywalled Anglo
+    # op-ed pages and the broken 한경 오피니언 feed were retired. Each
+    # verified 4/4 readable (Project Syndicate 3/4) before being added.
+    {"name": "Guardian Opinion", "category": "opinion", "lang": "en", "url": "https://www.theguardian.com/uk/commentisfree/rss"},
+    {"name": "The Conversation", "category": "opinion", "lang": "en", "url": "https://theconversation.com/us/articles.atom"},
+    {"name": "Project Syndicate","category": "opinion", "lang": "en", "url": "https://www.project-syndicate.org/rss"},
+    {"name": "한겨레 오피니언",    "category": "opinion", "lang": "ko", "url": "https://www.hani.co.kr/rss/opinion/"},
+    {"name": "경향 오피니언",     "category": "opinion", "lang": "ko", "url": "https://www.khan.co.kr/rss/rssdata/opinion_news.xml"},
     {"name": "동아 오피니언",   "category": "opinion", "lang": "ko", "url": "https://rss.donga.com/editorials.xml"},
 
     # Science (en) — 과학
@@ -258,6 +269,7 @@ OUTLETS: list[dict] = [
 # deleted: if one opens up (or we ever add a headless renderer), moving
 # the line back into OUTLETS is the whole change.
 RETIRED_OUTLETS: list[dict] = [
+    {"name": "한경 오피니언",   "category": "opinion", "lang": "ko", "url": "https://news.google.com/rss/search?q=site:hankyung.com/opinion&hl=ko&gl=KR&ceid=KR:ko"},
     {"name": "WaPo Opinion",     "category": "opinion", "lang": "en", "url": "https://feeds.washingtonpost.com/rss/opinions"},
     {"name": "NYT",          "category": "world", "lang": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"},
     {"name": "Reuters",      "category": "world", "lang": "en", "url": "https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en"},

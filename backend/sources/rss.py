@@ -563,6 +563,13 @@ _DEAD_URL_PATTERNS: tuple[str, ...] = (
     "aljazeera.com/video/",
     "/gallery/",
     "/photos/",
+    # Paginated section indexes. A Google News site: query happily
+    # returns these — every 한경 오피니언 item was
+    # hankyung.com/opinion/1159?page=N, a listing whose "body" is the
+    # opening line of thirty unrelated columns. They extract cleanly and
+    # look substantial, so nothing downstream would catch them.
+    "?page=",
+    "&page=",
 )
 
 
