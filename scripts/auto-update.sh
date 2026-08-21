@@ -13,11 +13,15 @@ cd "$(dirname "$0")/.."
 APP_DIR="$(pwd)"
 LOG_TAG="[auto-update] $(date -u +%FT%TZ)"
 
-# Cron runs this as root while the checkout is owned by `ubuntu`, and
-# git refuses that as "dubious ownership" — which silently broke every
-# cron deploy while manual `sudo` runs worked (sudo keeps HOME, so it
-# picked up ubuntu's gitconfig). Pin the exception per-invocation rather
-# than relying on root having it configured.
+# Run this as `ubuntu`, the owner of the checkout — see DEPLOY.md.
+#
+# It used to run from root's crontab, which caused two separate
+# failures: git refused the ubuntu-owned checkout as "dubious ownership"
+# (silently killing every cron deploy, while manual `sudo` runs worked
+# because sudo keeps HOME and picked up ubuntu's gitconfig), and the
+# runs that did succeed left root-owned objects in .git, so ubuntu could
+# no longer fetch. The safe.directory pin stays as belt-and-braces in
+# case anyone runs this as root again.
 GIT="git -c safe.directory=$APP_DIR"
 
 # --tags so checkpoint tags land on the box too: a rollback should be
@@ -47,14 +51,15 @@ if [ -x "$APP_DIR/.venv/bin/pip" ]; then
   "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt" || true
 fi
 
-systemctl restart dailybrief
+# sudo works either way: a no-op when already root, required as ubuntu.
+sudo systemctl restart dailybrief
 
 # Confirm it actually came back up; a deploy that leaves the service dead
 # should be loud in the log, not silent.
 sleep 5
-if systemctl is-active --quiet dailybrief; then
+if sudo systemctl is-active --quiet dailybrief; then
   echo "$LOG_TAG deployed $LOCAL -> $REMOTE, service active"
 else
   echo "$LOG_TAG DEPLOY FAILED: dailybrief is not active after restart"
-  systemctl status dailybrief --no-pager -n 20 || true
+  sudo systemctl status dailybrief --no-pager -n 20 || true
 fi

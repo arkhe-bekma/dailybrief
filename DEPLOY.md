@@ -112,12 +112,19 @@ The static build lives in `frontend_pro/` and on the box at
 
 To have the Lightsail box pull every new commit on `main` automatically:
 
+Install it in **ubuntu's** crontab, not root's — the checkout is owned
+by `ubuntu`, and running git as root leaves root-owned objects in
+`.git` that `ubuntu` can then no longer write to. The script uses
+`sudo systemctl` for the restart, which `ubuntu` can do passwordlessly.
+
 ```bash
 # On the Lightsail box, once:
 chmod +x ~/dailybrief/scripts/auto-update.sh
-( sudo crontab -l 2>/dev/null | grep -v dailybrief; \
+sudo touch /var/log/dailybrief-deploy.log
+sudo chown ubuntu:ubuntu /var/log/dailybrief-deploy.log
+{ crontab -l 2>/dev/null | grep -v dailybrief || true; \
   echo "* * * * * /home/ubuntu/dailybrief/scripts/auto-update.sh \
->> /var/log/dailybrief-deploy.log 2>&1" ) | sudo crontab -
+>> /var/log/dailybrief-deploy.log 2>&1"; } | crontab -
 ```
 
 Every minute, root checks `origin/main` for a new SHA. If there's one,
