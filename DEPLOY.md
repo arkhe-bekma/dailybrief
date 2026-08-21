@@ -138,6 +138,24 @@ Watch deploys land:
 sudo tail -f /var/log/dailybrief-deploy.log
 ```
 
+## Checkpoints
+
+Tag a verified-good state so there is always something known-good to roll
+back to:
+
+```bash
+git tag -a checkpoint-$(date +%Y%m%d)-slug -m "what was verified"
+git push origin checkpoint-$(date +%Y%m%d)-slug
+```
+
+Roll back with `git reset --hard <tag> && git push --force-with-lease`;
+the box syncs within a minute. Tag only states you have actually
+verified against the live site — a checkpoint nobody trusts is worse
+than none.
+
+The old `checkpoints/` directory of hand-copied snapshots on the server
+is obsolete and gitignored; it predates the box being a git checkout.
+
 ## Day-2 ops
 
 | Need | Command |
