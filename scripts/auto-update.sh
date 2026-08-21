@@ -63,3 +63,4 @@ else
   echo "$LOG_TAG DEPLOY FAILED: dailybrief is not active after restart"
   sudo systemctl status dailybrief --no-pager -n 20 || true
 fi
+
