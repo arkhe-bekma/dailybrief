@@ -20,7 +20,10 @@ LOG_TAG="[auto-update] $(date -u +%FT%TZ)"
 # than relying on root having it configured.
 GIT="git -c safe.directory=$APP_DIR"
 
-$GIT fetch -q origin main || exit 0
+# --tags so checkpoint tags land on the box too: a rollback should be
+# possible from the server itself, not only from a laptop that has the
+# repo cloned.
+$GIT fetch -q --tags origin main || exit 0
 LOCAL=$($GIT rev-parse HEAD)
 REMOTE=$($GIT rev-parse origin/main)
 
