@@ -164,6 +164,26 @@ class ExtractError:
         return asdict(self)
 
 
+# Video and streaming URLs that publishers hand back where an image
+# should be. NBC/Today video pages return an HLS manifest
+# (…/abs/index.m3u8, Content-Type application/x-mpegURL) as their
+# og:image; stored as a card image it renders as nothing at all.
+#
+# Deliberately a *reject* list, not an allow-list of image extensions:
+# plenty of real images have no extension (BeInCrypto serves
+# /img/<hash>/smart/…, Business Insider uses ?format=jpeg), so requiring
+# one would throw away more good images than bad.
+_NON_IMAGE_RES = [
+    _re_.compile(r"\.(m3u8|mpd|ts|mp4|m4v|webm|mov|avi|mkv|mp3|m4a)(\?|#|$)", _re_.I),
+    _re_.compile(r"/manifest\b|/playlist\.|/abs/index", _re_.I),
+]
+
+
+def is_non_image_url(url: str) -> bool:
+    """True for video / streaming / audio URLs masquerading as images."""
+    return bool(url) and any(rx.search(url) for rx in _NON_IMAGE_RES)
+
+
 def _absolutize(image: str | None, base_url: str) -> str | None:
     """Make an extracted image URL absolute against the page it came from.
 
@@ -183,7 +203,9 @@ def _absolutize(image: str | None, base_url: str) -> str | None:
         return f"{scheme}:{image}"
     if not image.startswith(("http://", "https://")):
         image = urljoin(base_url, image)
-    return image if image.startswith(("http://", "https://")) else None
+    if not image.startswith(("http://", "https://")):
+        return None
+    return None if is_non_image_url(image) else image
 
 
 # Paginated section indexes. These extract cleanly — a listing page

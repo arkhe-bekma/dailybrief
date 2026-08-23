@@ -1243,6 +1243,16 @@ def _repair_bad_images_sync() -> int:
             "  AND image NOT LIKE 'http://%' AND image NOT LIKE 'https://%'"
         )
         fixed = cur.rowcount or 0
+        # Video/streaming manifests stored as images (NBC/Today video
+        # pages return an HLS .m3u8 as their og:image). They render as
+        # nothing, so null them and let the sweep backfill a real photo.
+        cur2 = c.execute(
+            "UPDATE articles SET image = NULL WHERE image IS NOT NULL AND ("
+            "  image LIKE '%.m3u8%' OR image LIKE '%.mpd%' OR image LIKE '%.mp4%'"
+            "  OR image LIKE '%.webm%' OR image LIKE '%.mov%'"
+            "  OR image LIKE '%/abs/index%' OR image LIKE '%/manifest%')"
+        )
+        fixed += cur2.rowcount or 0
         # Cached reader payloads hold their own copy of the image, so a
         # repaired articles row still renders the broken one from cache.
         # Drop those rows; the next open re-extracts with the fix in

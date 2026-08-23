@@ -150,6 +150,10 @@ def _clean_image_url(raw: str | None, base: str | None = None) -> str | None:
     host = parsed.netloc
     if not host or "." not in host or any(ch in host for ch in " ="):
         return None
+    # Video/streaming manifests served as og:image — see
+    # reader.is_non_image_url.
+    if reader_agent.is_non_image_url(url):
+        return None
     return url
 
 
