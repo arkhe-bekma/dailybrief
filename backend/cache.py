@@ -41,6 +41,16 @@ _PURGE_SCAN = 40
 # once. They still expire normally on TTL.
 PINNED = ("brief:response", "rss:all")
 
+# Captured here, at module top, because this module defines a function
+# called `set` further down which shadows the builtin type everywhere
+# below it. Writing isinstance(v, (list, tuple, set)) inside a helper
+# therefore passed a *function* where a type was expected and raised
+# TypeError on every call — which took out /api/article until it was
+# caught. Bind the real types once, up front, where `set` still means
+# the builtin.
+_SEQ_TYPES = (list, tuple, set, frozenset)
+_BYTES_TYPES = (bytes, bytearray)
+
 _store: "OrderedDict[str, tuple[float, Any, int]]" = OrderedDict()
 _bytes = 0
 _evictions = 0
@@ -48,6 +58,14 @@ _expired = 0
 
 
 def _approx_size(v: Any, depth: int = 0) -> int:
+    """Wrapper so a bad estimate can never take down a cache write."""
+    try:
+        return _approx_size_inner(v, depth)
+    except Exception:
+        return 4096          # assume "biggish" and move on
+
+
+def _approx_size_inner(v: Any, depth: int = 0) -> int:
     """Rough byte cost of a cached value.
 
     Cheap and approximate on purpose — this runs on every write, so it
@@ -58,23 +76,23 @@ def _approx_size(v: Any, depth: int = 0) -> int:
         return 8
     if isinstance(v, str):
         return len(v) + 40
-    if isinstance(v, (bytes, bytearray)):
+    if isinstance(v, _BYTES_TYPES):
         return len(v) + 30
     if isinstance(v, (int, float, bool)):
         return 28
     if depth >= 4:
         return 200
     if isinstance(v, dict):
-        return 60 + sum(_approx_size(k, depth + 1) + _approx_size(x, depth + 1)
+        return 60 + sum(_approx_size_inner(k, depth + 1) + _approx_size_inner(x, depth + 1)
                         for k, x in list(v.items())[:200])
-    if isinstance(v, (list, tuple, set)):
-        return 60 + sum(_approx_size(x, depth + 1) for x in list(v)[:200])
+    if isinstance(v, _SEQ_TYPES):
+        return 60 + sum(_approx_size_inner(x, depth + 1) for x in list(v)[:200])
     d = getattr(v, "__dict__", None)
     if d:
-        return 60 + _approx_size(d, depth + 1)
+        return 60 + _approx_size_inner(d, depth + 1)
     slots = getattr(v, "__slots__", None)
     if slots:
-        return 60 + sum(_approx_size(getattr(v, s, None), depth + 1) for s in slots)
+        return 60 + sum(_approx_size_inner(getattr(v, s, None), depth + 1) for s in slots)
     return 200
 
 
