@@ -16,7 +16,22 @@ import asyncio
 import json
 import sqlite3
 import time
-from contextlib import closing
+import threading
+from contextlib import contextmanager
+
+
+@contextmanager
+def closing(conn):
+    """No-op stand-in for contextlib.closing.
+
+    Every query site is written as `with closing(_conn()) as c:`.
+    Connections are now thread-local and reused, so actually closing one
+    would throw away the page cache the reuse exists to keep — and the
+    next query on that thread would find a closed handle. Keeping the
+    call sites untouched avoids a 60-site mechanical edit whose only
+    effect would be to say the same thing differently.
+    """
+    yield conn
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +40,35 @@ DB_DIR = Path(__file__).resolve().parent / "data"
 DB_PATH = DB_DIR / "dailybrief.db"
 
 
+# One SQLite connection per worker thread, reused.
+#
+# This used to open a fresh connection for every single query, which
+# meant a mkdir syscall, two PRAGMA round trips and a cold 2 MB page
+# cache each time — on a 227 MB database, on the hot path of every
+# article open. asyncio.to_thread runs on a small pool (min(32, cpus+4)
+# = 6 threads here), so thread-local connections stay a handful of long
+# lived handles rather than thousands of short ones.
+#
+# sqlite3 connections are not safe to share across threads, which is
+# exactly why this is threading.local() and not a single global.
+_tls = threading.local()
+
+
 def _conn() -> sqlite3.Connection:
+    c = getattr(_tls, "conn", None)
+    if c is not None:
+        return c
     DB_DIR.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB_PATH, isolation_level=None, timeout=10)
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA busy_timeout=5000")
+    # ~16 MB of page cache, held for the life of the thread. Worth it now
+    # that the connection is reused; pointless when it was thrown away
+    # after one query.
+    c.execute("PRAGMA cache_size=-16000")
     c.row_factory = sqlite3.Row
+    _tls.conn = c
     return c
 
 
@@ -1283,6 +1321,7 @@ async def repair_bad_images() -> int:
 # can't grow without bound on a 1 GB box. That's ~2 weeks of traffic at
 # current volume, which is all the health view looks at anyway.
 EXTRACT_LOG_KEEP = 5000
+_extract_writes = 0
 
 
 def _record_extract_result_sync(outlet: str, url: str, ok: bool, reason: str) -> None:
@@ -1291,14 +1330,22 @@ def _record_extract_result_sync(outlet: str, url: str, ok: bool, reason: str) ->
             "INSERT INTO extract_log(ts, outlet, url, ok, reason) VALUES(?,?,?,?,?)",
             (int(time.time()), outlet or "", url, 1 if ok else 0, reason or ""),
         )
-        # Cheap trim: only bother when we're plausibly over the cap.
-        n = c.execute("SELECT COUNT(*) AS n FROM extract_log").fetchone()["n"]
-        if n > EXTRACT_LOG_KEEP * 1.2:
-            c.execute(
-                "DELETE FROM extract_log WHERE id NOT IN ("
-                "  SELECT id FROM extract_log ORDER BY id DESC LIMIT ?)",
-                (EXTRACT_LOG_KEEP,),
-            )
+        # Trim occasionally, not on every write. This ran
+        # SELECT COUNT(*) on the whole table for every article anyone
+        # opened — a full scan on the hottest write path in the app.
+        # Sampling the check keeps the table bounded at the same size for
+        # ~1/200th of the cost; the cap is a housekeeping limit, not an
+        # invariant anything depends on.
+        global _extract_writes
+        _extract_writes += 1
+        if _extract_writes % 200 == 0:
+            n = c.execute("SELECT COUNT(*) AS n FROM extract_log").fetchone()["n"]
+            if n > EXTRACT_LOG_KEEP * 1.2:
+                c.execute(
+                    "DELETE FROM extract_log WHERE id NOT IN ("
+                    "  SELECT id FROM extract_log ORDER BY id DESC LIMIT ?)",
+                    (EXTRACT_LOG_KEEP,),
+                )
 
 
 async def record_extract_result(outlet: str, url: str, ok: bool, reason: str) -> None:
