@@ -3125,3 +3125,34 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   .toast { transition: opacity 200ms ease; transform: translate(-50%, 0); }
 }
+
+/* ── Card image fallback ──────────────────────────────────────────
+   The layered-background comment on `.art .img` promised a
+   category-colour fallback for when a publisher's CDN 404s or blocks
+   hotlinking; it was never actually implemented, so a failed image
+   rendered as an empty dark slab. `.img-failed` is set from JS after an
+   Image() probe fails. The tint uses the same per-category variable the
+   chips and meta labels use, so a placeholder still reads as "this is a
+   science story" rather than as a broken card. */
+.art .img.img-failed {
+  background-image:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--cat-color, var(--neon-cyan)) 26%, transparent),
+      color-mix(in srgb, var(--cat-color, var(--neon-cyan)) 6%, transparent) 55%,
+      transparent 100%) !important;
+  background-color: var(--bg-2);
+}
+/* Map each card's category class onto the shared --cat-color hook so the
+   fallback (and anything later) can tint without a rule per category. */
+.art.cat-world   { --cat-color: var(--c-world); }
+.art.cat-econ    { --cat-color: var(--c-econ); }
+.art.cat-biz     { --cat-color: var(--c-biz); }
+.art.cat-tech    { --cat-color: var(--c-tech); }
+.art.cat-ai      { --cat-color: var(--c-ai); }
+.art.cat-crypto  { --cat-color: var(--c-crypto); }
+.art.cat-science { --cat-color: var(--c-science); }
+.art.cat-nature  { --cat-color: var(--neon-lime); }
+.art.cat-geo     { --cat-color: var(--c-geo); }
+.art.cat-opinion { --cat-color: var(--c-opinion); }
+.art.cat-korea   { --cat-color: var(--c-korea); }
+.art.cat-kent    { --cat-color: var(--c-kent); }

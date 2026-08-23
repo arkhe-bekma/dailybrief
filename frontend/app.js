@@ -285,6 +285,13 @@ function renderNewsCard(item, tier) {
   if (imgUrl) {
     const imgWrap = el("div", { class: "img-wrap" });
     const imgEl = el("div", { class: "img", style: `background-image:url('${imgUrl}')` });
+    // A background-image that 404s or gets hotlink-blocked fails
+    // silently — the card just renders an empty dark slab. Probe the URL
+    // and mark the element so CSS can fall back to the category tint,
+    // which reads as a deliberate placeholder rather than a bug.
+    const probe = new Image();
+    probe.onerror = () => imgEl.classList.add("img-failed");
+    probe.src = imgUrl;
     imgWrap.appendChild(imgEl);
     if (koBadge) imgWrap.appendChild(koBadge);
     imgWrap.appendChild(delBtn);
