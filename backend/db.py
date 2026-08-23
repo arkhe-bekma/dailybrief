@@ -17,21 +17,7 @@ import json
 import sqlite3
 import time
 import threading
-from contextlib import contextmanager
-
-
-@contextmanager
-def closing(conn):
-    """No-op stand-in for contextlib.closing.
-
-    Every query site is written as `with closing(_conn()) as c:`.
-    Connections are now thread-local and reused, so actually closing one
-    would throw away the page cache the reuse exists to keep — and the
-    next query on that thread would find a closed handle. Keeping the
-    call sites untouched avoids a 60-site mechanical edit whose only
-    effect would be to say the same thing differently.
-    """
-    yield conn
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +40,43 @@ DB_PATH = DB_DIR / "dailybrief.db"
 _tls = threading.local()
 
 
-def _conn() -> sqlite3.Connection:
+class _KeepAliveConn:
+    """A sqlite3.Connection whose close() is a no-op.
+
+    Every query site is `with closing(_conn()) as c:` — roughly sixty of
+    them, across db.py, auth.py, main.py and agent/ranker.py, each
+    importing contextlib.closing for itself. Shadowing `closing` inside
+    db.py only fixed db.py: auth.py and ranker.py went on closing the
+    shared handle, and the next query on that thread died with
+    "Cannot operate on a closed database".
+
+    Making the connection itself refuse to close is the version that
+    holds no matter which module reaches for it. Everything else
+    forwards to the real connection.
+    """
+
+    __slots__ = ("_c",)
+
+    def __init__(self, conn: sqlite3.Connection):
+        object.__setattr__(self, "_c", conn)
+
+    def close(self) -> None:          # deliberately does nothing
+        pass
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_c"), name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_c"), name, value)
+
+    def __enter__(self):
+        return object.__getattribute__(self, "_c").__enter__()
+
+    def __exit__(self, *exc):
+        return object.__getattribute__(self, "_c").__exit__(*exc)
+
+
+def _conn():
     c = getattr(_tls, "conn", None)
     if c is not None:
         return c
@@ -68,6 +90,7 @@ def _conn() -> sqlite3.Connection:
     # after one query.
     c.execute("PRAGMA cache_size=-16000")
     c.row_factory = sqlite3.Row
+    c = _KeepAliveConn(c)
     _tls.conn = c
     return c
 
