@@ -46,7 +46,10 @@ async def _refresh_agent():
             dropped = 0
             for k in list(cache._store.keys()):
                 if k.startswith("rss:") or k.startswith("article_reader:") or k == "brief:response":
-                    cache._store.pop(k, None)
+                    # cache.delete(), not _store.pop() — the cache tracks a
+                    # byte budget and popping behind its back leaks the
+                    # accounting upward until it evicts everything.
+                    cache.delete(k)
                     dropped += 1
             note = f"dropped {dropped} cache keys"
             print(f"[agent] refresh cycle: {note}", flush=True)
@@ -385,7 +388,7 @@ async def _rss_ingest_worker():
                 await db.upsert_articles(rows)
                 # Drop the brief response cache so the next /api/brief
                 # request runs the fast path and picks up the new rows.
-                cache._store.pop("brief:response", None)
+                cache.delete("brief:response")
                 print(
                     f"[rss-ingest] pulled {len(articles)} articles, "
                     f"upserted {len(rows)} rows",
@@ -432,7 +435,7 @@ async def _archive_worker():
                 stats = await db.archive_stats()
                 # Targeted invalidation: only the public-facing brief
                 # cache, NOT the RSS feed cache or per-URL caches.
-                cache._store.pop("brief:response", None)
+                cache.delete("brief:response")
                 print(
                     f"[archive] moved {moved} → archive. "
                     f"active={stats['active']} archived={stats['archived']}",
@@ -459,7 +462,7 @@ async def _ranker_worker():
         try:
             stats = await asyncio.to_thread(ranker.rank_active)
             # New scores / collapses → refresh the public feed cache.
-            cache._store.pop("brief:response", None)
+            cache.delete("brief:response")
             print(
                 f"[ranker] examined={stats['examined']} "
                 f"clusters={stats['clusters_multi']} "
@@ -492,7 +495,7 @@ async def _body_sweep_worker():
         try:
             res = await _body_sweep(limit=250, concurrency=6)
             if res["dropped"] or res["images_filled"]:
-                cache._store.pop("brief:response", None)
+                cache.delete("brief:response")
                 print(f"[sweep] checked={res['checked']} dropped={res['dropped']} "
                       f"images_filled={res['images_filled']} "
                       f"{list(res['dropped_by_outlet'].items())[:5]}", flush=True)
@@ -876,7 +879,7 @@ async def admin_rank_now(request: Request):
     Admin-only. Returns the pass stats."""
     await _require_admin(request)
     stats = await asyncio.to_thread(ranker.rank_active)
-    cache._store.pop("brief:response", None)
+    cache.delete("brief:response")
     return {"ok": True, **stats}
 
 
@@ -2545,6 +2548,7 @@ async def lab_overview(request: Request):
     )
     return {
         "cache": {
+            **cache.stats(),
             "total_keys": len(store),
             "by_prefix": dict(sorted(by_prefix.items(), key=lambda kv: -kv[1])),
         },
