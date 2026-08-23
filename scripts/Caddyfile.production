@@ -34,6 +34,23 @@ dailybrief.fun, www.dailybrief.fun {
     #     file_server
     # }
 
+    # ── Static assets served straight off disk ───────────────────
+    # These used to be proxied to uvicorn's StaticFiles mount, which
+    # meant every page load pushed ~170 KB of JS + CSS through Python on
+    # a single-worker process with 416 MB of RAM. Caddy serves them
+    # without waking the app at all.
+    #
+    # Needs `chmod o+x /home/ubuntu` so caddy can traverse to the
+    # directory (execute-only: it permits traversal, not listing).
+    #
+    # Every asset is versioned in the HTML (?v=NN), so a long immutable
+    # cache is safe — a change ships a new query string, not a new file.
+    handle_path /static/* {
+        root * /home/ubuntu/dailybrief/frontend
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
     reverse_proxy 127.0.0.1:8000
 }
 
