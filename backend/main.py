@@ -491,9 +491,10 @@ async def _body_sweep_worker():
     while True:
         try:
             res = await _body_sweep(limit=250, concurrency=6)
-            if res["dropped"]:
+            if res["dropped"] or res["images_filled"]:
                 cache._store.pop("brief:response", None)
                 print(f"[sweep] checked={res['checked']} dropped={res['dropped']} "
+                      f"images_filled={res['images_filled']} "
                       f"{list(res['dropped_by_outlet'].items())[:5]}", flush=True)
         except Exception as exc:
             print(f"[sweep] pass failed: {exc!r}", flush=True)
@@ -1211,6 +1212,11 @@ async def _body_sweep(limit: int = 400, concurrency: int = 8) -> dict:
     sem = asyncio.Semaphore(concurrency)
     dropped: dict[str, int] = {}
     kept = 0
+    images_filled = 0
+
+    def nonlocal_filled() -> None:
+        nonlocal images_filled
+        images_filled += 1
 
     async def _one(row: dict) -> None:
         nonlocal kept
@@ -1225,6 +1231,20 @@ async def _body_sweep(limit: int = 400, concurrency: int = 8) -> dict:
         if reading:
             kept += 1
             await db.record_extract_result(outlet, url, True, "")
+            # Free image backfill. We already paid for the extraction, and
+            # reader.extract_detailed hands back the hero image. Until now
+            # that image was only written when a *user* opened the story,
+            # so a card with no RSS image stayed blank until somebody
+            # clicked it — the picture appearing on open was proof we had
+            # it all along. update_article_image only fills blanks, so a
+            # good feed image is never overwritten.
+            if reading.image:
+                try:
+                    if await db.update_article_image(url, reading.image):
+                        nonlocal_filled()
+                except Exception as exc:
+                    print(f"[sweep] image backfill failed for {url[:60]}: {exc!r}",
+                          flush=True)
             return
         reason = err.reason if err else "error"
         # Only a definitive "there is no body here" removes an article.
@@ -1245,6 +1265,7 @@ async def _body_sweep(limit: int = 400, concurrency: int = 8) -> dict:
         "checked": len(rows),
         "kept": kept,
         "dropped": total,
+        "images_filled": images_filled,
         "dropped_by_outlet": dict(sorted(dropped.items(), key=lambda kv: -kv[1])),
     }
 

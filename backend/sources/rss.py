@@ -687,6 +687,15 @@ async def _probe_readability(articles: list[Article]) -> None:
             # re-fetching. Shaping it into the stored reader payload is
             # /api/article's job — doing it here would persist a
             # half-formed row that the reader would then serve verbatim.
+            #
+            # The hero image, though, is worth taking now. Plenty of
+            # feeds ship no <media:content> at all (TechCrunch, MIT Tech
+            # Review, Nature), and without this their cards stay blank
+            # until a reader opens the story and the on-open backfill
+            # fires — which is why the picture "appeared" on open.
+            if ok and reading is not None and reading.image:
+                if not getattr(article, "image", None):
+                    article.image = reading.image
 
     await asyncio.gather(*[_one(a) for a in todo])
 
