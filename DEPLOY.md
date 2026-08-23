@@ -145,6 +145,44 @@ Watch deploys land:
 sudo tail -f /var/log/dailybrief-deploy.log
 ```
 
+## Capacity
+
+Measured on the live box (416 MB RAM, 2 vCPU, one uvicorn worker) on
+2026-08-23, simulating readers paced the way a real session behaves: a
+page load is 3 requests that reach Python, an idle reader costs
+essentially nothing, and opening an article is one more request.
+
+| concurrent readers | req/s | errors | p50 | p95 | peak load |
+|---|---|---|---|---|---|
+| 500  | 38 | 0        | 89 ms  | 3.4 s  | 0.79 / 2 cpu |
+| 1000 | 61 | 16% (timeouts) | 659 ms | 21 s | 2.60 / 2 cpu |
+
+**500 concurrent readers is comfortable. 1000 is past the edge.** At
+1000 the two CPUs saturate and Caddy starts timing out upstream; the app
+never crashes and recovers on its own the moment load drops.
+
+Raw throughput ceiling is ~250 req/s. The gap between that and 61 req/s
+at the breaking point is the *arrival burst* — 1000 readers landing
+inside 12 seconds is ~250 req/s of page loads on its own.
+
+If more headroom is needed, in order:
+
+1. **Bigger instance.** 416 MB is the real limit and the cheapest thing
+   to change. Nothing below is worth doing first.
+2. **A second uvicorn worker** — but only *after* more RAM. The cache is
+   per-process, so two workers means two copies of it, half the hit
+   rate, and `brief:response` invalidation that no longer reaches both.
+   That trade is bad at 416 MB and fine at 1 GB+.
+3. **Move the cache to Redis** if it ever goes multi-worker for real.
+
+Background workers (ranker, RSS ingest, body sweep) share those two
+CPUs. The ranker alone is ~4 s of CPU over 6,000 rows every 20 minutes,
+and it shows up as a p95 spike under load. On a busier box they should
+move off the request path.
+
+Re-run the load test with `scratchpad/realistic.py`-style pacing, not a
+flat hammer — a synthetic hammer measures a number nobody experiences.
+
 ## Checkpoints
 
 Tag a verified-good state so there is always something known-good to roll
