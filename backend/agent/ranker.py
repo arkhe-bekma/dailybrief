@@ -53,7 +53,17 @@ _SIM_THRESHOLD = 0.52    # token-Jaccard ≥ this ⇒ same story
 _WINDOW_DAYS = getattr(config, "RANK_WINDOW_DAYS", 3)   # feed-relevant window;
                          # must stay >= config.FEED_MAX_AGE_HOURS/24 or the
                          # feed serves articles nothing is re-scoring
-_MAX_ARTICLES = 6000     # hard ceiling on rows loaded per pass
+# Safety ceiling, not a tuning knob: the WHERE clause's 3-day window is
+# what actually bounds this (7,943 rows at time of writing). At 6000 the
+# cap bound *first*, so the oldest ~1,700 articles inside the feed's own
+# 72h window were never re-scored and kept stale pre-decay scores — they
+# then outranked fresh news, which is how 48-72h articles ended up
+# averaging score 70 while sub-12h articles averaged 52.
+#
+# Measured: 6000 → 2.7s, 14000 → 1.3s (same 7,943 rows examined, warmer
+# cache). Covering the window costs nothing. Keep this comfortably above
+# the number of articles the feed window can hold.
+_MAX_ARTICLES = 20000    # hard ceiling on rows loaded per pass
 _BUCKET_CAP = 1400       # per (category,lang) bucket cap on pairwise compares
 
 # Baseline importance per desk, so a busy-but-minor desk (kent) doesn't
