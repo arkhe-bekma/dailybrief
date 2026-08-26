@@ -150,6 +150,10 @@ async def _start():
         asyncio.create_task(_body_sweep_worker())  # 25-min bodyless-article purge
     except Exception as exc:
         print(f"[startup] body sweep worker failed to schedule: {exc!r}", flush=True)
+    try:
+        asyncio.create_task(_published_ts_backfill_worker())   # one-time migration
+    except Exception as exc:
+        print(f"[startup] published_ts backfill failed to schedule: {exc!r}", flush=True)
     # Prewarm the cache immediately so the very first visitor doesn't
     # see an empty payload.
     try:
@@ -473,6 +477,33 @@ async def _ranker_worker():
         except Exception as exc:
             print(f"[ranker] pass failed: {exc!r}", flush=True)
         await asyncio.sleep(INTERVAL_SECONDS)
+
+
+async def _published_ts_backfill_worker():
+    """One-time backfill of articles.published_ts, in small batches.
+
+    Runs as a worker rather than inside startup because the table holds
+    ~190k rows and doing it inline cost 29 seconds of blocked boot. The
+    feed is correct the whole time — the freshness queries fall back with
+    COALESCE(published_ts, fetched_at) — so this can take as long as it
+    likes. Exits for good once there is nothing left.
+    """
+    await asyncio.sleep(90)          # let startup and the first ingest settle
+    total = 0
+    while True:
+        try:
+            n = await db.backfill_published_ts()
+        except Exception as exc:
+            print(f"[published_ts] backfill failed: {exc!r}", flush=True)
+            return
+        if not n:
+            if total:
+                print(f"[published_ts] backfill complete ({total} rows)", flush=True)
+            return
+        total += n
+        # Yield generously: this is housekeeping and must never compete
+        # with request serving on a two-core box.
+        await asyncio.sleep(3)
 
 
 async def _body_sweep_worker():

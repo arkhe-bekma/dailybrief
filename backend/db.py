@@ -13,6 +13,7 @@ backend/data/dailybrief.db. Tables:
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import sqlite3
 import time
@@ -263,6 +264,9 @@ def _init_sync() -> None:
 
 async def init() -> None:
     await asyncio.to_thread(_init_sync)
+    # Schema only. The 190k-row backfill runs in a background worker —
+    # see main._published_ts_backfill_worker.
+    await asyncio.to_thread(_ensure_published_ts_column_sync)
 
 
 # ── articles ────────────────────────────────────────────────────────
@@ -313,18 +317,39 @@ def _upsert_article_sync(row: dict) -> None:
 # ── page query (lazy / from-disk pagination) ───────────────────────
 # All article-listing paths default to the ACTIVE set (archived = 0).
 # Lab / debug callers can pass include_archived=True to see everything.
+# published_at is an ISO-8601 string with a per-feed UTC offset, and a
+# few feeds emit nonsense (one row measured 20 years out). Filtering the
+# feed on fetch time instead was the obvious dodge, but it filters by the
+# wrong clock: the reader sees the *publication* date, so a story fetched
+# yesterday and published last week still reads as a week old — which is
+# exactly the complaint. So parse it once, on write, sanity-clamp it
+# against fetched_at, and store an integer the queries can use directly.
+_PUB_MAX_AHEAD = 86400          # published more than a day after we saw it
+_PUB_MAX_BEHIND = 400 * 86400   # ...or more than a year before: not credible
+
+
+def _published_ts(published_at, fetched_at) -> int | None:
+    """ISO publish date → unix seconds, clamped to a credible range."""
+    fetched = int(fetched_at or time.time())
+    if not published_at:
+        return fetched
+    try:
+        dt = datetime.datetime.fromisoformat(str(published_at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        ts = int(dt.timestamp())
+    except (ValueError, TypeError, OverflowError):
+        return fetched
+    if ts > fetched + _PUB_MAX_AHEAD or ts < fetched - _PUB_MAX_BEHIND:
+        return fetched          # garbage date — fall back to when we saw it
+    return ts
+
+
 def _age_cutoff(hours: int) -> int:
     """Unix cutoff for the feed freshness window.
 
-    Filters on fetched_at rather than published_at for two reasons: it is
-    an integer (no ISO parsing or mixed UTC offsets in SQL), and it is
-    the more trustworthy of the two — some feeds emit garbage publication
-    dates (one row measured 20 years off). fetched_at is also *not*
-    refreshed by the upsert's ON CONFLICT clause, so it stays the
-    first-seen time and an article genuinely ages out instead of being
-    kept alive by every re-ingest.
-
-    Measured drift between the two: median 0.3h, p90 3.3h.
+    Compared against published_ts — the publication date, sanitised on
+    write by _published_ts. That is the clock the reader is judging by.
     """
     return int(time.time()) - max(1, hours) * 3600
 
@@ -339,7 +364,7 @@ def _list_articles_sync(
     if not include_archived:
         where_parts.append("archived = 0")
     if max_age_hours:
-        where_parts.append("fetched_at >= ?")
+        where_parts.append("COALESCE(published_ts, fetched_at) >= ?")
         args.append(_age_cutoff(max_age_hours))
     if cat:
         where_parts.append("category = ?")
@@ -482,7 +507,7 @@ def _list_articles_roundrobin_sync(offset: int, limit: int,
                        ELSE 99
                      END AS cat_order
               FROM articles
-              WHERE archived = 0 AND fetched_at >= ? AND validated != -1
+              WHERE archived = 0 AND COALESCE(published_ts, fetched_at) >= ? AND validated != -1
                 AND (dup_of IS NULL OR dup_of = '')
             )
             SELECT url, title, image, outlet, category, lang, summary, score,
@@ -518,7 +543,7 @@ def _count_articles_validated_sync(cat: str | None, include_archived: bool = Fal
     args: list = []
     where_parts = ["validated != -1", "(dup_of IS NULL OR dup_of = '')"]
     if max_age_hours:
-        where_parts.append("fetched_at >= ?")
+        where_parts.append("COALESCE(published_ts, fetched_at) >= ?")
         args.append(_age_cutoff(max_age_hours))
     if not include_archived:
         where_parts.append("archived = 0")
@@ -541,6 +566,62 @@ async def count_articles(
             _count_articles_validated_sync, cat, include_archived, max_age_hours,
         )
     return await asyncio.to_thread(_count_articles_sync, cat, include_archived)
+
+
+# Batched so a 190k-row backfill never becomes one giant transaction on
+# a 416 MB box, and capped per boot so startup stays fast. Newest-first
+# ordering means the feed is correct after the first pass even if the
+# archived tail takes a few more.
+_MIGRATE_BATCH = 2000
+
+
+def _ensure_published_ts_column_sync() -> None:
+    """Schema half of the migration: fast, safe to run on every boot."""
+    with closing(_conn()) as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(articles)").fetchall()}
+        if "published_ts" not in cols:
+            c.execute("ALTER TABLE articles ADD COLUMN published_ts INTEGER")
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_articles_published_ts "
+            "ON articles(published_ts DESC)"
+        )
+
+
+def _backfill_published_ts_sync(batch: int = _MIGRATE_BATCH) -> int:
+    """Populate published_ts for one batch. Returns rows written.
+
+    Newest first, deliberately. The table holds ~190k rows counting
+    archived ones; ordering arbitrarily backfilled July before August and
+    left every current article NULL, so the feed saw nothing fresh at
+    all. Recent rows are the ones the feed actually reads.
+
+    One batch only — the caller loops with awaits in between. Doing all
+    190k inline took 29s, which is 29s of blocked startup on a two-core
+    box, and the feed reads fine throughout because the queries use
+    COALESCE(published_ts, fetched_at).
+    """
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT url, published_at, fetched_at FROM articles "
+            "WHERE published_ts IS NULL ORDER BY fetched_at DESC LIMIT ?",
+            (batch,),
+        ).fetchall()
+        if not rows:
+            return 0
+        c.executemany(
+            "UPDATE articles SET published_ts = ? WHERE url = ?",
+            [(_published_ts(r["published_at"], r["fetched_at"]), r["url"])
+             for r in rows],
+        )
+        return len(rows)
+
+
+async def ensure_published_ts_column() -> None:
+    await asyncio.to_thread(_ensure_published_ts_column_sync)
+
+
+async def backfill_published_ts(batch: int = _MIGRATE_BATCH) -> int:
+    return await asyncio.to_thread(_backfill_published_ts_sync, batch)
 
 
 def _upsert_articles_batch_sync(rows: list[dict]) -> int:
@@ -572,8 +653,8 @@ def _upsert_articles_batch_sync(rows: list[dict]) -> int:
                       (url, title, image, outlet, category, lang, summary, score,
                        why, image_source, tier,
                        premium, weight, premium_body, quality,
-                       published_at, fetched_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       published_at, fetched_at, last_seen_at, published_ts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(url) DO UPDATE SET
                       title=excluded.title,
                       image=COALESCE(excluded.image, articles.image),
@@ -589,7 +670,8 @@ def _upsert_articles_batch_sync(rows: list[dict]) -> int:
                       weight=COALESCE(excluded.weight, articles.weight),
                       premium_body=COALESCE(excluded.premium_body, articles.premium_body),
                       quality=MAX(IFNULL(excluded.quality, 0), IFNULL(articles.quality, 0)),
-                      last_seen_at=excluded.last_seen_at
+                      last_seen_at=excluded.last_seen_at,
+                      published_ts=COALESCE(articles.published_ts, excluded.published_ts)
                 """, (
                     row.get("url"), row.get("title"), row.get("image"),
                     row.get("outlet"), row.get("category"), row.get("lang"),
@@ -606,6 +688,7 @@ def _upsert_articles_batch_sync(rows: list[dict]) -> int:
                     float(row.get("quality") or 0),
                     row.get("published_at"),
                     row.get("fetched_at") or now, now,
+                    _published_ts(row.get("published_at"), row.get("fetched_at") or now),
                 ))
             c.execute("COMMIT")
         except Exception:
