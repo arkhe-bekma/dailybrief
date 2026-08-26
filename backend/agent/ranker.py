@@ -182,13 +182,19 @@ def _cluster_bucket(arts: list[dict]) -> list[list[dict]]:
 
 def rank_active(dry_run: bool = False) -> dict:
     now = int(time.time())
-    cutoff = now - _WINDOW_DAYS * 86400
+    # Must cover everything the feed can show, with slack. The feed
+    # windows on publication date while this windowed on fetch date, so
+    # an article published 60h ago but first seen 80h ago was inside the
+    # feed and outside the ranker — it kept a stale pre-decay score and
+    # outranked fresh news. Same clock, wider window, no gap.
+    cutoff = now - int(_WINDOW_DAYS * 86400 * 1.5)
     with closing(db._conn()) as c:
         rows = c.execute(
             "SELECT url, outlet, category, lang, title, summary, image, "
             "published_at, fetched_at FROM articles "
-            "WHERE archived = 0 AND validated != -1 AND fetched_at >= ? "
-            "ORDER BY fetched_at DESC LIMIT ?",
+            "WHERE archived = 0 AND validated != -1 "
+            "  AND COALESCE(published_ts, fetched_at) >= ? "
+            "ORDER BY COALESCE(published_ts, fetched_at) DESC LIMIT ?",
             (cutoff, _MAX_ARTICLES),
         ).fetchall()
         arts = [dict(r) for r in rows]
