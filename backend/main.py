@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import html
+import time
 import re
 from pathlib import Path
 from typing import Optional
@@ -1639,6 +1641,46 @@ def _scrub_text(s: str | None) -> str:
     return _API_WS_RE.sub(" ", out).strip()
 
 
+def _item_age_hours(item: dict) -> float | None:
+    """Age of a feed item in hours, from its ISO publish date."""
+    ts = item.get("ts") or item.get("published_at")
+    if not ts:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return (time.time() - dt.timestamp()) / 3600.0
+
+
+def _drop_stale(mixed: list) -> list:
+    """Remove items older than the feed window.
+
+    The last line of defence, applied to every /api/brief response
+    whichever path built it. /api/page got the freshness window and this
+    endpoint did not, so the category tabs went fresh while the homepage
+    kept serving a median 6.3-day-old wall — the bug the reader actually
+    saw. Filtering at the query is still right; this makes sure a path I
+    have not thought of, or a payload cached before the fix, cannot
+    reintroduce it.
+
+    Never empties the feed: if everything looks stale (clock skew, an
+    ingest outage, missing dates) the original list is returned rather
+    than a blank page.
+    """
+    limit = getattr(config, "FEED_MAX_AGE_HOURS", 72)
+    kept = [
+        it for it in mixed
+        if not isinstance(it, dict)
+        or it.get("kind") != "news"
+        or (_item_age_hours(it) or 0) <= limit
+    ]
+    news_kept = sum(1 for it in kept if isinstance(it, dict) and it.get("kind") == "news")
+    return kept if news_kept else mixed
+
+
 def _polish_mixed(payload: dict) -> dict:
     """In-place: strip HTML out of every text field on every mixed item,
     then drop duplicate-outlet pile-ups past _API_GLOBAL_PER_OUTLET_CAP.
@@ -1646,6 +1688,7 @@ def _polish_mixed(payload: dict) -> dict:
     mixed = payload.get("mixed") or []
     if not isinstance(mixed, list):
         return payload
+    mixed = _drop_stale(mixed)
     per_outlet: dict[str, int] = {}
     out_list: list[dict] = []
     for it in mixed:
@@ -1668,7 +1711,10 @@ def _polish_mixed(payload: dict) -> dict:
     return payload
 
 
-def _brief_db_fallback() -> dict | None:
+_SPARSE_HOURS = 168
+
+
+def _brief_db_fallback(_fresh_hours: int | None = None) -> dict | None:
     """Synchronously build a tiny brief payload from SQLite only — no
     RSS fetch, no LLM headline, no image scraping. Used as the first
     response when the in-memory cache is cold on a fresh user.
@@ -1681,6 +1727,8 @@ def _brief_db_fallback() -> dict | None:
     dominate the top of the wall even when one has a huge backlog.
     SQLite supports ROW_NUMBER + CTE since 3.25; Ubuntu 22.04 has 3.37+.
     """
+    if _fresh_hours is None:
+        _fresh_hours = getattr(config, "FEED_MAX_AGE_HOURS", 72)
     try:
         import sqlite3
         from contextlib import closing as _cl
@@ -1726,7 +1774,13 @@ def _brief_db_fallback() -> dict | None:
                   -- an empty "Loading feed…" payload for weeks. Relaxed
                   -- 2026-07-05 to just active + non-failed, which matches
                   -- what /api/page already shows on the category tabs.
+                  -- Freshness. This is the homepage feed: /api/page got
+                  -- the age window first and this did not, so the
+                  -- category tabs went fresh while the front page kept
+                  -- serving a median 6.3-day-old wall with items up to 8
+                  -- days old. Same window, same clock as everywhere else.
                   WHERE archived = 0 AND validated != -1
+                    AND COALESCE(published_ts, fetched_at) >= :fresh_cutoff
                     AND (dup_of IS NULL OR dup_of = '')
                 )
                 SELECT url, title, image, outlet, category, lang, summary,
@@ -1736,8 +1790,14 @@ def _brief_db_fallback() -> dict | None:
                 WHERE cat_rank <= 10
                 ORDER BY cat_rank ASC, cat_order ASC
                 LIMIT 120
-                """
+                """,
+                {"fresh_cutoff": int(time.time()) - _fresh_hours * 3600},
             ).fetchall()
+            if not rows and _fresh_hours < _SPARSE_HOURS:
+                # Never trade a stale feed for an empty one. If the tight
+                # window found nothing (quiet night, ingest stalled), the
+                # caller retries at the sparse window before giving up.
+                return _brief_db_fallback(_fresh_hours=_SPARSE_HOURS)
             if not rows:
                 return None
             mixed = []
