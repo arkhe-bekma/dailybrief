@@ -2726,9 +2726,22 @@ async def api_page(
     size = max(1, min(size, 100))
     cat_clean = cat if cat and cat != "all" else None
     premium_only = bool(premium)
+
+    # Freshness window. Thin categories (science/ai/nature/geo run 25-60
+    # articles per 72h) widen to the sparse window rather than rendering
+    # an empty page — the point is to drop stale filler, not to punish a
+    # quiet beat.
+    max_age = getattr(config, "FEED_MAX_AGE_HOURS", 72)
     total = min(
-        await db.count_articles(cat=cat_clean), MAX_VISIBLE_ARTICLES,
+        await db.count_articles(cat=cat_clean, max_age_hours=max_age),
+        MAX_VISIBLE_ARTICLES,
     )
+    if total < getattr(config, "FEED_SPARSE_MIN_ITEMS", 12):
+        max_age = getattr(config, "FEED_MAX_AGE_HOURS_SPARSE", 168)
+        total = min(
+            await db.count_articles(cat=cat_clean, max_age_hours=max_age),
+            MAX_VISIBLE_ARTICLES,
+        )
     pages = max(1, (total + size - 1) // size)
     n = min(n, pages)
     # ALL tab (no category, no premium filter) stays round-robin balanced
@@ -2736,7 +2749,7 @@ async def api_page(
     # past page 1. Category / premium pages keep the flat ordering.
     if cat_clean is None and not premium_only:
         items = await db.list_articles_roundrobin(
-            offset=(n - 1) * size, limit=size,
+            offset=(n - 1) * size, limit=size, max_age_hours=max_age,
         )
     else:
         items = await db.list_articles(
@@ -2744,6 +2757,7 @@ async def api_page(
             limit=size,
             cat=cat_clean,
             premium_only=premium_only,
+            max_age_hours=max_age,
         )
     converted = [_row_to_card(r) for r in items]
     return {"page": n, "size": size, "total_pages": pages, "total_items": total, "items": converted}

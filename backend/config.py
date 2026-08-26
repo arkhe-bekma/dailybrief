@@ -82,6 +82,33 @@ def outlet_meta(name: str) -> dict:
     return {"premium": premium, "weight": weight}
 
 
+# ── Feed freshness window ────────────────────────────────────────
+# How old an article may be and still appear in the feed.
+#
+# There was no age filter at all. The ranker only re-scores articles
+# from the last RANK_WINDOW_DAYS, so anything older kept whatever score
+# it last earned — frozen at its peak, which included the freshness
+# bonus it had when it was new. Combined with `ORDER BY premium DESC,
+# score DESC` and a 7-day archive sweep, a four-day-old premium article
+# sat above everything current until it finally aged out. Award-show
+# line-ups were still on the front page a week later.
+#
+# 72h is deliberately the same number as RANK_WINDOW_DAYS: the feed
+# should never serve an article the ranker has stopped maintaining a
+# score for. Keep them equal.
+#
+# Measured 2026-08-25: 7,340 of 17,478 active articles fall inside 72h,
+# and every category clears 30+, so nothing starves.
+FEED_MAX_AGE_HOURS = 72
+
+# Categories with thin supply fall back to this wider window rather than
+# rendering an empty page. science/ai/nature/geo run 25-60 articles per
+# 72h, so a quiet weekend could otherwise empty them.
+FEED_MAX_AGE_HOURS_SPARSE = 168
+FEED_SPARSE_MIN_ITEMS = 12
+
+RANK_WINDOW_DAYS = 3
+
 OUTLETS: list[dict] = [
     # World / general (en)
     {"name": "BBC",          "category": "world", "lang": "en", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},

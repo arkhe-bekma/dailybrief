@@ -50,7 +50,9 @@ _STOPWORDS = {
 
 _MIN_TOKENS = 3          # titles with fewer real tokens are never clustered
 _SIM_THRESHOLD = 0.52    # token-Jaccard ≥ this ⇒ same story
-_WINDOW_DAYS = 3         # only rank the recent, feed-relevant window
+_WINDOW_DAYS = getattr(config, "RANK_WINDOW_DAYS", 3)   # feed-relevant window;
+                         # must stay >= config.FEED_MAX_AGE_HOURS/24 or the
+                         # feed serves articles nothing is re-scoring
 _MAX_ARTICLES = 6000     # hard ceiling on rows loaded per pass
 _BUCKET_CAP = 1400       # per (category,lang) bucket cap on pairwise compares
 
@@ -119,10 +121,17 @@ def _score(a: dict, corroboration: int, now: int) -> int:
     # Slow recency so freshness nudges but doesn't dominate — importance
     # stays put for days rather than reshuffling every ingest.
     age = _age_hours(a.get("published_at"), a.get("fetched_at"), now)
-    recency = max(0.0, 16.0 - age * 0.18)          # ~+16 fresh → 0 by ~90h
-    return int(max(0, min(100, round(
-        base + premium_bonus + weight_bonus + corr_bonus + recency
-    ))))
+    importance = base + premium_bonus + weight_bonus + corr_bonus
+
+    # Recency used to be an additive bonus of at most +16 that hit
+    # exactly zero at ~90h, so a 4-day-old article and a 40-day-old one
+    # scored identically and both could outrank today's news on
+    # importance alone. It is now a multiplier, so age never stops
+    # mattering: half-life of 36h, floored at 0.55 so a genuinely big
+    # story still holds its place for a day or two rather than being
+    # buried by anything newer.
+    decay = max(0.30, 0.5 ** (age / 30.0))
+    return int(max(0, min(100, round(importance * decay))))
 
 
 def _cluster_bucket(arts: list[dict]) -> list[list[dict]]:

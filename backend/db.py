@@ -313,14 +313,34 @@ def _upsert_article_sync(row: dict) -> None:
 # ── page query (lazy / from-disk pagination) ───────────────────────
 # All article-listing paths default to the ACTIVE set (archived = 0).
 # Lab / debug callers can pass include_archived=True to see everything.
+def _age_cutoff(hours: int) -> int:
+    """Unix cutoff for the feed freshness window.
+
+    Filters on fetched_at rather than published_at for two reasons: it is
+    an integer (no ISO parsing or mixed UTC offsets in SQL), and it is
+    the more trustworthy of the two — some feeds emit garbage publication
+    dates (one row measured 20 years off). fetched_at is also *not*
+    refreshed by the upsert's ON CONFLICT clause, so it stays the
+    first-seen time and an article genuinely ages out instead of being
+    kept alive by every re-ingest.
+
+    Measured drift between the two: median 0.3h, p90 3.3h.
+    """
+    return int(time.time()) - max(1, hours) * 3600
+
+
 def _list_articles_sync(
     offset: int, limit: int, cat: str | None, premium_only: bool = False,
     validated_only: bool = True, include_archived: bool = False,
+    max_age_hours: int | None = None,
 ) -> list[dict]:
     args: list = []
     where_parts: list[str] = []
     if not include_archived:
         where_parts.append("archived = 0")
+    if max_age_hours:
+        where_parts.append("fetched_at >= ?")
+        args.append(_age_cutoff(max_age_hours))
     if cat:
         where_parts.append("category = ?")
         args.append(cat)
@@ -416,10 +436,11 @@ def _count_articles_sync(cat: str | None, include_archived: bool = False) -> int
 async def list_articles(
     offset: int, limit: int, cat: str | None = None, premium_only: bool = False,
     validated_only: bool = True, include_archived: bool = False,
+    max_age_hours: int | None = None,
 ) -> list[dict]:
     return await asyncio.to_thread(
         _list_articles_sync, offset, limit, cat, premium_only, validated_only,
-        include_archived,
+        include_archived, max_age_hours,
     )
 
 
@@ -432,7 +453,8 @@ async def list_articles(
 # premium → score → published_at, so it's stable across refreshes AND
 # becomes importance-first automatically once the ranker populates
 # premium/score (today they're all 0, so it's newest-first per cat).
-def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
+def _list_articles_roundrobin_sync(offset: int, limit: int,
+                                   max_age_hours: int | None = None) -> list[dict]:
     with closing(_conn()) as c:
         rows = c.execute(
             """
@@ -460,7 +482,7 @@ def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
                        ELSE 99
                      END AS cat_order
               FROM articles
-              WHERE archived = 0 AND validated != -1
+              WHERE archived = 0 AND fetched_at >= ? AND validated != -1
                 AND (dup_of IS NULL OR dup_of = '')
             )
             SELECT url, title, image, outlet, category, lang, summary, score,
@@ -471,21 +493,33 @@ def _list_articles_roundrobin_sync(offset: int, limit: int) -> list[dict]:
             ORDER BY cat_rank ASC, cat_order ASC
             LIMIT ? OFFSET ?
             """,
-            (limit, offset),
+            # The age cutoff binds inside the CTE, so it comes before
+            # limit/offset. Positional throughout — sqlite3 will not mix
+            # named and positional parameters in one statement.
+            (_age_cutoff(max_age_hours or 10 ** 6), limit, offset),
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-async def list_articles_roundrobin(offset: int, limit: int) -> list[dict]:
+async def list_articles_roundrobin(
+    offset: int, limit: int, max_age_hours: int | None = None,
+) -> list[dict]:
     """Paginated round-robin ALL feed straight from SQLite."""
-    return await asyncio.to_thread(_list_articles_roundrobin_sync, offset, limit)
+    return await asyncio.to_thread(
+        _list_articles_roundrobin_sync, offset, limit, max_age_hours,
+    )
 
 
-def _count_articles_validated_sync(cat: str | None, include_archived: bool = False) -> int:
+def _count_articles_validated_sync(cat: str | None, include_archived: bool = False,
+                                   max_age_hours: int | None = None) -> int:
     # Same semantics as the listing path: hide validated=-1 + archived +
-    # collapsed duplicates.
+    # collapsed duplicates — and the same freshness window, otherwise the
+    # pager advertises pages the listing will not fill.
     args: list = []
     where_parts = ["validated != -1", "(dup_of IS NULL OR dup_of = '')"]
+    if max_age_hours:
+        where_parts.append("fetched_at >= ?")
+        args.append(_age_cutoff(max_age_hours))
     if not include_archived:
         where_parts.append("archived = 0")
     if cat:
@@ -500,11 +534,11 @@ def _count_articles_validated_sync(cat: str | None, include_archived: bool = Fal
 
 async def count_articles(
     cat: str | None = None, validated_only: bool = True,
-    include_archived: bool = False,
+    include_archived: bool = False, max_age_hours: int | None = None,
 ) -> int:
     if validated_only:
         return await asyncio.to_thread(
-            _count_articles_validated_sync, cat, include_archived,
+            _count_articles_validated_sync, cat, include_archived, max_age_hours,
         )
     return await asyncio.to_thread(_count_articles_sync, cat, include_archived)
 
