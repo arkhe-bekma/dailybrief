@@ -291,6 +291,32 @@ function renderNewsCard(item, tier) {
     // which reads as a deliberate placeholder rather than a bug.
     const probe = new Image();
     probe.onerror = () => imgEl.classList.add("img-failed");
+    if (tier === "hero") {
+      // The hero frame is wide and short, so `cover` scales the photo UP
+      // to fill it and then crops hard — a portrait comes out as a face
+      // filling the whole band. When the source is already big enough to
+      // fill the frame on its own, show it at its natural size instead:
+      // centred, no upscale, and whatever runs past the frame is cropped.
+      //
+      // Only the hero does this. Measured over 45 live feed images, two
+      // thirds are NARROWER than the 1356px hero frame (median 1200px,
+      // min 140px) — those still need `cover`, or they'd sit in the
+      // middle of a dark gap, which looks far worse than a crop.
+      //
+      // Deferred to rAF because the card isn't laid out yet when a
+      // cached image fires onload synchronously; clientWidth would be 0.
+      probe.onload = () => {
+        let tries = 0;
+        const fit = () => {
+          const w = imgEl.clientWidth, h = imgEl.clientHeight;
+          if (!w || !h) { if (tries++ < 3) requestAnimationFrame(fit); return; }
+          if (probe.naturalWidth >= w && probe.naturalHeight >= h) {
+            imgEl.style.backgroundSize = "auto";
+          }
+        };
+        requestAnimationFrame(fit);
+      };
+    }
     probe.src = imgUrl;
     imgWrap.appendChild(imgEl);
     if (koBadge) imgWrap.appendChild(koBadge);

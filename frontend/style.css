@@ -3199,7 +3199,12 @@ footer {
   /* ── Photo caps ──────────────────────────────────────────── */
   /* min-height:0 is required — the base rules set min-heights up to
      420px, which would otherwise fight the cap and win. */
-  .tier-hero .img    { aspect-ratio: 21/9; min-height: 0; max-height: 360px; }
+  /* 400 not 360: the frame's job is to be short, but at 21/9 across a
+     1356px card a centred crop was cutting heads off portraits. The
+     extra 40px buys back ~17% of the vertical crop and costs almost
+     nothing in feed height. app.js drops `cover` entirely on heroes
+     whose source is big enough to fill the frame unscaled. */
+  .tier-hero .img    { aspect-ratio: 21/9; min-height: 0; max-height: 400px; }
   .tier-feature .img { aspect-ratio: 16/9; min-height: 0; max-height: 250px; }
   .tier-large .img   { aspect-ratio: 16/9; min-height: 0; max-height: 200px; }
   .tier-medium .img  { aspect-ratio: 16/9; min-height: 0; max-height: 200px; }
