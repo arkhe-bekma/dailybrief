@@ -3156,3 +3156,143 @@ footer {
 .art.cat-opinion { --cat-color: var(--c-opinion); }
 .art.cat-korea   { --cat-color: var(--c-korea); }
 .art.cat-kent    { --cat-color: var(--c-kent); }
+
+/* ════════════════════════════════════════════════════════════
+   DESKTOP DENSITY  (≥1024px)
+   ────────────────────────────────────────────────────────────
+   Mobile is deliberately untouched. Every rule above that shapes
+   phones lives in a `max-width` block, and phones are the part that
+   already works — the photo-forward feed is the whole point there.
+
+   Web was the problem. The column ran to 1800px and every non-hero
+   card spanned 6 of 12 columns, so a "small" card was ~880px wide and
+   its 16/10 photo came out ~550px tall. Twelve of those stacked two
+   per row is a wall of pictures, not a newspaper.
+
+   Three levers, in the order that matters:
+     1. Cap the column at 1400px. CNN/Guardian/NYT all sit near 1200.
+     2. Rebuild the spans into a pyramid — 1 across, then 2, then 3,
+        then 4 — so importance is carried by size instead of every
+        card shouting at the same volume.
+     3. Cap image HEIGHT per tier. This is the one that actually does
+        the work: aspect-ratio alone rescales the photo with the card,
+        so a wider card just means a taller photo. The cap crops
+        instead (background-size:cover), which is what a news grid
+        wants — a 16/9 letterbox, not a portrait.
+
+   Text got the same treatment: the dek line-clamps were 7–9 lines,
+   and nine lines of grey prose under every headline is as heavy as
+   the photo above it. Desktop clamps to 2–4.
+   ════════════════════════════════════════════════════════════ */
+@media (min-width: 1024px) {
+
+  .main-col { max-width: 1400px; padding: 20px 22px 24px; }
+  #paper { gap: 14px; }
+
+  /* ── The pyramid ─────────────────────────────────────────── */
+  .tier-hero    { grid-column: span 12; }   /* 1 across */
+  .tier-feature { grid-column: span 6;  }   /* 2 across */
+  .tier-large   { grid-column: span 4;  }   /* 3 across */
+  .tier-medium  { grid-column: span 4;  }   /* 3 across */
+  .tier-small   { grid-column: span 3;  }   /* 4 across */
+
+  /* ── Photo caps ──────────────────────────────────────────── */
+  /* min-height:0 is required — the base rules set min-heights up to
+     420px, which would otherwise fight the cap and win. */
+  .tier-hero .img    { aspect-ratio: 21/9; min-height: 0; max-height: 360px; }
+  .tier-feature .img { aspect-ratio: 16/9; min-height: 0; max-height: 250px; }
+  .tier-large .img   { aspect-ratio: 16/9; min-height: 0; max-height: 200px; }
+  .tier-medium .img  { aspect-ratio: 16/9; min-height: 0; max-height: 200px; }
+  .tier-small .img   { aspect-ratio: 16/9; min-height: 0; max-height: 170px; }
+
+  /* ── Headlines, rescaled to the narrower column ──────────── */
+  /* The old sizes were tuned for an 1800px column; at 1400 the hero
+     was running 54px into four clamped lines. */
+  .tier-hero .h            { font-size: calc(clamp(30px, 2.6vw, 40px) * var(--text-scale, 1)); letter-spacing: -1.4px; -webkit-line-clamp: 3; }
+  .tier-hero .h[lang="ko"] { font-size: calc(clamp(25px, 2.1vw, 32px) * var(--text-scale, 1)); }
+  .tier-feature .h         { font-size: calc(clamp(21px, 1.7vw, 26px) * var(--text-scale, 1)); -webkit-line-clamp: 3; }
+  .tier-large .h,
+  .tier-medium .h          { font-size: calc(clamp(17px, 1.35vw, 20px) * var(--text-scale, 1)); -webkit-line-clamp: 3; }
+  .tier-small .h           { font-size: calc(clamp(15px, 1.15vw, 17px) * var(--text-scale, 1)); -webkit-line-clamp: 3; }
+
+  /* ── Deks: trimmed hard ──────────────────────────────────── */
+  .tier-hero .dek    { -webkit-line-clamp: 3; font-size: 14px; }
+  .tier-feature .dek { -webkit-line-clamp: 3; font-size: 13px; }
+  .tier-large .dek,
+  .tier-medium .dek  { -webkit-line-clamp: 2; font-size: 12.5px; }
+  .tier-small .dek   { -webkit-line-clamp: 2; font-size: 12px; }
+
+  /* Tighter card padding — 3-and-4-across cards can't afford 11px. */
+  .tier-large, .tier-medium { padding: 8px 9px; }
+  .tier-small               { padding: 7px 8px; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   AD SLOTS — reserved, not yet served
+   ────────────────────────────────────────────────────────────
+   Nothing renders these today. They exist so that turning AdSense on
+   later is a markup change, not a re-layout: the sizes below are IAB
+   standard units that already fit the grid spans above, so dropping a
+   unit in doesn't push the design around.
+
+     .ad-leaderboard  span 12 · 728×90   — under the chips bar, and
+                                           between feed bands
+     .ad-infeed       span 4  · 336×280  — sits in a large/medium slot
+                                           (a 3-across card is ~442px)
+     .ad-rect         span 3  · 300×250  — sits in a small slot
+                                           (a 4-across card is ~328px)
+
+   Two rules that matter for revenue and for not wrecking the page:
+
+   1. `min-height` is reserved up front. An ad that arrives late and
+      pushes the feed down is a Core Web Vitals (CLS) failure, and
+      CLS is a ranking input. Reserve the box, then fill it.
+   2. `:empty` keeps an unfilled slot invisible — no grey holes when
+      AdSense has no inventory, which is most of the time on a small
+      site. AdSense injects an <iframe> on fill, so the wrapper stops
+      being :empty exactly when there's something worth showing.
+
+   To turn on: load the AdSense script in index.html <head>, then have
+   the feed renderer append <div class="ad-slot ad-infeed"><ins …></ins></div>
+   into #paper at whatever cadence you want (every 8–12 cards is the
+   usual). Policy note: Google requires ad units be distinguishable
+   from content — hence the "AD" label rule below, not a bare box.
+   ════════════════════════════════════════════════════════════ */
+.ad-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(11,13,24,0.55);
+  border: 1px dashed rgba(var(--acc-2), 0.20);
+}
+/* No inventory → no hole. */
+.ad-slot:empty { display: none; }
+
+/* Required by AdSense policy: the unit must not read as editorial. */
+.ad-slot::before {
+  content: "AD";
+  position: absolute;
+  top: 6px; left: 8px;
+  font-family: var(--mono, monospace);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--dim);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.ad-slot.ad-leaderboard { grid-column: span 12; min-height: 90px;  }
+.ad-slot.ad-infeed      { grid-column: span 4;  min-height: 280px; }
+.ad-slot.ad-rect        { grid-column: span 3;  min-height: 250px; }
+
+/* Phones: never a leaderboard (728px won't fit). Everything collapses
+   to a single full-width 300×250, which is the only unit that
+   reliably fills on mobile anyway. */
+@media (max-width: 800px) {
+  .ad-slot.ad-leaderboard,
+  .ad-slot.ad-infeed,
+  .ad-slot.ad-rect { grid-column: span 12; min-height: 250px; }
+}
