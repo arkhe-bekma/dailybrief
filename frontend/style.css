@@ -3199,12 +3199,37 @@ footer {
   /* ── Photo caps ──────────────────────────────────────────── */
   /* min-height:0 is required — the base rules set min-heights up to
      420px, which would otherwise fight the cap and win. */
-  /* 400 not 360: the frame's job is to be short, but at 21/9 across a
-     1356px card a centred crop was cutting heads off portraits. The
-     extra 40px buys back ~17% of the vertical crop and costs almost
-     nothing in feed height. app.js drops `cover` entirely on heroes
-     whose source is big enough to fill the frame unscaled. */
-  .tier-hero .img    { aspect-ratio: 21/9; min-height: 0; max-height: 400px; }
+  /* ── HERO: photo beside the headline, not under it ──────────
+     The hero used to run the photo full-bleed across the card. Short
+     card + full width = a 3.39:1 letterbox, and feed photos are about
+     1.6:1, so a centred crop threw away half the picture — portraits
+     came out as a face filling the band. Measured: the live hero was
+     1200x749 in a 1354x400 frame, 47% of the height discarded.
+
+     Barely any of that was scaling (1.13x). It was the frame shape.
+     You cannot fix frame shape with background-size, so the frame
+     changed instead: the photo takes ~62% of the width and the
+     headline takes the rest. Same 400px height, 2.10:1 instead of
+     3.39:1, and the horizontal space now carries the title rather
+     than being cropped away. */
+  .tier-hero {
+    display: grid;
+    grid-template-columns: 1.62fr 1fr;
+    align-items: stretch;
+    height: 400px;
+  }
+  .tier-hero .img-wrap { height: 100%; min-height: 0; }
+  .tier-hero .img {
+    height: 100%;
+    max-height: none;
+    aspect-ratio: auto;   /* the grid row sets the height now */
+    min-height: 0;
+  }
+  .tier-hero .body {
+    justify-content: center;
+    padding: 16px 22px;
+    overflow: hidden;     /* long KO titles clamp instead of stretching */
+  }
   .tier-feature .img { aspect-ratio: 16/9; min-height: 0; max-height: 250px; }
   .tier-large .img   { aspect-ratio: 16/9; min-height: 0; max-height: 200px; }
   .tier-medium .img  { aspect-ratio: 16/9; min-height: 0; max-height: 200px; }
@@ -3213,15 +3238,17 @@ footer {
   /* ── Headlines, rescaled to the narrower column ──────────── */
   /* The old sizes were tuned for an 1800px column; at 1400 the hero
      was running 54px into four clamped lines. */
-  .tier-hero .h            { font-size: calc(clamp(30px, 2.6vw, 40px) * var(--text-scale, 1)); letter-spacing: -1.4px; -webkit-line-clamp: 3; }
-  .tier-hero .h[lang="ko"] { font-size: calc(clamp(25px, 2.1vw, 32px) * var(--text-scale, 1)); }
+  /* The headline column is ~500px now, not the full 1354, so the hero
+     type comes down and gets a 4th line to work with. */
+  .tier-hero .h            { font-size: calc(clamp(24px, 2.1vw, 31px) * var(--text-scale, 1)); letter-spacing: -1.1px; -webkit-line-clamp: 4; }
+  .tier-hero .h[lang="ko"] { font-size: calc(clamp(21px, 1.8vw, 27px) * var(--text-scale, 1)); }
   .tier-feature .h         { font-size: calc(clamp(21px, 1.7vw, 26px) * var(--text-scale, 1)); -webkit-line-clamp: 3; }
   .tier-large .h,
   .tier-medium .h          { font-size: calc(clamp(17px, 1.35vw, 20px) * var(--text-scale, 1)); -webkit-line-clamp: 3; }
   .tier-small .h           { font-size: calc(clamp(15px, 1.15vw, 17px) * var(--text-scale, 1)); -webkit-line-clamp: 3; }
 
   /* ── Deks: trimmed hard ──────────────────────────────────── */
-  .tier-hero .dek    { -webkit-line-clamp: 3; font-size: 14px; }
+  .tier-hero .dek    { -webkit-line-clamp: 4; font-size: 13.5px; }
   .tier-feature .dek { -webkit-line-clamp: 3; font-size: 13px; }
   .tier-large .dek,
   .tier-medium .dek  { -webkit-line-clamp: 2; font-size: 12.5px; }
