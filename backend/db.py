@@ -241,6 +241,13 @@ def _init_sync() -> None:
             "ALTER TABLE articles ADD COLUMN dup_of TEXT",
             "ALTER TABLE articles ADD COLUMN corroboration INTEGER DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN ranked_at INTEGER",
+            # Set once the archivist (backend/agent/archivist.py) has
+            # written this article — metadata AND body — to a file under
+            # archive/. It is the receipt that a durable copy exists
+            # outside SQLite, and it is what makes the prune safe to run:
+            # prune deletes only rows carrying this stamp, so a row can
+            # never be destroyed before it has been preserved.
+            "ALTER TABLE articles ADD COLUMN archived_to_disk_at INTEGER",
         ):
             try:
                 c.execute(stmt)
@@ -257,6 +264,13 @@ def _init_sync() -> None:
             CREATE INDEX IF NOT EXISTS idx_articles_validated ON articles(validated, fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_archived  ON articles(archived, fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_active    ON articles(archived, validated, fetched_at DESC);
+            -- Drives the archivist's backlog scan. Without it, the
+            -- oldest-first query degrades as the backlog drains: the
+            -- rows it must skip are exactly the ones already archived,
+            -- which accumulate at the head of the scan. Leading with
+            -- archived_to_disk_at lets SQLite seek straight to the
+            -- unarchived group instead of walking past 200k+ done rows.
+            CREATE INDEX IF NOT EXISTS idx_articles_to_disk    ON articles(archived_to_disk_at, fetched_at ASC);
             CREATE INDEX IF NOT EXISTS idx_reader_used        ON reader_results(last_used_at DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
         """)
@@ -1112,6 +1126,105 @@ async def list_active_urls(limit: int = 1000) -> list[dict]:
     return await asyncio.to_thread(_list_active_urls_sync, limit)
 
 
+# ── Archivist support ───────────────────────────────────────────────
+# The archivist writes articles to files under archive/. These helpers
+# are the DB half of that: hand it the rows to write, then record which
+# ones made it to disk.
+
+def _rows_for_archive_sync(urls: list[str]) -> list[dict]:
+    """Full article rows + their reader body, for the given URLs.
+
+    LEFT JOIN, not INNER: an article with no stored body is still worth
+    archiving for its metadata. The body is the prize, but a headline
+    with an outlet and a timestamp is not nothing.
+    """
+    if not urls:
+        return []
+    out: list[dict] = []
+    with closing(_conn()) as c:
+        # Chunked so a long displayed-list can't blow past SQLite's
+        # variable limit (999 on older builds).
+        for i in range(0, len(urls), 400):
+            chunk = urls[i:i + 400]
+            marks = ",".join("?" * len(chunk))
+            rows = c.execute(
+                "SELECT a.url, a.title, a.title_ko, a.image, a.outlet, "
+                "       a.category, a.lang, a.summary, a.dek_ko, a.why, "
+                "       a.score, a.premium, a.corroboration, "
+                "       a.published_at, a.published_ts, a.fetched_at, "
+                "       a.validated, a.archived, "
+                "       r.payload_json AS body_json "
+                "FROM articles a "
+                "LEFT JOIN reader_results r ON r.url = a.url "
+                f"WHERE a.url IN ({marks})",
+                chunk,
+            ).fetchall()
+            out.extend(dict(r) for r in rows)
+    return out
+
+
+async def rows_for_archive(urls: list[str]) -> list[dict]:
+    return await asyncio.to_thread(_rows_for_archive_sync, urls)
+
+
+def _mark_archived_to_disk_sync(urls: list[str], ts: int) -> int:
+    if not urls:
+        return 0
+    with closing(_conn()) as c:
+        c.executemany(
+            "UPDATE articles SET archived_to_disk_at = ? WHERE url = ?",
+            [(ts, u) for u in urls],
+        )
+        c.commit()
+        return len(urls)
+
+
+async def mark_archived_to_disk(urls: list[str], ts: int | None = None) -> int:
+    """Record that these URLs now have a durable copy under archive/.
+
+    Only ever called AFTER the file write has returned, so a crash
+    mid-write leaves the row unstamped and it gets archived again next
+    pass. Re-archiving is harmless; losing an article is not.
+    """
+    return await asyncio.to_thread(
+        _mark_archived_to_disk_sync, urls, int(ts if ts is not None else time.time())
+    )
+
+
+def _archive_disk_stats_sync() -> dict:
+    with closing(_conn()) as c:
+        total = c.execute("SELECT COUNT(*) AS n FROM articles").fetchone()["n"]
+        on_disk = c.execute(
+            "SELECT COUNT(*) AS n FROM articles WHERE archived_to_disk_at IS NOT NULL"
+        ).fetchone()["n"]
+        return {"articles": total, "on_disk": on_disk, "not_on_disk": total - on_disk}
+
+
+async def archive_disk_stats() -> dict:
+    return await asyncio.to_thread(_archive_disk_stats_sync)
+
+
+def _list_unarchived_sync(limit: int, older_than_days: int) -> list[str]:
+    """Oldest-first backlog of rows with no file copy yet.
+
+    Oldest-first on purpose: the rows nearest the prune cutoff are the
+    ones actually at risk of deletion, so they get saved first.
+    """
+    cutoff = int(time.time()) - older_than_days * 86_400
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT url FROM articles "
+            "WHERE archived_to_disk_at IS NULL AND fetched_at < ? "
+            "ORDER BY fetched_at ASC LIMIT ?",
+            (cutoff, limit),
+        ).fetchall()
+        return [r["url"] for r in rows]
+
+
+async def list_unarchived(limit: int = 500, older_than_days: int = 0) -> list[str]:
+    return await asyncio.to_thread(_list_unarchived_sync, limit, older_than_days)
+
+
 def _is_blocked_sync(url: str) -> bool:
     if not url:
         return False
@@ -1676,12 +1789,28 @@ def _prune_sync() -> dict:
         # 1. Drop articles older than retention. Keep any that are
         #    referenced by a recent reader_results last_used_at — if a
         #    user opened it recently we keep the metadata around.
+        #    The archived_to_disk_at guard is the important clause: an
+        #    article is deleted only once the archivist has written it to
+        #    a file under archive/. Before this existed, prune was the
+        #    one operation in the system that could destroy the last copy
+        #    of something — 60 days on, the row went and nothing was left.
+        #    Now the worst case is that prune removes nothing because the
+        #    archivist has fallen behind, which is a stall, not a loss.
         cur = c.execute(
             "DELETE FROM articles WHERE fetched_at < ? AND "
+            "archived_to_disk_at IS NOT NULL AND "
             "url NOT IN (SELECT url FROM reader_results WHERE last_used_at > ?)",
             (cutoff, cutoff),
         )
         removed_articles = cur.rowcount or 0
+        # How much is stuck behind the guard — i.e. old enough to prune
+        # but not yet safe on disk. Non-zero for a long stretch means the
+        # archivist is not keeping up and the DB will keep growing.
+        blocked = c.execute(
+            "SELECT COUNT(*) AS n FROM articles "
+            "WHERE fetched_at < ? AND archived_to_disk_at IS NULL",
+            (cutoff,),
+        ).fetchone()["n"]
         # 2. Cap reader_results at READER_CACHE_LIMIT, keeping the most
         #    recently USED rows (cross-user popularity wins).
         total = c.execute("SELECT COUNT(*) AS n FROM reader_results").fetchone()["n"]
@@ -1701,6 +1830,7 @@ def _prune_sync() -> dict:
     return {
         "removed_articles": removed_articles,
         "removed_reader": removed_reader,
+        "blocked_not_on_disk": blocked,
         "db_bytes_after": db_bytes,
         "ran_at": now,
     }

@@ -19,3 +19,10 @@ checkpoints/
 *.bak
 *.bak.*
 ._*
+
+# Archived article corpus — written by backend/agent/archivist.py.
+# Operational data: grows without bound, differs per deployment, and
+# would bloat the repo. The folder + its README are tracked so the
+# layout is documented; the .ndjson files are not.
+archive/*
+!archive/README.md

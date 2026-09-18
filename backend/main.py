@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import auth, cache, config, db, mixer, tickers
 from backend.agent import (
-    curator, dedup, illustrator, ranker, reader, registry, sorter, summary,
-    translator, validator,
+    archivist, curator, dedup, illustrator, ranker, reader, registry, sorter,
+    summary, translator, validator,
 )
 from backend.sources import politicians, prices, rss, whales, youtube
 
@@ -152,6 +152,14 @@ async def _start():
         asyncio.create_task(_body_sweep_worker())  # 25-min bodyless-article purge
     except Exception as exc:
         print(f"[startup] body sweep worker failed to schedule: {exc!r}", flush=True)
+    try:
+        # Sits between the display path and the prune: writes what was
+        # shown out to archive/ and stamps archived_to_disk_at, which is
+        # the flag prune requires before it will delete anything. Cheap —
+        # batched file appends every 6 min, no network, no LLM.
+        asyncio.create_task(_archivist_worker())
+    except Exception as exc:
+        print(f"[startup] archivist failed to schedule: {exc!r}", flush=True)
     try:
         asyncio.create_task(_published_ts_backfill_worker())   # one-time migration
     except Exception as exc:
@@ -537,6 +545,68 @@ async def _body_sweep_worker():
         await asyncio.sleep(INTERVAL_SECONDS)
 
 
+async def _archivist_worker():
+    """The archivist. Writes what the page displayed out to archive/.
+
+    Sits between the display path and the prune, and that position is
+    the whole point of it:
+
+        display → record_displayed() → [this worker] → prune
+
+    It drains the queue the display hook fills, writes those articles to
+    dated NDJSON files, and only then stamps archived_to_disk_at. The
+    prune deletes exclusively stamped rows, so nothing can be destroyed
+    before a durable copy of it exists outside SQLite.
+
+    Two sources of work, in priority order:
+      1. the live queue — what readers are being shown right now
+      2. a backlog trickle — rows from before this worker existed, or
+         ones that were never displayed. Oldest first, because the
+         oldest rows are the ones nearest the prune cutoff.
+
+    Deliberately modest: 6-minute cadence, ≤250 rows a pass. The box is
+    on a strict worker diet (see the startup comment) and this is
+    maintenance, not something anyone is waiting on.
+    """
+    INTERVAL_SECONDS = 6 * 60
+    LIVE_BATCH = 250
+    BACKLOG_BATCH = 120
+    await asyncio.sleep(240)      # let ingest + ranker settle first
+    print(f"[archivist] armed → {archivist.ARCHIVE_DIR}", flush=True)
+    while True:
+        try:
+            urls = archivist.take_pending(LIVE_BATCH)
+            # Top up from the backlog when the live queue is quiet, so
+            # the historical corpus fills in over time instead of only
+            # ever capturing whatever is on the front page today.
+            if len(urls) < BACKLOG_BATCH:
+                try:
+                    backlog = await db.list_unarchived(
+                        limit=BACKLOG_BATCH - len(urls))
+                    urls.extend(u for u in backlog if u not in urls)
+                except Exception as exc:
+                    print(f"[archivist] backlog query failed: {exc!r}", flush=True)
+
+            if urls:
+                rows = await db.rows_for_archive(urls)
+                written, safe = await archivist.flush(rows)
+                if safe:
+                    # Stamp only what actually reached a file that wrote
+                    # cleanly. Anything else stays unstamped and comes
+                    # back next pass — re-archiving is free, losing an
+                    # article is not.
+                    await db.mark_archived_to_disk(safe)
+                if written:
+                    st = await db.archive_disk_stats()
+                    print(f"[archivist] wrote {written} new "
+                          f"({len(safe)} durable) · on_disk={st['on_disk']}/"
+                          f"{st['articles']} · pending={archivist.pending_count()}",
+                          flush=True)
+        except Exception as exc:
+            print(f"[archivist] pass failed: {exc!r}", flush=True)
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
 async def _prune_worker():
     """Daily maintenance: drops articles older than 60 days, caps the
     reader_results cache at 6000 rows, VACUUMs the file to actually
@@ -548,10 +618,15 @@ async def _prune_worker():
             await db.set_setting("last_prune", result)
             removed = result["removed_articles"] + result["removed_reader"]
             mb = result["db_bytes_after"] / 1e6
+            blocked = result.get("blocked_not_on_disk", 0)
             print(
                 f"[prune] removed {removed} rows, DB now {mb:.1f}MB "
                 f"({result['removed_articles']} articles + "
-                f"{result['removed_reader']} reader bodies)",
+                f"{result['removed_reader']} reader bodies)"
+                # Held back because the archivist hasn't written them yet.
+                # Persistently high = archivist not keeping up, and the DB
+                # will keep growing until it does.
+                + (f" · {blocked} held back (not on disk)" if blocked else ""),
                 flush=True,
             )
         except Exception as exc:
@@ -1708,6 +1783,21 @@ def _polish_mixed(payload: dict) -> dict:
     if len(out_list) != len(mixed):
         payload["mixed"] = out_list
         payload["total_mixed"] = len(out_list)
+    # ── Archive hook ────────────────────────────────────────────────
+    # Every path that serves the feed funnels through here — fresh
+    # cache, stale cache, DB fallback and full rebuild alike — which
+    # makes this the one place that sees everything the user is
+    # actually shown. Queue those URLs for the archivist.
+    #
+    # This is a set-update and nothing else: no I/O, no await, no DB.
+    # The writing happens in _archivist_worker, off the request path.
+    # record_displayed swallows its own errors, and the call is wrapped
+    # again here, because a failure to archive must never cost a reader
+    # their page.
+    try:
+        archivist.record_displayed(out_list)
+    except Exception:
+        pass
     return payload
 
 
