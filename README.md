@@ -75,8 +75,10 @@ Open <http://localhost:8000>.
 | `backend/agent/curator.py` | LLM ranker |
 | `backend/agent/ranker.py` | Cross-outlet dedup + scoring |
 | `backend/agent/translator.py` | KO ⇄ EN article translation |
+| `backend/agent/archivist.py` | Writes displayed articles to `archive/` |
 | `frontend/` | `index.html`, `app.js`, `style.css` |
 | `frontend/status.*` | Public status page |
+| `archive/` | Durable NDJSON copy of every displayed article |
 | `scripts/Caddyfile.production` | The live edge config |
 
 ## Pages
@@ -115,6 +117,34 @@ scrape, and requesting it without `?oc=5` returns 400.
 `Fbv4je` batchexecute RPC, which returns the publisher URL. If Google
 changes this again, `/status` is where it will show up first — the
 affected outlets drop to a 0% success rate.
+
+## Archiving
+
+Every article the feed displays is also written to `archive/` as
+NDJSON, grouped by publication date. The database is one file and one
+point of failure; this is the copy that survives a publisher deleting a
+story, a paywall going up, a prune, or the DB itself corrupting.
+
+The order matters more than the format:
+
+```
+display → record_displayed() → archivist worker → prune
+```
+
+`_polish_mixed` is the hook because every serve path funnels through it,
+so it sees everything a reader is actually shown. It only adds strings
+to a set — the file writing happens in the worker, off the request path.
+
+The archivist stamps `articles.archived_to_disk_at` **after** the write
+returns, and the prune deletes only stamped rows. An article therefore
+cannot leave the database before a durable copy of it exists. If the
+archivist falls behind, prune removes less and logs how many rows it
+held back; it never removes something unsaved.
+
+Reading it needs nothing but `jq` — see [archive/README.md](archive/README.md).
+
+The contents are gitignored (unbounded, per-deployment). Back it up like
+a database: `rsync -avz ubuntu@<box>:~/dailybrief/archive/ ./backup/`.
 
 ## Operating it
 
