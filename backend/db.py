@@ -241,14 +241,6 @@ def _init_sync() -> None:
             "ALTER TABLE articles ADD COLUMN dup_of TEXT",
             "ALTER TABLE articles ADD COLUMN corroboration INTEGER DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN ranked_at INTEGER",
-            # Last time the body sweep actually looked at this row. The
-            # sweep orders by it ascending (NULL first), which is what
-            # makes the pass ROTATE through the whole active set instead
-            # of re-checking the newest rows forever. Deliberately NOT
-            # validated_at: that belongs to the separate validation
-            # worker, and sharing one column would make each department
-            # hide the other's work from itself.
-            "ALTER TABLE articles ADD COLUMN swept_at INTEGER",
         ):
             try:
                 c.execute(stmt)
@@ -265,16 +257,6 @@ def _init_sync() -> None:
             CREATE INDEX IF NOT EXISTS idx_articles_validated ON articles(validated, fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_archived  ON articles(archived, fetched_at DESC);
             CREATE INDEX IF NOT EXISTS idx_articles_active    ON articles(archived, validated, fetched_at DESC);
-            -- Drives the body sweep's rotation: seek on archived=0,
-            -- then read swept_at in order and stop at LIMIT.
-            -- `validated` is deliberately NOT in here. The sweep filters
-            -- it with `!= -1`, and an inequality ends the usable index
-            -- prefix — with validated in the middle, swept_at becomes
-            -- unreachable for ORDER BY and SQLite sorts the whole active
-            -- set in a temp B-tree on every pass instead. Verified with
-            -- EXPLAIN QUERY PLAN; the other two predicates are cheap
-            -- residuals.
-            CREATE INDEX IF NOT EXISTS idx_articles_sweep      ON articles(archived, swept_at ASC);
             CREATE INDEX IF NOT EXISTS idx_reader_used        ON reader_results(last_used_at DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at DESC);
         """)
@@ -1118,81 +1100,16 @@ def _list_active_urls_sync(limit: int) -> list[dict]:
             "SELECT url, outlet FROM articles "
             "WHERE archived = 0 AND (dup_of IS NULL OR dup_of = '') "
             "  AND validated != -1 "
-            # Least-recently-swept first. SQLite sorts NULL before any
-            # value, so rows the sweep has never seen come first, then
-            # the ones it looked at longest ago. fetched_at is only the
-            # tie-break inside one batch.
-            #
-            # This used to be `ORDER BY fetched_at DESC`, which handed
-            # the sweep the same newest N rows on every pass, forever.
-            # Anything that aged past that window was never re-checked,
-            # so a story that was readable at ingest and got paywalled
-            # later stayed in the feed permanently — visible in the
-            # archive and in the reader's "related" list, dead on click.
-            "ORDER BY swept_at ASC, fetched_at DESC LIMIT ?",
+            "ORDER BY fetched_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
 
 async def list_active_urls(limit: int = 1000) -> list[dict]:
-    """The next slice of active articles due for a body check.
-
-    Rotates: callers get the least-recently-swept rows, so repeated
-    calls walk the entire active set rather than re-reading the head.
-    Call mark_swept() on whatever you examine or the rotation stalls.
-    """
+    """Every article currently eligible for the feed. Used by the
+    body-check sweep."""
     return await asyncio.to_thread(_list_active_urls_sync, limit)
-
-
-def _mark_swept_sync(urls: list[str], ts: int) -> int:
-    if not urls:
-        return 0
-    with closing(_conn()) as c:
-        c.executemany(
-            "UPDATE articles SET swept_at = ? WHERE url = ?",
-            [(ts, u) for u in urls],
-        )
-        c.commit()
-        return len(urls)
-
-
-async def mark_swept(urls: list[str], ts: int | None = None) -> int:
-    """Stamp rows as swept so the rotation moves past them.
-
-    Stamp everything the sweep LOOKED at, including rows it left alone
-    on a timeout. Skipping the stamp on transient failures means a
-    handful of slow publishers get re-picked at the head of every pass
-    and the rotation never advances past them.
-    """
-    return await asyncio.to_thread(
-        _mark_swept_sync, urls, int(ts if ts is not None else time.time())
-    )
-
-
-def _sweep_backlog_sync() -> dict:
-    with closing(_conn()) as c:
-        where = ("WHERE archived = 0 AND (dup_of IS NULL OR dup_of = '') "
-                 "AND validated != -1")
-        total = c.execute(
-            f"SELECT COUNT(*) AS n FROM articles {where}").fetchone()["n"]
-        never = c.execute(
-            f"SELECT COUNT(*) AS n FROM articles {where} AND swept_at IS NULL"
-        ).fetchone()["n"]
-        oldest = c.execute(
-            f"SELECT MIN(swept_at) AS t FROM articles {where} "
-            "AND swept_at IS NOT NULL").fetchone()["t"]
-        return {"active": total, "never_swept": never, "oldest_swept_at": oldest}
-
-
-async def sweep_backlog() -> dict:
-    """How far around the rotation the body sweep has got.
-
-    `never_swept` falling to 0 means one full lap of the active set.
-    `oldest_swept_at` is then the age of the staleest check, i.e. the
-    real worst case for how long a newly-paywalled story can linger.
-    """
-    return await asyncio.to_thread(_sweep_backlog_sync)
 
 
 def _is_blocked_sync(url: str) -> bool:

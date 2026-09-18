@@ -532,21 +532,6 @@ async def _body_sweep_worker():
                 print(f"[sweep] checked={res['checked']} dropped={res['dropped']} "
                       f"images_filled={res['images_filled']} "
                       f"{list(res['dropped_by_outlet'].items())[:5]}", flush=True)
-            # Rotation progress. Printed every pass, not only on a drop:
-            # "dropped=0" is ambiguous on its own — it reads the same
-            # whether the feed is clean or the sweep is stuck re-reading
-            # rows it already cleared. never_swept counts down to 0 over
-            # the first full lap; after that lag_h is the worst case for
-            # how long a story can stay dead in the feed.
-            try:
-                bl = await db.sweep_backlog()
-                lag = ""
-                if bl["oldest_swept_at"]:
-                    lag = f" lag={int((time.time() - bl['oldest_swept_at']) / 3600)}h"
-                print(f"[sweep] rotation active={bl['active']} "
-                      f"never_swept={bl['never_swept']}{lag}", flush=True)
-            except Exception as exc:
-                print(f"[sweep] backlog stat failed: {exc!r}", flush=True)
         except Exception as exc:
             print(f"[sweep] pass failed: {exc!r}", flush=True)
         await asyncio.sleep(INTERVAL_SECONDS)
@@ -1308,20 +1293,6 @@ async def _body_sweep(limit: int = 400, concurrency: int = 8) -> dict:
         dropped[outlet] = dropped.get(outlet, 0) + 1
 
     await asyncio.gather(*[_one(r) for r in rows])
-
-    # Advance the rotation. Stamp EVERY row we pulled, not just the ones
-    # that resolved cleanly: a row we skipped on a transient error is
-    # still a row we looked at, and leaving it unstamped parks it at the
-    # head of the next batch forever. db.list_active_urls orders by this
-    # column, so without the stamp the sweep re-reads the same slice and
-    # we are back to the bug this replaced.
-    examined = [r.get("url") for r in rows if r.get("url")]
-    try:
-        await db.mark_swept(examined)
-    except Exception as exc:
-        print(f"[sweep] mark_swept failed ({len(examined)} rows): {exc!r}",
-              flush=True)
-
     total = sum(dropped.values())
     if total:
         print(f"[sweep] dropped {total} bodyless articles: "
